@@ -1,4 +1,4 @@
-import { writeFile, mkdir, rm } from "fs/promises";
+import { mkdir, rm, open } from "fs/promises";
 import { join } from "path";
 import type { FileItem } from "./types.js";
 
@@ -152,7 +152,9 @@ export async function decodeFilesToTemp(
 
   for (const file of files) {
     const decoded = Buffer.from(file.content, "base64");
-    await writeFile(join(dir, file.name), decoded, { mode: 0o600 });
+    const fd = await open(join(dir, file.name), "wx", 0o600);
+    await fd.writeFile(decoded);
+    await fd.close();
   }
 
   return dir;
