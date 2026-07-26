@@ -75,6 +75,12 @@ sequenceDiagram
     C-->>U: Outcome
 ```
 
+## Example
+
+ChatGPT can send a prompt and attached file through PickleShell to a local agent, allowing the agent to work with files directly in the configured workspace.
+
+![PickleShell file-transfer example](docs/assets/example-file-transfer.png)
+
 ## Capabilities
 
 | Capability | Behaviour |
