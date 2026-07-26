@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Secure MCP bridge from ChatGPT to a locally operated OpenCode agent",
-  "license": "ISC",
+  "license": "MIT",
   "scripts": {
     "build": "npm --prefix mcp-server run build",
     "test": "npm --prefix gateway test && npm --prefix mcp-server test",

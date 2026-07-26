@@ -24,7 +24,7 @@
     "gateway"
   ],
   "author": "PickleShell",
-  "license": "ISC",
+  "license": "MIT",
   "engines": {
     "node": ">=20"
   }

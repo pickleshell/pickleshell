@@ -56,4 +56,4 @@ npm run audit
 
 ## License
 
-ISC
+MIT
