@@ -224,6 +224,44 @@ async function runTests() {
     "rejects per-file dest_dir traversal"
   );
 
+  // Regression: O_EXCL — writing to same path twice should fail
+  console.log("\n26. O_EXCL regression — duplicate write rejected");
+  const dir26 = await decodeFilesToTemp([
+    { name: "clash.txt", content: Buffer.from("first").toString("base64") },
+  ]);
+  let exclCaught = false;
+  try {
+    const { open } = await import("fs/promises");
+    const fd = await open(`${dir26}/clash.txt`, "wx", 0o600);
+    await fd.close();
+  } catch (e: any) {
+    exclCaught = e.code === "EEXIST";
+  }
+  if (exclCaught) {
+    console.log("   PASS: O_EXCL rejects duplicate write");
+    passed++;
+  } else {
+    console.log("   FAIL: O_EXCL should reject duplicate write");
+    failed++;
+  }
+  await cleanupTempDir(dir26);
+
+  // Regression: randomUUID — temp dir names are valid UUIDs
+  console.log("\n27. randomUUID regression — temp dir name is UUID format");
+  const dir27 = await decodeFilesToTemp([
+    { name: "u.txt", content: Buffer.from("u").toString("base64") },
+  ]);
+  const uuidPattern = /^mcp-files-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const dirName = dir27.split("/").pop() || "";
+  if (uuidPattern.test(dirName)) {
+    console.log("   PASS: temp dir name matches UUIDv4 format");
+    passed++;
+  } else {
+    console.log(`   FAIL: temp dir name '${dirName}' is not UUIDv4`);
+    failed++;
+  }
+  await cleanupTempDir(dir27);
+
   console.log(`\n--- Results: ${passed} passed, ${failed} failed ---`);
   process.exit(failed > 0 ? 1 : 0);
 }

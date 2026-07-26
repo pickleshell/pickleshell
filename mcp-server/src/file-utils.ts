@@ -154,8 +154,11 @@ export async function decodeFilesToTemp(
   for (const file of files) {
     const decoded = Buffer.from(file.content, "base64");
     const fd = await open(join(dir, file.name), "wx", 0o600);
-    await fd.writeFile(decoded);
-    await fd.close();
+    try {
+      await fd.writeFile(decoded);
+    } finally {
+      await fd.close();
+    }
   }
 
   return dir;
