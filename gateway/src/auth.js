@@ -25,19 +25,19 @@ const auth = (req, res, next) => {
     });
   }
 
-  // Constant-time comparison (must be same length)
+  // Constant-time comparison: pad shorter buffer to expected length
   const tokenBuf = Buffer.from(token, 'utf8');
   const expectedBuf = Buffer.from(expectedToken, 'utf8');
 
-  if (tokenBuf.length !== expectedBuf.length) {
-    return res.status(401).json({
-      ok: false,
-      error: 'unauthorized',
-      details: 'Invalid token'
-    });
-  }
+  const maxLen = Math.max(tokenBuf.length, expectedBuf.length);
+  const tokenPadded = Buffer.alloc(maxLen, 0);
+  const expectedPadded = Buffer.alloc(maxLen, 0);
 
-  const isValid = crypto.timingSafeEqual(tokenBuf, expectedBuf);
+  tokenBuf.copy(tokenPadded);
+  expectedBuf.copy(expectedPadded);
+
+  const isValid = crypto.timingSafeEqual(tokenPadded, expectedPadded) &&
+    tokenBuf.length === expectedBuf.length;
 
   if (!isValid) {
     return res.status(401).json({
