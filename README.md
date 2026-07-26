@@ -1,4 +1,4 @@
-# PickleShell
+# 🥒 PickleShell
 
 ### Give ChatGPT a secure path to your local OpenCode agent
 
