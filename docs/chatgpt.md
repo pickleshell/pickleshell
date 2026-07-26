@@ -7,8 +7,21 @@ Prerequisites:
 - a Secure MCP Tunnel created in the OpenAI Platform;
 - `tunnel-client` running on the PickleShell host.
 
-Create a ChatGPT app named `PickleShell`, select the configured tunnel, and
+## Create the plugin
+
+Create a ChatGPT plugin named `PickleShell`, select the configured tunnel, and
 allow the `send-chat` action.
+
+![Create the PickleShell plugin in ChatGPT](assets/plugin-create.png)
+
+## Verify the connected plugin
+
+The connected PickleShell entry should show the `send-chat` action and the
+current schema.
+
+![Connected PickleShell plugin and send-chat action](assets/plugin-connected.png)
+
+## Refresh after schema changes
 
 After changing the MCP schema:
 
@@ -17,6 +30,8 @@ After changing the MCP schema:
 3. review the action diff;
 4. enable the updated action;
 5. start a new conversation.
+
+## Test the connection
 
 Test:
 
