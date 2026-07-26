@@ -1,5 +1,6 @@
 import { mkdir, rm, open } from "fs/promises";
 import { join } from "path";
+import { randomUUID } from "crypto";
 import type { FileItem } from "./types.js";
 
 const MAX_FILES = 20;
@@ -147,7 +148,7 @@ export async function decodeFilesToTemp(
   files: FileItem[]
 ): Promise<string> {
   const baseDir = process.env.MCP_TEMP_DIR || join(process.env.HOME || "/tmp", ".mcp-temp");
-  const dir = join(baseDir, `mcp-files-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const dir = join(baseDir, `mcp-files-${randomUUID()}`);
   await mkdir(dir, { recursive: true, mode: 0o700 });
 
   for (const file of files) {
