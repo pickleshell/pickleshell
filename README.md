@@ -1,6 +1,10 @@
-# 🥒 PickleShell
+<p align="center">
+  <img src="docs/assets/pickleshell-logo.png" width="180" alt="PickleShell cucumber logo">
+</p>
 
-### Give ChatGPT a secure path to your local OpenCode agent
+<h1 align="center">PickleShell</h1>
+
+<p align="center"><strong>Give ChatGPT a secure path to your local OpenCode agent</strong></p>
 
 [![Release](https://img.shields.io/badge/release-v0.1.0--pre--release-f5a623)](#project-status)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](#development)
