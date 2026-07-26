@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="docs/assets/pickleshell-logo.png" width="180" alt="PickleShell cucumber logo">
-</p>
-
-<h1 align="center">PickleShell</h1>
+<h1 align="center">
+  <img src="docs/assets/pickleshell-logo.png" height="48" alt="PickleShell cucumber logo" align="center">
+  PickleShell
+</h1>
 
 <p align="center"><strong>Give ChatGPT a secure path to your local OpenCode agent</strong></p>
 
