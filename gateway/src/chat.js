@@ -2,6 +2,7 @@ const config = require('./config');
 const agent = require('./agent');
 const fileTransfer = require('./file-transfer');
 const concurrency = require('./concurrency');
+const { timeoutSec } = require('./timeout');
 const crypto = require('crypto');
 
 const chatHandler = async (req, res) => {
@@ -121,7 +122,6 @@ const chatHandler = async (req, res) => {
     concurrency.setTask(slotKey, taskSnippet);
 
     // Send to agent
-    const timeoutSec = parseInt(process.env.AGENT_TIMEOUT_SEC) || 300;
     const agentResult = await agent.sendMessage(
       chat_id, message, chatConfig, timeoutSec, session_id, resolvedModel,
       fileSummary

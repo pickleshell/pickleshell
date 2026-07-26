@@ -84,5 +84,5 @@ Common errors:
 | 502 | `agent_error` |
 | 504 | `agent_timeout` |
 
-`GET /health` is unauthenticated on the loopback listener and returns service
+`GET /health` requires Bearer token authentication (same as POST /chat) and returns service
 identity, uptime, configured chat IDs, active work, and concurrency policy.

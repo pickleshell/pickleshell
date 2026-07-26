@@ -1,4 +1,5 @@
 const concurrency = require('./src/concurrency');
+const { timeoutSec, staleTimeoutMs } = require('./src/timeout');
 
 let passed = 0;
 
@@ -35,5 +36,16 @@ assert(afterRelease.ok, 'session can run again after release');
 const status = concurrency.status();
 assert(status.max === null, 'status reports no global maximum');
 assert(status.policy === 'one_active_request_per_session', 'status reports policy');
+
+// Regression: stale timeout must always exceed agent timeout by at least STALE_BUFFER_SEC
+const STALE_BUFFER_SEC = 30;
+assert(
+  staleTimeoutMs >= timeoutSec * 1000 + STALE_BUFFER_SEC * 1000,
+  `staleTimeoutMs (${staleTimeoutMs}) must >= agentTimeout (${timeoutSec * 1000}) + ${STALE_BUFFER_SEC * 1000}ms buffer`
+);
+assert(
+  timeoutSec > 0,
+  `timeoutSec (${timeoutSec}) must be positive (AGENT_TIMEOUT_SEC=0 falls back to 300)`
+);
 
 console.log(`Concurrency tests: ${passed} passed`);

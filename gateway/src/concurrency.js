@@ -1,5 +1,4 @@
-const _timeoutSec = process.env.AGENT_TIMEOUT_SEC;
-const STALE_TIMEOUT_MS = (_timeoutSec !== undefined ? parseInt(_timeoutSec, 10) || 0 : 300) * 1000 + 30000;
+const { staleTimeoutMs } = require('./timeout');
 
 const slots = new Map();
 const activeSessions = new Map();
@@ -23,7 +22,7 @@ function release(slotKey) {
 function reapStale() {
   const now = Date.now();
   for (const [key, entry] of slots) {
-    if (now - entry.started > STALE_TIMEOUT_MS) {
+    if (now - entry.started > staleTimeoutMs) {
       console.warn(`[CONCURRENCY] Reaping stale slot ${key} (held ${Math.round((now - entry.started) / 1000)}s)`);
       release(key);
     }

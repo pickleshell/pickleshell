@@ -57,6 +57,12 @@ async function check(name, expectedStatus, action, expectedError) {
 async function run() {
   await check('health', 200, () => request('/health', { token: apiKey }));
   await check(
+    'health without token returns 401',
+    401,
+    () => request('/health'),
+    'unauthorized'
+  );
+  await check(
     'missing authentication',
     401,
     () => request('/chat', { method: 'POST', body: { chat_id: 'test', message: 'ping' } }),
