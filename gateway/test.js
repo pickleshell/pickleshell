@@ -55,7 +55,7 @@ async function check(name, expectedStatus, action, expectedError) {
 }
 
 async function run() {
-  await check('health', 200, () => request('/health'));
+  await check('health', 200, () => request('/health', { token: apiKey }));
   await check(
     'missing authentication',
     401,

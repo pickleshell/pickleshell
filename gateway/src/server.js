@@ -18,18 +18,6 @@ app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '5mb' }));
 const config = require('./config');
 const concurrency = require('./concurrency');
 
-app.get('/health', (req, res) => {
-  const cfg = config.loadConfig();
-  res.json({
-    ok: true,
-    service: 'pickleshell-gateway',
-    agent: 'opencode',
-    uptime_s: Math.round(process.uptime()),
-    configured_chats: Object.keys(cfg.chats || {}),
-    concurrency: concurrency.status()
-  });
-});
-
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -39,6 +27,19 @@ const limiter = rateLimit({
     error: 'rate_limit',
     details: 'Too many requests'
   }
+});
+
+// Health check (authenticated)
+app.get('/health', auth, (req, res) => {
+  const cfg = config.loadConfig();
+  res.json({
+    ok: true,
+    service: 'pickleshell-gateway',
+    agent: 'opencode',
+    uptime_s: Math.round(process.uptime()),
+    configured_chats: Object.keys(cfg.chats || {}),
+    concurrency: concurrency.status()
+  });
 });
 
 // Chat endpoint
