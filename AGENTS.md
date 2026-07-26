@@ -46,3 +46,23 @@ git diff --check
 - Keep requests without `session_id` independent.
 - Keep deployment examples generic; do not add real domains, IP addresses,
   chat IDs, usernames, or filesystem layouts from production.
+
+## Security review triage
+
+Security reviews report:
+
+| Severity | Report | Fix during review |
+|---|---|---|
+| CRITICAL | Always | No |
+| HIGH | Always | No |
+| MEDIUM | Always | No |
+| LOW | Only when essential | No |
+
+An essential LOW finding directly affects security, data integrity,
+availability, deployment correctness, API compatibility, or secret exposure.
+Ignore cosmetic, stylistic, speculative, optional-refactoring, and unmeasured
+performance findings.
+
+Reviews produce findings only. Apply each confirmed finding in a separate
+task, ordered by severity. Every fix requires a regression test before it can
+be marked complete.
