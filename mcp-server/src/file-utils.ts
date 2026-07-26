@@ -144,16 +144,20 @@ export function validateDestinationDir(dir: string | undefined): void {
   validateRelativePath(dir, "destination_dir");
 }
 
+type OpenFn = (path: string, flags: string, mode?: number) => Promise<{ writeFile(data: Buffer): Promise<void>; close(): Promise<void> }>;
+
 export async function decodeFilesToTemp(
-  files: FileItem[]
+  files: FileItem[],
+  openFn?: OpenFn
 ): Promise<string> {
+  const opener = openFn || ((p: string, f: string, m?: number) => open(p, f, m));
   const baseDir = process.env.MCP_TEMP_DIR || join(process.env.HOME || "/tmp", ".mcp-temp");
   const dir = join(baseDir, `mcp-files-${randomUUID()}`);
   await mkdir(dir, { recursive: true, mode: 0o700 });
 
   for (const file of files) {
     const decoded = Buffer.from(file.content, "base64");
-    const fd = await open(join(dir, file.name), "wx", 0o600);
+    const fd = await opener(join(dir, file.name), "wx", 0o600);
     try {
       await fd.writeFile(decoded);
     } finally {

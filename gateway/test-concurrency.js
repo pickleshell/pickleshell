@@ -1,5 +1,5 @@
 const concurrency = require('./src/concurrency');
-const { timeoutSec, staleTimeoutMs } = require('./src/timeout');
+const { parseAgentTimeoutSec, timeoutSec, staleTimeoutMs } = require('./src/timeout');
 
 let passed = 0;
 
@@ -49,3 +49,23 @@ assert(
 );
 
 console.log(`Concurrency tests: ${passed} passed`);
+
+// Unit tests for parseAgentTimeoutSec (pure function)
+function assertEq(actual, expected, msg) {
+  if (actual !== expected) {
+    throw new Error(`${msg}: expected ${expected}, got ${actual}`);
+  }
+  passed++;
+}
+
+assertEq(parseAgentTimeoutSec(undefined), 300, 'undefined → 300');
+assertEq(parseAgentTimeoutSec(''), 300, 'empty string → 300');
+assertEq(parseAgentTimeoutSec('0'), 300, '"0" → 300 (zero falls back)');
+assertEq(parseAgentTimeoutSec('-5'), 300, '"-5" → 300 (negative falls back)');
+assertEq(parseAgentTimeoutSec('NaN'), 300, '"NaN" → 300 (NaN falls back)');
+assertEq(parseAgentTimeoutSec('abc'), 300, '"abc" → 300 (non-numeric falls back)');
+assertEq(parseAgentTimeoutSec('300'), 300, '"300" → 300');
+assertEq(parseAgentTimeoutSec('60'), 60, '"60" → 60');
+assertEq(parseAgentTimeoutSec('999'), 999, '"999" → 999');
+
+console.log(`parseAgentTimeoutSec tests: ${passed} passed`);
