@@ -1,4 +1,5 @@
-const STALE_TIMEOUT_MS = (parseInt(process.env.AGENT_TIMEOUT_SEC) || 300) * 1000 + 30000;
+const _timeoutSec = process.env.AGENT_TIMEOUT_SEC;
+const STALE_TIMEOUT_MS = (_timeoutSec !== undefined ? parseInt(_timeoutSec, 10) || 0 : 300) * 1000 + 30000;
 
 const slots = new Map();
 const activeSessions = new Map();
