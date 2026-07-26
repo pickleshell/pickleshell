@@ -4,7 +4,7 @@ const STALE_BUFFER_SEC = 30;
 function parseAgentTimeoutSec(raw) {
   if (raw === undefined || raw === '') return DEFAULT_TIMEOUT_SEC;
   const n = Number(raw);
-  if (Number.isNaN(n) || n <= 0) return DEFAULT_TIMEOUT_SEC;
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_TIMEOUT_SEC;
   return n;
 }
 

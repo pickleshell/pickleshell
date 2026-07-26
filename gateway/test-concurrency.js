@@ -67,5 +67,7 @@ assertEq(parseAgentTimeoutSec('abc'), 300, '"abc" → 300 (non-numeric falls bac
 assertEq(parseAgentTimeoutSec('300'), 300, '"300" → 300');
 assertEq(parseAgentTimeoutSec('60'), 60, '"60" → 60');
 assertEq(parseAgentTimeoutSec('999'), 999, '"999" → 999');
+assertEq(parseAgentTimeoutSec('Infinity'), 300, '"Infinity" → 300 (Infinity falls back)');
+assertEq(parseAgentTimeoutSec('-Infinity'), 300, '"-Infinity" → 300 (negative Infinity falls back)');
 
 console.log(`parseAgentTimeoutSec tests: ${passed} passed`);

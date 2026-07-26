@@ -70,8 +70,9 @@ sudo cp /opt/pickleshell/gateway/systemd/pickleshell-gateway.service \
   /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now pickleshell-gateway.service
-source /etc/pickleshell/gateway.env
-curl -fsS http://127.0.0.1:18092/health -H "Authorization: Bearer $PICKLESHELL_API_KEY"
+sudo -u pickleshell bash -c \
+  'set -a; source /etc/pickleshell/gateway.env; \
+   curl -fsS http://127.0.0.1:18092/health -H "Authorization: Bearer $PICKLESHELL_API_KEY"'
 ```
 
 Tune `MemoryHigh`, `MemoryMax`, and `TasksMax` for the host.

@@ -155,14 +155,19 @@ export async function decodeFilesToTemp(
   const dir = join(baseDir, `mcp-files-${randomUUID()}`);
   await mkdir(dir, { recursive: true, mode: 0o700 });
 
-  for (const file of files) {
-    const decoded = Buffer.from(file.content, "base64");
-    const fd = await opener(join(dir, file.name), "wx", 0o600);
-    try {
-      await fd.writeFile(decoded);
-    } finally {
-      await fd.close();
+  try {
+    for (const file of files) {
+      const decoded = Buffer.from(file.content, "base64");
+      const fd = await opener(join(dir, file.name), "wx", 0o600);
+      try {
+        await fd.writeFile(decoded);
+      } finally {
+        await fd.close();
+      }
     }
+  } catch (err) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    throw err;
   }
 
   return dir;

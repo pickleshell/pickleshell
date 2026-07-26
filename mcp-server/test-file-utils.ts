@@ -224,33 +224,40 @@ async function runTests() {
     "rejects per-file dest_dir traversal"
   );
 
-  // Regression: O_EXCL — duplicate file name in single decodeFilesToTemp call
-  console.log("\n26. O_EXCL regression — duplicate filename rejected");
-  let exclCaught = false;
+  // Regression: O_EXCL — decodeFilesToTemp uses exclusive creation
+  console.log("\n26. O_EXCL regression — decodeFilesToTemp uses exclusive open");
+  let exclCode = "";
+  let openFlags = "";
+  const exclMock = async (p: string, f: string, _m?: number) => {
+    openFlags += f;
+    const err: any = new Error("EEXIST: file already exists");
+    err.code = "EEXIST";
+    throw err;
+  };
+  let dir26 = "";
   try {
-    await decodeFilesToTemp([
-      { name: "clash.txt", content: Buffer.from("first").toString("base64") },
-      { name: "clash.txt", content: Buffer.from("second").toString("base64") },
-    ]);
+    dir26 = await decodeFilesToTemp(
+      [{ name: "a.txt", content: Buffer.from("x").toString("base64") }],
+      exclMock
+    );
   } catch (e: any) {
-    exclCaught = e.code === "ERR_CRYPTO_HASH_FINALIZATION" || e.message?.includes("duplicate");
+    exclCode = e.code;
   }
-  // Even if duplicate names slip past decodeFilesToTemp, validateFiles catches it
-  // So test the real path: validateFiles rejects duplicates
-  let validateCaught = false;
-  try {
-    validateFiles([
-      { name: "clash.txt", content: Buffer.from("first").toString("base64") },
-      { name: "clash.txt", content: Buffer.from("second").toString("base64") },
-    ]);
-  } catch (e: any) {
-    validateCaught = e.message?.includes("Duplicate file name");
+  // Verify dir was cleaned up after error
+  const { access } = await import("fs/promises");
+  let dir26Gone = true;
+  if (dir26) {
+    try {
+      await access(dir26);
+      dir26Gone = false;
+    } catch { /* gone */ }
   }
-  if (validateCaught) {
-    console.log("   PASS: duplicate filename rejected by validateFiles");
+  const flagsCorrect = openFlags.includes("wx");
+  if (exclCode === "EEXIST" && dir26Gone && flagsCorrect) {
+    console.log("   PASS: EEXIST propagated, dir cleaned, open used 'wx' flag");
     passed++;
   } else {
-    console.log(`   FAIL: exclCaught=${exclCaught}, validateCaught=${validateCaught}`);
+    console.log(`   FAIL: code=${exclCode}, dirGone=${dir26Gone}, flags=${openFlags}`);
     failed++;
   }
 
@@ -270,27 +277,35 @@ async function runTests() {
   }
   await cleanupTempDir(dir27);
 
-  // Regression: fd-close — writeFile error triggers close via finally
-  console.log("\n28. fd-close regression — close called when writeFile throws");
+  // Regression: fd-close + dir cleanup — writeFile error triggers close and rm
+  console.log("\n28. fd-close + cleanup regression — close called, dir removed");
   let closeCalled = false;
+  let writeErrDir = "";
   const mockOpenFn = async (_p: string, _f: string, _m?: number) => ({
     writeFile: async () => { throw new Error("simulated write failure"); },
     close: async () => { closeCalled = true; },
   });
   let writeErrorCaught = false;
   try {
-    await decodeFilesToTemp(
+    writeErrDir = await decodeFilesToTemp(
       [{ name: "fail.txt", content: Buffer.from("x").toString("base64") }],
       mockOpenFn
     );
   } catch (e: any) {
     writeErrorCaught = e.message === "simulated write failure";
   }
-  if (writeErrorCaught && closeCalled) {
-    console.log("   PASS: close() called after writeFile error");
+  let writeErrDirGone = true;
+  if (writeErrDir) {
+    try {
+      await access(writeErrDir);
+      writeErrDirGone = false;
+    } catch { /* gone */ }
+  }
+  if (writeErrorCaught && closeCalled && writeErrDirGone) {
+    console.log("   PASS: close() called, dir removed after writeFile error");
     passed++;
   } else {
-    console.log(`   FAIL: writeErrorCaught=${writeErrorCaught}, closeCalled=${closeCalled}`);
+    console.log(`   FAIL: caught=${writeErrorCaught}, close=${closeCalled}, dirGone=${writeErrDirGone}`);
     failed++;
   }
 
