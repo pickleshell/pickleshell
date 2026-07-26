@@ -1,5 +1,6 @@
 import { validateFiles, validateDestinationDir, decodeFilesToTemp, cleanupTempDir, FileValidationError } from "./src/file-utils.js";
 import { readdir, readFile, stat } from "fs/promises";
+import { dirname } from "path";
 
 let passed = 0;
 let failed = 0;
@@ -228,29 +229,32 @@ async function runTests() {
   console.log("\n26. O_EXCL regression — decodeFilesToTemp uses exclusive open");
   let exclCode = "";
   let openFlags = "";
+  let openedPath = "";
   const exclMock = async (p: string, f: string, _m?: number) => {
+    openedPath = p;
     openFlags += f;
-    const err: any = new Error("EEXIST: file already exists");
+    const err: any = new Error("EEXIST");
     err.code = "EEXIST";
     throw err;
   };
-  let dir26 = "";
   try {
-    dir26 = await decodeFilesToTemp(
+    await decodeFilesToTemp(
       [{ name: "a.txt", content: Buffer.from("x").toString("base64") }],
       exclMock
     );
   } catch (e: any) {
     exclCode = e.code;
   }
-  // Verify dir was cleaned up after error
+  // Derive dir from the path the mock received, then verify cleanup
+  const dir26 = openedPath ? dirname(openedPath) : "";
   const { access } = await import("fs/promises");
-  let dir26Gone = true;
+  let dir26Gone = false;
   if (dir26) {
     try {
       await access(dir26);
-      dir26Gone = false;
-    } catch { /* gone */ }
+    } catch {
+      dir26Gone = true;
+    }
   }
   const flagsCorrect = openFlags.includes("wx");
   if (exclCode === "EEXIST" && dir26Gone && flagsCorrect) {
