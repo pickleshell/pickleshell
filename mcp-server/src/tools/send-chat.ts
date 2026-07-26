@@ -35,6 +35,7 @@ export const sendChatSchema = {
   message: z.string().describe("Message to send to the local agent"),
   session_id: z
     .string()
+    .regex(/^[A-Za-z0-9_-]{1,128}$/, "session_id must be 1-128 chars: letters, numbers, _, -")
     .optional()
     .describe("Optional session ID to continue a previous conversation"),
   model: z
