@@ -1,0 +1,12 @@
+{
+  "chats": {
+    "pickleshell-main": {
+      "workspace": "/home/pickleshell/workspace",
+      "agent": "opencode"
+    }
+  },
+  "allowed_models": [
+    "opencode/big-pickle"
+  ],
+  "default_model": "opencode/big-pickle"
+}

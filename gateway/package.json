@@ -1,0 +1,31 @@
+{
+  "name": "@pickleshell/gateway",
+  "version": "0.1.0",
+  "description": "Authenticated HTTP gateway for a local OpenCode agent",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "node test-agent-command.js && node test-config.js && node test-file-transfer.js && node test-concurrency.js",
+    "test:smoke": "node test.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "opencode",
+    "mcp",
+    "gateway"
+  ],
+  "author": "PickleShell",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  }
+}

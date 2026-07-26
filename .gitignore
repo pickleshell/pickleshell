@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.env
+config.json
+.inbox/
+.mcp-temp/
+*.log
+*.bak
+*.bak-*
+*.xcf
+.DS_Store

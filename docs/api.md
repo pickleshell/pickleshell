@@ -1,0 +1,88 @@
+# API Reference
+
+## MCP tool: `send-chat`
+
+This is the public PickleShell interface exposed to ChatGPT.
+
+```json
+{
+  "chat_id": "pickleshell-main",
+  "message": "Review the attached file",
+  "session_id": "ses_example",
+  "model": "opencode/big-pickle",
+  "destination_dir": "docs/images",
+  "files": [
+    {
+      "name": "diagram.png",
+      "content": "<base64>",
+      "mime_type": "image/png",
+      "dest_dir": "docs/images",
+      "overwrite": false
+    }
+  ]
+}
+```
+
+`chat_id` and `message` are required. Other fields are optional.
+
+File limits:
+
+- 20 files per request;
+- 2 MiB decoded per file;
+- 10 MiB decoded total.
+
+Destination resolution:
+
+1. `files[].dest_dir`;
+2. request-level `destination_dir`;
+3. `.inbox/<request-id>/`.
+
+All destinations are relative to the configured workspace. `overwrite`
+defaults to false.
+
+When an explicit session is already active, `send-chat` returns a short
+notification containing the current task and elapsed time. It does not queue
+the second request.
+
+## Internal HTTP Gateway
+
+The MCP server sends authenticated requests to `POST /chat`. This interface is
+for same-host component communication and must not be exposed publicly.
+
+The internal request uses `file_paths`, not Base64 `files`:
+
+```json
+{
+  "chat_id": "pickleshell-main",
+  "message": "Review the delivered file",
+  "session_id": "ses_example",
+  "model": "opencode/big-pickle",
+  "destination_dir": "docs",
+  "file_paths": [
+    {
+      "name": "notes.txt",
+      "path": "/home/pickleshell/.mcp-temp/request/notes.txt",
+      "mime_type": "text/plain",
+      "dest_dir": "docs",
+      "overwrite": false
+    }
+  ]
+}
+```
+
+Common errors:
+
+| Status | Error |
+|---|---|
+| 400 | `invalid_request`, `invalid_json`, `file_transfer_error` |
+| 401 | `unauthorized` |
+| 403 | `forbidden_model` |
+| 404 | `unknown_chat_id` |
+| 409 | `session_busy` |
+| 413 | `payload_too_large` |
+| 429 | `rate_limit` |
+| 502 | `agent_error` |
+| 504 | `agent_timeout` |
+
+`GET /health` is unauthenticated on the loopback listener and returns service
+identity, uptime, configured chat IDs, active work, and concurrency policy.

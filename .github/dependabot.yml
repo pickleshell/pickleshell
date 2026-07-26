@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /gateway
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /mcp-server
+    schedule:
+      interval: weekly

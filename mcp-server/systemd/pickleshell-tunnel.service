@@ -1,0 +1,29 @@
+[Unit]
+Description=PickleShell Secure MCP Tunnel
+After=network-online.target pickleshell-gateway.service
+Wants=network-online.target
+Requires=pickleshell-gateway.service
+
+[Service]
+Type=simple
+User=pickleshell
+Group=pickleshell
+WorkingDirectory=/opt/pickleshell/mcp-server
+Environment=HOME=/home/pickleshell
+EnvironmentFile=/etc/pickleshell/mcp.env
+ExecStart=/usr/local/bin/tunnel-client run --profile pickleshell
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+TasksMax=128
+MemoryMax=1G
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

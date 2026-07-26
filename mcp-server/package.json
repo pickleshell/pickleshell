@@ -1,0 +1,31 @@
+{
+  "name": "@pickleshell/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP stdio adapter for the PickleShell Gateway",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsx test-file-utils.ts && tsx test-session-busy.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.22.0",
+    "dotenv": "^16.4.7",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "@hono/node-server": "^2.0.12"
+  },
+  "author": "PickleShell",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  }
+}

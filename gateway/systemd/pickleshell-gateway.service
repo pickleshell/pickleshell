@@ -1,0 +1,31 @@
+[Unit]
+Description=PickleShell Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pickleshell
+Group=pickleshell
+WorkingDirectory=/opt/pickleshell/gateway
+Environment=NODE_ENV=production
+Environment=HOME=/home/pickleshell
+Environment=PATH=/home/pickleshell/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/etc/pickleshell/gateway.env
+ExecStart=/usr/bin/node src/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+TasksMax=256
+MemoryHigh=3G
+MemoryMax=4G
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

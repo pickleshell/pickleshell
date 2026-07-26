@@ -1,0 +1,15 @@
+{
+  "name": "pickleshell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Secure MCP bridge from ChatGPT to a locally operated OpenCode agent",
+  "license": "ISC",
+  "scripts": {
+    "build": "npm --prefix mcp-server run build",
+    "test": "npm --prefix gateway test && npm --prefix mcp-server test",
+    "audit": "npm --prefix gateway audit --omit=dev && npm --prefix mcp-server audit --omit=dev"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
