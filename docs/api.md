@@ -88,9 +88,15 @@ Common errors:
 identity, uptime, configured chat IDs, active work, and concurrency policy.
 
 `GET /status?chat_id=<id>&session_id=<id>` is an authenticated preflight check for
-one session. It returns `state: "ready"` for a free explicit session, or
+one session. It returns `state: "ready"` for a free explicit session,
 `state: "new_session"` when `session_id` is omitted (the next request creates a
-new OpenCode session). An active session returns `state: "busy"` with its task,
-elapsed time, and recent progress. This check is advisory; callers must still
-handle `409 session_busy` from `POST /chat` because another request can start
-between the check and the command.
+new OpenCode session), `state: "busy"` with the current task and progress while
+running, or `state: "completed"` with the buffered reply and trace after the
+last command finishes. The completed buffer is cleared when the next command
+for that explicit session starts and expires automatically after one hour.
+This check is advisory; callers must still handle `409 session_busy` from
+`POST /chat` because another request can start between the check and the command.
+
+The MCP `session-output` tool reads this same buffer. Read it after observing
+`ready`/`completed` and before sending the next command; sessions without an
+explicit `session_id` do not have a readable persistent buffer.
