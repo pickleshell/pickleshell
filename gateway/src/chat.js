@@ -192,6 +192,7 @@ const chatHandler = async (req, res) => {
 
     promise.then((agentResult) => {
       if (agentResult.cancelled) {
+        concurrency.setErrorClass(slotKey, 'cancelled');
         concurrency.completeCancel(slotKey, {
           session_id: agentResult.sessionId || session_id || null,
         });
@@ -216,6 +217,8 @@ const chatHandler = async (req, res) => {
       slotKey = null;
     }).catch((error) => {
       console.error('Chat error:', error.message);
+      const errorClass = error.message.includes('timeout') ? 'timeout' : 'agent_error';
+      concurrency.setErrorClass(slotKey, errorClass);
       concurrency.complete(slotKey, { error: error.message });
       concurrency.release(slotKey);
       slotKey = null;

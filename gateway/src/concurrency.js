@@ -126,6 +126,13 @@ function acquire(chatId, sessionId, idempotencyKey) {
     idempotencyKey: idempotencyKey || null,
     task: null,
     progress: [],
+    metadata: {
+      files_modified: [],
+      tools_used: new Set(),
+      test_result: null,
+      git_commit: null,
+      error_class: null,
+    },
     started: Date.now(),
     createdAt,
     startedAt: null,
@@ -155,6 +162,11 @@ function setCancelFn(slotKey, fn) {
   if (entry) entry.cancelFn = fn;
 }
 
+function setErrorClass(slotKey, errorClass) {
+  const entry = slots.get(slotKey);
+  if (entry) entry.metadata.error_class = errorClass;
+}
+
 function cancelRequest(requestId) {
   const slotKey = requestIdToSlotKey.get(requestId);
   const active = slotKey ? slots.get(slotKey) : null;
@@ -178,6 +190,16 @@ function cancelRequest(requestId) {
   return { ok: false, status: 'not_found', request_id: requestId };
 }
 
+function serializeMetadata(meta) {
+  return {
+    files_modified: [...meta.files_modified],
+    tools_used: [...meta.tools_used],
+    test_result: meta.test_result,
+    git_commit: meta.git_commit,
+    error_class: meta.error_class,
+  };
+}
+
 function complete(slotKey, output) {
   const entry = slots.get(slotKey);
   if (!entry) return;
@@ -187,6 +209,7 @@ function complete(slotKey, output) {
     ...output,
     request_id: entry.requestId,
     chat_id: entry.chatId,
+    metadata: serializeMetadata(entry.metadata),
     completedAt,
     createdAt: entry.createdAt,
     startedAt: entry.startedAt,
@@ -262,6 +285,7 @@ function updateProgress(slotKey, event) {
   if (!entry) return;
 
   const progress = entry.progress;
+  const meta = entry.metadata;
   const now = Date.now();
 
   if (event.type === 'tool_use') {
@@ -272,7 +296,40 @@ function updateProgress(slotKey, event) {
     const inputCmd = event.part?.state?.input?.command || '';
     const output = event.part?.state?.output || '';
 
+    meta.tools_used.add(tool);
+
     if (status === 'completed') {
+      // Track file modifications
+      if ((tool === 'write' || tool === 'edit' || tool === 'file_edit' || tool === 'file_write') && filePath) {
+        if (!meta.files_modified.includes(filePath)) {
+          meta.files_modified.push(filePath);
+        }
+      }
+
+      // Extract git commit hash
+      if ((tool === 'bash' || tool === 'terminal') && inputCmd) {
+        if (inputCmd.includes('git commit') && !inputCmd.includes('git commit --amend')) {
+          const hashMatch = output.match(/\[[\w]+\s+([0-9a-f]{7,40})\]/);
+          if (hashMatch && !meta.git_commit) {
+            meta.git_commit = hashMatch[1];
+          }
+        }
+
+        // Detect test results
+        if (inputCmd.match(/\b(test|jest|vitest|mocha|pytest|go test|cargo test|npm test|npx test)\b/)) {
+          const passMatch = output.match(/(\d+)\s+pass/);
+          const failMatch = output.match(/(\d+)\s+fail/);
+          const totalMatch = output.match(/(\d+)\s+test/);
+          if (passMatch || failMatch || totalMatch) {
+            meta.test_result = {
+              passed: passMatch ? parseInt(passMatch[1], 10) : null,
+              failed: failMatch ? parseInt(failMatch[1], 10) : null,
+              total: totalMatch ? parseInt(totalMatch[1], 10) : null,
+            };
+          }
+        }
+      }
+
       const pendingIdx = progress.findIndex(p => p.type === 'tool' && p.tool === tool && p.status === 'running');
       if (pendingIdx !== -1) progress.splice(pendingIdx, 1);
       progress.push({
@@ -415,6 +472,7 @@ function getRequestOutput(requestId) {
         session_id: completed.session_id || null,
         error: completed.error || null,
         cancelled: completed.cancelled || false,
+        metadata: completed.metadata || null,
       },
       next_action: null,
       retry_after_ms: 0,
@@ -505,6 +563,7 @@ function sessionOutput(chatId, sessionId) {
         trace: completed.trace || [],
         error: completed.error || null,
         cancelled: completed.cancelled || false,
+        metadata: completed.metadata || null,
       },
       next_action: null,
       retry_after_ms: 0,
@@ -542,6 +601,6 @@ module.exports = {
   updateProgress, getProgress, getProgressBySession,
   sessionStatus, sessionOutput,
   getRequestStatus, getRequestOutput,
-  setCancelFn, cancelRequest,
+  setCancelFn, setErrorClass, cancelRequest,
   checkIdempotency,
 };

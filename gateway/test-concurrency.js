@@ -455,3 +455,57 @@ assert(idemAfterRelease !== null, 'released key still in completed map');
 assert(idemAfterRelease.type === 'completed', 'released key shows completed');
 
 console.log(`idempotency tests: ${passed} passed`);
+
+// === metadata tests ===
+console.log('\n=== metadata ===');
+
+const metaTarget = concurrency.acquire('meta-chat', 'sess-meta');
+assert(metaTarget.ok, 'metadata target acquires');
+
+// Simulate tool events
+concurrency.updateProgress(metaTarget.slotKey, {
+  type: 'tool_use',
+  part: { tool: 'write', state: { status: 'completed', title: 'Create README', input: { filePath: '/docs/README.md' }, output: 'Written' } },
+});
+concurrency.updateProgress(metaTarget.slotKey, {
+  type: 'tool_use',
+  part: { tool: 'write', state: { status: 'completed', title: 'Create index', input: { filePath: '/src/index.js' }, output: 'Written' } },
+});
+concurrency.updateProgress(metaTarget.slotKey, {
+  type: 'tool_use',
+  part: { tool: 'bash', state: { status: 'completed', title: 'Run tests', input: { command: 'npm test' }, output: '181 passed, 0 failed, 181 tests' } },
+});
+concurrency.updateProgress(metaTarget.slotKey, {
+  type: 'tool_use',
+  part: { tool: 'bash', state: { status: 'completed', title: 'Git commit', input: { command: 'git commit -m "feat: readme"' }, output: '[main abc1234] feat: readme' } },
+});
+
+// Complete and check metadata
+concurrency.complete(metaTarget.slotKey, { reply: 'Done', trace: [], session_id: 'sess-meta' });
+concurrency.release(metaTarget.slotKey);
+
+const metaOutput = concurrency.getRequestOutput(metaTarget.request_id);
+assert(metaOutput.output.metadata !== null, 'metadata present in output');
+assert(metaOutput.output.metadata.files_modified.length === 2, '2 files modified');
+assert(metaOutput.output.metadata.files_modified[0] === '/docs/README.md', 'first file correct');
+assert(metaOutput.output.metadata.files_modified[1] === '/src/index.js', 'second file correct');
+assert(metaOutput.output.metadata.tools_used.includes('write'), 'write tool tracked');
+assert(metaOutput.output.metadata.tools_used.includes('bash'), 'bash tool tracked');
+assert(metaOutput.output.metadata.test_result !== null, 'test result extracted');
+assert(metaOutput.output.metadata.test_result.passed === 181, '181 passed');
+assert(metaOutput.output.metadata.test_result.failed === 0, '0 failed');
+assert(metaOutput.output.metadata.git_commit === 'abc1234', 'git commit hash extracted');
+
+// setErrorClass
+const errTarget = concurrency.acquire('meta-chat', 'sess-err');
+assert(errTarget.ok, 'error class target acquires');
+concurrency.setErrorClass(errTarget.slotKey, 'timeout');
+concurrency.complete(errTarget.slotKey, { reply: null, error: 'timeout' });
+concurrency.release(errTarget.slotKey);
+
+const errOutput = concurrency.getRequestOutput(errTarget.request_id);
+assert(errOutput.output.metadata.error_class === 'timeout', 'error_class set to timeout');
+
+concurrency.release(errTarget.slotKey);
+
+console.log(`metadata tests: ${passed} passed`);
