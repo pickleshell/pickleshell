@@ -122,6 +122,16 @@ assert(busyStatus.ready === false && busyStatus.state === 'busy', 'active sessio
 const newStatus = concurrency.sessionStatus('status-test');
 assert(newStatus.ready === true && newStatus.state === 'new_session', 'missing session reports new_session');
 
+concurrency.complete(progressSession.slotKey, { reply: 'Done', trace: ['✓ write: test.txt'] });
 concurrency.release(progressSession.slotKey);
+const completedStatus = concurrency.sessionStatus('progress-test', 'sess-prog');
+assert(completedStatus.state === 'completed', 'completed session exposes buffered output');
+assert(completedStatus.output.reply === 'Done', 'completed buffer includes reply');
+assert(completedStatus.output.trace.length === 1, 'completed buffer includes trace');
+
+const nextCommand = concurrency.acquire('progress-test', 'sess-prog');
+assert(nextCommand.ok, 'same session accepts next command');
+assert(concurrency.sessionStatus('progress-test', 'sess-prog').state === 'busy', 'new command clears completed buffer');
+concurrency.release(nextCommand.slotKey);
 
 console.log(`All tests: ${passed} passed`);

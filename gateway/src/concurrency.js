@@ -2,6 +2,8 @@ const { staleTimeoutMs } = require('./timeout');
 
 const slots = new Map();
 const activeSessions = new Map();
+const completedTasks = new Map();
+const COMPLETED_TTL_MS = 60 * 60 * 1000;
 
 let slotCounter = 0;
 
@@ -21,6 +23,9 @@ function release(slotKey) {
 
 function reapStale() {
   const now = Date.now();
+  for (const [key, result] of completedTasks) {
+    if (now - result.completedAt > COMPLETED_TTL_MS) completedTasks.delete(key);
+  }
   for (const [key, entry] of slots) {
     if (now - entry.started > staleTimeoutMs) {
       console.warn(`[CONCURRENCY] Reaping stale slot ${key} (held ${Math.round((now - entry.started) / 1000)}s)`);
@@ -48,6 +53,8 @@ function acquire(chatId, sessionId) {
     };
   }
 
+  if (sessionKey) completedTasks.delete(sessionKey);
+
   const key = `slot:${++slotCounter}`;
   slots.set(key, {
     chatId,
@@ -62,6 +69,15 @@ function acquire(chatId, sessionId) {
   }
 
   return { ok: true, slotKey: key };
+}
+
+function complete(slotKey, output) {
+  const entry = slots.get(slotKey);
+  if (!entry || !entry.sessionKey) return;
+  completedTasks.set(entry.sessionKey, {
+    ...output,
+    completedAt: Date.now(),
+  });
 }
 
 function setTask(slotKey, task) {
@@ -160,6 +176,15 @@ function sessionStatus(chatId, sessionId) {
   const slotKey = activeSessions.get(sessionKey);
   const active = slotKey ? slots.get(slotKey) : null;
   if (!active) {
+    const completed = completedTasks.get(sessionKey);
+    if (completed) {
+      return {
+        ready: true,
+        state: 'completed',
+        session_id: sessionId,
+        output: completed,
+      };
+    }
     return { ready: true, state: 'ready', session_id: sessionId };
   }
 
@@ -192,4 +217,4 @@ function status() {
   };
 }
 
-module.exports = { acquire, setTask, release, status, updateProgress, getProgress, getProgressBySession, sessionStatus };
+module.exports = { acquire, setTask, complete, release, status, updateProgress, getProgress, getProgressBySession, sessionStatus };

@@ -2,6 +2,7 @@ import { GatewayError, GatewayClient } from "./src/gateway-client.js";
 import { loadConfig } from "./src/config.js";
 import { sendChatSchema } from "./src/tools/send-chat.js";
 import { sessionStatusSchema } from "./src/tools/session-status.js";
+import { sessionOutputSchema } from "./src/tools/session-output.js";
 
 let failed = 0;
 let passed = 0;
@@ -183,6 +184,8 @@ console.log("\n=== sessionStatusSchema ===");
 assert(sessionStatusSchema.chat_id.safeParse("pickleshell-main").success, "status chat_id accepted");
 assert(sessionStatusSchema.session_id.safeParse("ses_abc").success, "status session_id accepted");
 assert(!sessionStatusSchema.session_id.safeParse("bad session").success, "status invalid session_id rejected");
+assert(sessionOutputSchema.session_id.safeParse("ses_abc").success, "output session_id accepted");
+assert(!sessionOutputSchema.session_id.safeParse(undefined).success, "output session_id required");
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

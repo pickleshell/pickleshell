@@ -132,6 +132,14 @@ const chatHandler = async (req, res) => {
 
     // Collect final progress trace
     const finalProgress = concurrency.getProgress(slotKey);
+    const trace = finalProgress && finalProgress.events.length > 0
+      ? finalProgress.events.map(e => {
+          if (e.type === 'tool') return `${e.status === 'running' ? '...' : '✓'} ${e.tool}: ${e.title}`;
+          if (e.type === 'text') return `→ ${e.text}`;
+          return null;
+        }).filter(Boolean)
+      : [];
+    concurrency.complete(slotKey, { reply: agentResult.reply, trace });
     concurrency.release(slotKey);
     slotKey = null;
 
@@ -142,17 +150,7 @@ const chatHandler = async (req, res) => {
       reply: agentResult.reply,
     };
 
-    if (finalProgress && finalProgress.events.length > 0) {
-      result.trace = finalProgress.events.map(e => {
-        if (e.type === 'tool') {
-          return `${e.status === 'running' ? '...' : '✓'} ${e.tool}: ${e.title}`;
-        }
-        if (e.type === 'text') {
-          return `→ ${e.text}`;
-        }
-        return null;
-      }).filter(Boolean);
-    }
+    if (trace.length > 0) result.trace = trace;
 
     return res.json(result);
 
