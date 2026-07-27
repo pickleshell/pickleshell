@@ -41,7 +41,9 @@ const result = await handler({
 });
 
 const text = result.content[0]?.text;
-if (text !== "Сессия занята: Build forecast widget (12 с).") {
+const payload = JSON.parse(text || "{}");
+if (payload.state !== "busy" || payload.error !== "session_busy" ||
+    payload.current_task !== "Build forecast widget" || payload.elapsed_s !== 12) {
   throw new Error(`Unexpected busy notification: ${text}`);
 }
 

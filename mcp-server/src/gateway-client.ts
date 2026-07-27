@@ -5,6 +5,7 @@ export interface GatewayErrorPayload {
   notification?: string;
   current_task?: string;
   elapsed_s?: number;
+  progress?: unknown;
 }
 
 export class GatewayError extends Error {

@@ -141,7 +141,16 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
               content: [
                 {
                   type: "text",
-                  text: `Сессия занята: ${task}${suffix}.`,
+                  text: JSON.stringify({
+                    ok: false,
+                    chat_id: args.chat_id,
+                    state: "busy",
+                    error: "session_busy",
+                    notification: `Сессия занята: ${task}${suffix}.`,
+                    current_task: task,
+                    elapsed_s: elapsed,
+                    progress: error.payload.progress,
+                  }),
                 },
               ],
             };
@@ -150,7 +159,17 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
         }
 
         return {
-          content: [{ type: "text", text: response.reply }],
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              ok: response.ok,
+              chat_id: response.chat_id,
+              session_id: response.session_id,
+              state: "completed",
+              output: response.reply,
+              trace: response.trace || [],
+            }),
+          }],
         };
       } finally {
         if (tempDir) {

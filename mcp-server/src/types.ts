@@ -29,6 +29,7 @@ export interface ChatResponse {
   chat_id: string;
   session_id: string;
   reply: string;
+  trace?: string[];
 }
 
 export interface SessionStatusResponse {
