@@ -1,5 +1,23 @@
 # API Reference
 
+## Interface layers
+
+ChatGPT sees MCP tools exposed by the PickleShell plugin. The Gateway HTTP
+endpoints are an internal authenticated interface used by the MCP wrapper;
+they are not separate ChatGPT tools and must not be exposed publicly.
+
+```text
+ChatGPT
+  -> MCP tool: session-status  -> GET  /status
+  -> MCP tool: send-chat       -> POST /chat -> OpenCode
+  -> MCP tool: session-output  -> GET  /status (reads progress/buffer)
+
+Gateway health check           -> GET  /health
+```
+
+Refresh the PickleShell plugin after MCP tools or their schemas change. A
+Gateway endpoint change alone does not require a plugin refresh.
+
 ## MCP tool: `send-chat`
 
 This is the public PickleShell interface exposed to ChatGPT.
