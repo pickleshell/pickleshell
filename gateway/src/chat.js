@@ -86,6 +86,7 @@ const chatHandler = async (req, res) => {
     // Unlimited across sessions; one active request per explicit session.
     const acquireResult = concurrency.acquire(chat_id, session_id);
     if (!acquireResult.ok) {
+      const progress = concurrency.getProgressBySession(chat_id, session_id);
       return res.status(409).json({
         ok: false,
         chat_id,
@@ -94,6 +95,7 @@ const chatHandler = async (req, res) => {
         notification: acquireResult.notification,
         current_task: acquireResult.current_task,
         elapsed_s: acquireResult.elapsed_s,
+        progress: progress || undefined,
       });
     }
     slotKey = acquireResult.slotKey;
@@ -121,21 +123,38 @@ const chatHandler = async (req, res) => {
     const taskSnippet = message.replace(/\s+/g, ' ').trim().substring(0, 80);
     concurrency.setTask(slotKey, taskSnippet);
 
-    // Send to agent
+    // Send to agent with streaming progress updates
     const agentResult = await agent.sendMessage(
       chat_id, message, chatConfig, timeoutSec, session_id, resolvedModel,
-      fileSummary
+      fileSummary,
+      (event) => concurrency.updateProgress(slotKey, event)
     );
 
+    // Collect final progress trace
+    const finalProgress = concurrency.getProgress(slotKey);
     concurrency.release(slotKey);
     slotKey = null;
 
-    return res.json({
+    const result = {
       ok: true,
       chat_id,
       session_id: agentResult.sessionId || session_id || undefined,
-      reply: agentResult.reply
-    });
+      reply: agentResult.reply,
+    };
+
+    if (finalProgress && finalProgress.events.length > 0) {
+      result.trace = finalProgress.events.map(e => {
+        if (e.type === 'tool') {
+          return `${e.status === 'running' ? '...' : '✓'} ${e.tool}: ${e.title}`;
+        }
+        if (e.type === 'text') {
+          return `→ ${e.text}`;
+        }
+        return null;
+      }).filter(Boolean);
+    }
+
+    return res.json(result);
 
   } catch (error) {
     if (slotKey) concurrency.release(slotKey);

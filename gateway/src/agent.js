@@ -1,7 +1,5 @@
-const { execFile } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
-const util = require('util');
-const execFileAsync = util.promisify(execFile);
 
 const SYSTEM_INSTRUCTION = `You are a PickleShell Gateway worker.
 
@@ -22,9 +20,7 @@ When creating or editing files, return:
 - git diff if the workspace is a git repository
 If you cannot safely complete the request, explain why.`;
 
-const WRAPPER_SCRIPT =
-  process.env.OPENCODE_WRAPPER_SCRIPT ||
-  path.join(__dirname, '..', 'opencode-run.sh');
+const WRAPPER_SCRIPT = process.env.OPENCODE_WRAPPER_SCRIPT || path.join(__dirname, '..', 'opencode-run.sh');
 
 const parseJsonOutput = (stdout) => {
   const lines = stdout.split('\n').filter(line => line.trim());
@@ -57,7 +53,7 @@ const parseJsonOutput = (stdout) => {
   return { text: textParts.join('\n'), sessionId };
 };
 
-const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, model, fileSummary) => {
+const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, model, fileSummary, onProgress) => {
   const filePrompt = fileSummary
     ? require('./file-transfer').buildFileSummaryPrompt(fileSummary)
     : '';
@@ -79,31 +75,111 @@ const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, m
     model || '',
   ];
 
-  try {
-    const { stdout } = await execFileAsync('/bin/bash', args, {
-      timeout: timeoutSec * 1000,
-      maxBuffer: 10 * 1024 * 1024,
+  return new Promise((resolve, reject) => {
+    const proc = spawn('bash', args, {
       cwd: chatConfig.workspace,
-      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
     });
 
-    let { text: reply, sessionId } = parseJsonOutput(stdout);
+    let stdout = '';
+    let stderr = '';
+    let buffer = '';
+    let sessionIdFound = null;
+    const textParts = [];
 
-    if (!reply) {
-      reply = `Message received and processed for ${chatId}. No output generated.`;
-    }
+    proc.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-    return { reply, sessionId };
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
 
-  } catch (error) {
-    console.error(`[OPENCODE] Error for ${chatId}:`, error.message);
+        try {
+          const event = JSON.parse(trimmed);
 
-    if (error.killed) {
-      throw new Error('timeout');
-    }
+          if (event.sessionID && !sessionIdFound) {
+            sessionIdFound = event.sessionID;
+          }
 
-    throw error;
-  }
+          if (event.type === 'text' && event.part?.text) {
+            textParts.push(event.part.text);
+          }
+
+          if (event.type === 'tool_use' && event.part?.state?.output) {
+            const output = event.part.state.output.trim();
+            if (output) {
+              textParts.push(`[${event.part.state.title || 'tool'}]: ${output}`);
+            }
+          }
+
+          if (onProgress) {
+            try { onProgress(event); } catch (_) {}
+          }
+        } catch (e) {
+          // Non-JSON line (ANSI codes from PTY wrapper, etc)
+        }
+
+        stdout += line + '\n';
+      }
+    });
+
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      proc.kill('SIGKILL');
+      reject(new Error('timeout'));
+    }, timeoutSec * 1000);
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+
+      if (buffer.trim()) {
+        try {
+          const event = JSON.parse(buffer.trim());
+          if (event.sessionID && !sessionIdFound) {
+            sessionIdFound = event.sessionID;
+          }
+          if (event.type === 'text' && event.part?.text) {
+            textParts.push(event.part.text);
+          }
+          if (event.type === 'tool_use' && event.part?.state?.output) {
+            const output = event.part.state.output.trim();
+            if (output) {
+              textParts.push(`[${event.part.state.title || 'tool'}]: ${output}`);
+            }
+          }
+          if (onProgress) {
+            try { onProgress(event); } catch (_) {}
+          }
+        } catch (e) {}
+      }
+
+      let reply = textParts.join('\n');
+      if (!reply) {
+        reply = `Message received and processed for ${chatId}. No output generated.`;
+      }
+
+      console.log(`[OPENCODE] Completed for ${chatId} session=${sessionIdFound || '(none)'} code=${code}`);
+      resolve({ reply, sessionId: sessionIdFound });
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      console.error(`[OPENCODE] Spawn error for ${chatId}:`, err.message);
+      reject(err);
+    });
+  });
 };
 
 module.exports = {

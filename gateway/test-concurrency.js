@@ -37,7 +37,6 @@ const status = concurrency.status();
 assert(status.max === null, 'status reports no global maximum');
 assert(status.policy === 'one_active_request_per_session', 'status reports policy');
 
-// Regression: stale timeout must always exceed agent timeout by at least STALE_BUFFER_SEC
 const STALE_BUFFER_SEC = 30;
 assert(
   staleTimeoutMs >= timeoutSec * 1000 + STALE_BUFFER_SEC * 1000,
@@ -50,7 +49,6 @@ assert(
 
 console.log(`Concurrency tests: ${passed} passed`);
 
-// Unit tests for parseAgentTimeoutSec (pure function)
 function assertEq(actual, expected, msg) {
   if (actual !== expected) {
     throw new Error(`${msg}: expected ${expected}, got ${actual}`);
@@ -71,3 +69,52 @@ assertEq(parseAgentTimeoutSec('Infinity'), 300, '"Infinity" → 300 (Infinity fa
 assertEq(parseAgentTimeoutSec('-Infinity'), 300, '"-Infinity" → 300 (negative Infinity falls back)');
 
 console.log(`parseAgentTimeoutSec tests: ${passed} passed`);
+
+// === Progress tracking tests ===
+concurrency.release(afterRelease.slotKey);
+
+const progressSession = concurrency.acquire('progress-test', 'sess-prog');
+assert(progressSession.ok, 'progress session acquires');
+concurrency.setTask(progressSession.slotKey, 'Create file');
+
+concurrency.updateProgress(progressSession.slotKey, {
+  type: 'tool_use',
+  part: { tool: 'write', state: { status: 'running', input: { filePath: '/tmp/test.txt' }, title: 'test.txt' } }
+});
+
+let progress = concurrency.getProgress(progressSession.slotKey);
+assert(progress !== null, 'getProgress returns data');
+assert(progress.task === 'Create file', 'progress includes task');
+assert(progress.events.length === 1, 'progress has 1 running event');
+assert(progress.events[0].status === 'running', 'event status is running');
+assert(progress.events[0].tool === 'write', 'event tool is write');
+
+concurrency.updateProgress(progressSession.slotKey, {
+  type: 'tool_use',
+  part: { tool: 'write', state: { status: 'completed', input: { filePath: '/tmp/test.txt' }, output: 'OK', title: 'test.txt' } }
+});
+
+progress = concurrency.getProgress(progressSession.slotKey);
+assert(progress.events.length === 1, 'completed replaces running event');
+assert(progress.events[0].status === 'done', 'event status is done');
+assert(progress.events[0].output === 'OK', 'event has output');
+
+concurrency.updateProgress(progressSession.slotKey, {
+  type: 'text',
+  part: { text: 'Created test.txt' }
+});
+
+progress = concurrency.getProgress(progressSession.slotKey);
+assert(progress.events.length === 2, 'text event added alongside completed tool');
+assert(progress.events[1].type === 'text', 'second event is text');
+
+const bySession = concurrency.getProgressBySession('progress-test', 'sess-prog');
+assert(bySession !== null, 'getProgressBySession returns data');
+assert(bySession.events.length === 2, 'getProgressBySession returns same events');
+
+const noProgress = concurrency.getProgressBySession('progress-test', 'nonexistent');
+assert(noProgress === null, 'getProgressBySession returns null for unknown session');
+
+concurrency.release(progressSession.slotKey);
+
+console.log(`All tests: ${passed} passed`);
