@@ -91,3 +91,35 @@ message: Reply with exactly: pong. Do not use tools or modify files.
 
 For continued work, pass the `session_id` returned by the previous call. Use a
 different session for unrelated work.
+
+## 9. Plugin tool smoke test
+
+Use this checklist in a fresh ChatGPT conversation after the initial `pong`
+test. All messages below target `chat_id: pickleshell-main` and must not edit
+files.
+
+1. Call `session-status` without `session_id`. Expect `state: "new_session"`.
+2. Call `send-chat` with the message: `Reply exactly: PONG_TEST. Do not use tools or modify files.`
+   Save the returned `session_id` and confirm the reply is `PONG_TEST`.
+3. Call `session-status` with that `session_id`. Expect `state: "completed"`.
+4. Call `session-output` with that `session_id`. Confirm it returns the previous
+   reply and, when available, a `trace`.
+5. Call `send-chat` again with the same session: `Reply exactly: SECOND_TEST. Do not use tools or modify files.`
+6. Call `session-output` after completion. Confirm the buffer now contains
+   `SECOND_TEST`, not `PONG_TEST`.
+
+To test the busy state, start a separate explicit session with:
+`Wait 10 seconds, then reply exactly: BUSY_TEST_DONE. Do not use tools or modify files.`
+While it runs, call `session-status` and `session-output` for that session.
+Both must report `state: "busy"` and include elapsed time or progress. After
+completion, repeat `session-output` and expect `BUSY_TEST_DONE`.
+
+The expected tool sequence is:
+
+```text
+session-status -> send-chat -> session-status -> session-output
+                -> send-chat -> session-output
+```
+
+Receiving `409 session_busy` during a race is expected; wait and repeat the
+status check rather than sending a second command to the same session.
