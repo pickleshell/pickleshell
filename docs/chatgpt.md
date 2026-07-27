@@ -123,3 +123,36 @@ session-status -> send-chat -> session-status -> session-output
 
 Receiving `409 session_busy` during a race is expected; wait and repeat the
 status check rather than sending a second command to the same session.
+
+## 10. Async chat smoke test
+
+Use this test after the provider is available. Set `chat_id` to
+`pickleshell-main` and do not attach files.
+
+1. Call `session-status` without `session_id`. Expect `state: "new_session"`.
+2. Call `send-chat` without `session_id` with:
+   `Reply exactly: ASYNC_PONG. Do not use tools or modify files.`
+3. Confirm that `send-chat` returns immediately with `state: "busy"`, a
+   non-empty `request_id`, and `session_id: null`.
+4. Poll `session-status` using that `request_id` every 2–5 seconds. It must
+   report `state: "busy"` while running, then `state: "completed"`.
+5. Call `session-output` with the same `request_id`. Confirm `output.reply`
+   is `ASYNC_PONG`, `output.trace` is present, and save
+   `output.session_id` if it is non-null.
+6. If a real `output.session_id` was returned, call `send-chat` with that ID:
+   `Reply exactly: ASYNC_CONTINUED. Do not use tools or modify files.`
+   Poll its new `request_id`, then read the result with `session-output`.
+
+Expected async sequence:
+
+```text
+send-chat (busy + request_id)
+  -> session-status(request_id) [busy ... completed]
+  -> session-output(request_id) [reply + trace + session_id]
+  -> optional continuation with returned ses_... ID
+```
+
+If the completed output contains `output.error` such as `No provider
+available (401)`, the async transport is working and the failure is in the
+OpenCode provider/authentication layer. Do not treat that result as a
+Gateway or MCP workflow failure.
