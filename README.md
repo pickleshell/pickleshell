@@ -113,6 +113,7 @@ PickleShell deliberately separates its two interfaces:
   receives validated local `file_paths`, not public file payloads.
 
 See the [API reference](docs/api.md) for the complete schemas.
+See the [roadmap](docs/roadmap.md) for the next production version checklist.
 
 ## Requirements
 
