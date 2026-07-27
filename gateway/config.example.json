@@ -6,7 +6,8 @@
     }
   },
   "allowed_models": [
-    "opencode/big-pickle"
+    "opencode/big-pickle",
+    "opencode/ling-3.0-flash-free"
   ],
-  "default_model": "opencode/big-pickle"
+  "default_model": "opencode/ling-3.0-flash-free"
 }
