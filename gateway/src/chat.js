@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const chatHandler = async (req, res) => {
   let slotKey = null;
   try {
-    const { chat_id, message, session_id, model, file_paths, destination_dir } = req.body;
+    const { chat_id, message, session_id, model, file_paths, destination_dir, idempotency_key } = req.body;
 
     // Validate request
     if (!chat_id || typeof chat_id !== 'string' || chat_id.trim() === '') {
@@ -83,8 +83,48 @@ const chatHandler = async (req, res) => {
       }
     }
 
+    // Idempotency check
+    if (idempotency_key && typeof idempotency_key === 'string' && idempotency_key.length <= 128) {
+      const existing = concurrency.checkIdempotency(idempotency_key);
+      if (existing) {
+        if (existing.type === 'active') {
+          return res.status(409).json({
+            ok: false,
+            idempotent: true,
+            chat_id,
+            request_id: existing.request_id,
+            session_id: existing.session_id,
+            state: 'rejected',
+            error: 'session_busy',
+            notification: existing.notification,
+            current_task: existing.current_task,
+            elapsed_s: existing.elapsed_s,
+            next_action: existing.next_action,
+            retry_after_ms: existing.retry_after_ms,
+          });
+        }
+        if (existing.type === 'completed') {
+          return res.json({
+            ok: true,
+            idempotent: true,
+            chat_id: existing.output.chat_id,
+            request_id: existing.request_id,
+            session_id: existing.output.session_id,
+            state: 'completed',
+            next_action: null,
+            retry_after_ms: 0,
+            created_at: existing.output.createdAt,
+            started_at: existing.output.startedAt,
+            completed_at: existing.output.completedAt,
+            queue_ms: existing.output.queue_ms,
+            execution_ms: existing.output.execution_ms,
+          });
+        }
+      }
+    }
+
     // One active request per session
-    const acquireResult = concurrency.acquire(chat_id, session_id);
+    const acquireResult = concurrency.acquire(chat_id, session_id, idempotency_key);
     if (!acquireResult.ok) {
       const progress = concurrency.getProgressBySession(chat_id, session_id);
       return res.status(409).json({

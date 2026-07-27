@@ -22,6 +22,7 @@ export interface ChatRequest {
   destination_dir?: string;
   files?: FileItem[];
   file_paths?: FileTransfer[];
+  idempotency_key?: string;
 }
 
 export interface ChatResponse {

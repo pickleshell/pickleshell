@@ -404,3 +404,54 @@ assert(typeof tsOutput.execution_ms === 'number', 'completed has execution_ms');
 assert(tsOutput.execution_ms >= 0, 'completed execution_ms is non-negative');
 
 console.log(`timestamp tests: ${passed} passed`);
+
+// === idempotency tests ===
+console.log('\n=== idempotency ===');
+
+// checkIdempotency returns null for unknown key
+const idem1 = concurrency.checkIdempotency('idem_unknown');
+assert(idem1 === null, 'unknown idempotency key returns null');
+
+// Acquire with idempotency key, check active
+const idemTarget = concurrency.acquire('idem-chat', 'sess-idem', 'idem_key_1');
+assert(idemTarget.ok, 'idempotency acquire ok');
+concurrency.setTask(idemTarget.slotKey, 'Idempotency task');
+
+const idemActive = concurrency.checkIdempotency('idem_key_1');
+assert(idemActive !== null, 'active idempotency check returns result');
+assert(idemActive.type === 'active', 'idempotency type is active');
+assert(idemActive.request_id === idemTarget.request_id, 'idempotency returns correct request_id');
+assert(idemActive.current_task === 'Idempotency task', 'idempotency returns task');
+assert(typeof idemActive.elapsed_s === 'number', 'idempotency returns elapsed_s');
+
+// Complete, check completed idempotency
+concurrency.complete(idemTarget.slotKey, { reply: 'idem done', trace: ['done'], session_id: 'sess-idem' });
+concurrency.release(idemTarget.slotKey);
+
+const idemCompleted = concurrency.checkIdempotency('idem_key_1');
+assert(idemCompleted !== null, 'completed idempotency check returns result');
+assert(idemCompleted.type === 'completed', 'idempotency type is completed');
+assert(idemCompleted.output.reply === 'idem done', 'completed idempotency has reply');
+assert(idemCompleted.output.request_id === idemTarget.request_id, 'completed idempotency has request_id');
+
+// Acquire without idempotency key — no crash
+const idemNoKey = concurrency.acquire('idem-chat', 'sess-no-key');
+assert(idemNoKey.ok, 'acquire without idempotency key ok');
+assert(idemNoKey.request_id.startsWith('req_'), 'has request_id');
+concurrency.complete(idemNoKey.slotKey, { reply: 'no key', trace: [], session_id: 'sess-no-key' });
+concurrency.release(idemNoKey.slotKey);
+
+// Two different keys on same session
+const idem2a = concurrency.acquire('idem-chat2', 'sess-dual', 'key_a');
+assert(idem2a.ok, 'first key acquires');
+const idem2b = concurrency.checkIdempotency('key_b');
+assert(idem2b === null, 'different key returns null');
+concurrency.complete(idem2a.slotKey, { reply: 'a done', trace: [], session_id: 'sess-dual' });
+concurrency.release(idem2a.slotKey);
+
+// After release, idempotency key is removed from active map
+const idemAfterRelease = concurrency.checkIdempotency('key_a');
+assert(idemAfterRelease !== null, 'released key still in completed map');
+assert(idemAfterRelease.type === 'completed', 'released key shows completed');
+
+console.log(`idempotency tests: ${passed} passed`);

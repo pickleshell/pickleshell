@@ -6,6 +6,8 @@ const activeSessions = new Map();
 const completedByRequestId = new Map();
 const completedBySessionKey = new Map();
 const requestIdToSlotKey = new Map();
+const activeByIdempotencyKey = new Map();
+const completedByIdempotencyKey = new Map();
 const COMPLETED_TTL_MS = 60 * 60 * 1000;
 const RETRY_MS = 2000;
 
@@ -30,10 +32,43 @@ function release(slotKey) {
   if (!entry) return;
 
   if (entry.requestId) requestIdToSlotKey.delete(entry.requestId);
+  if (entry.idempotencyKey) activeByIdempotencyKey.delete(entry.idempotencyKey);
   slots.delete(slotKey);
   if (entry.sessionKey && activeSessions.get(entry.sessionKey) === slotKey) {
     activeSessions.delete(entry.sessionKey);
   }
+}
+
+function checkIdempotency(idempotencyKey) {
+  const activeSlotKey = activeByIdempotencyKey.get(idempotencyKey);
+  if (activeSlotKey) {
+    const entry = slots.get(activeSlotKey);
+    if (entry) {
+      return {
+        type: 'active',
+        request_id: entry.requestId,
+        chat_id: entry.chatId,
+        session_id: entry.sessionId || null,
+        current_task: entry.task || 'Задача запускается',
+        elapsed_s: Math.max(0, Math.round((Date.now() - entry.started) / 1000)),
+        next_action: 'session-status',
+        retry_after_ms: RETRY_MS,
+      };
+    }
+  }
+
+  const completed = completedByIdempotencyKey.get(idempotencyKey);
+  if (completed) {
+    return {
+      type: 'completed',
+      request_id: completed.request_id || null,
+      chat_id: completed.chat_id || null,
+      session_id: completed.session_id || null,
+      output: completed,
+    };
+  }
+
+  return null;
 }
 
 function reapStale() {
@@ -44,6 +79,9 @@ function reapStale() {
   for (const [key, result] of completedBySessionKey) {
     if (now - result.completedAt > COMPLETED_TTL_MS) completedBySessionKey.delete(key);
   }
+  for (const [key, result] of completedByIdempotencyKey) {
+    if (now - result.completedAt > COMPLETED_TTL_MS) completedByIdempotencyKey.delete(key);
+  }
   for (const [key, entry] of slots) {
     if (now - entry.started > staleTimeoutMs) {
       console.warn(`[CONCURRENCY] Reaping stale slot ${key} (held ${Math.round((now - entry.started) / 1000)}s)`);
@@ -52,7 +90,7 @@ function reapStale() {
   }
 }
 
-function acquire(chatId, sessionId) {
+function acquire(chatId, sessionId, idempotencyKey) {
   reapStale();
 
   const sessionKey = getSessionKey(chatId, sessionId);
@@ -85,6 +123,7 @@ function acquire(chatId, sessionId) {
     sessionId,
     sessionKey,
     requestId,
+    idempotencyKey: idempotencyKey || null,
     task: null,
     progress: [],
     started: Date.now(),
@@ -97,6 +136,9 @@ function acquire(chatId, sessionId) {
     activeSessions.set(sessionKey, key);
   }
   requestIdToSlotKey.set(requestId, key);
+  if (idempotencyKey) {
+    activeByIdempotencyKey.set(idempotencyKey, key);
+  }
 
   return { ok: true, slotKey: key, request_id: requestId };
 }
@@ -143,6 +185,8 @@ function complete(slotKey, output) {
   const completedAt = isoNow();
   const record = {
     ...output,
+    request_id: entry.requestId,
+    chat_id: entry.chatId,
     completedAt,
     createdAt: entry.createdAt,
     startedAt: entry.startedAt,
@@ -160,6 +204,11 @@ function complete(slotKey, output) {
 
   if (entry.sessionKey) {
     completedBySessionKey.set(entry.sessionKey, record);
+  }
+
+  if (entry.idempotencyKey) {
+    completedByIdempotencyKey.set(entry.idempotencyKey, record);
+    activeByIdempotencyKey.delete(entry.idempotencyKey);
   }
 }
 
@@ -173,6 +222,8 @@ function completeCancel(slotKey, output) {
     trace: [],
     cancelled: true,
     ...output,
+    request_id: entry.requestId,
+    chat_id: entry.chatId,
     completedAt,
     createdAt: entry.createdAt,
     startedAt: entry.startedAt,
@@ -190,6 +241,10 @@ function completeCancel(slotKey, output) {
 
   if (entry.sessionKey) {
     completedBySessionKey.set(entry.sessionKey, record);
+  }
+
+  if (entry.idempotencyKey) {
+    completedByIdempotencyKey.set(entry.idempotencyKey, record);
   }
 
   release(slotKey);
@@ -488,4 +543,5 @@ module.exports = {
   sessionStatus, sessionOutput,
   getRequestStatus, getRequestOutput,
   setCancelFn, cancelRequest,
+  checkIdempotency,
 };

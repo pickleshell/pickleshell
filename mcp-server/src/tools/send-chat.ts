@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "crypto";
 import { GatewayError, type GatewayClient } from "../gateway-client.js";
 import type { FileTransfer } from "../types.js";
 import {
@@ -123,6 +124,19 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
 
         let response: Awaited<ReturnType<GatewayClient["chat"]>>;
         try {
+          // Auto-generate idempotency key from request content
+          const idempotencyPayload = JSON.stringify({
+            chat_id: args.chat_id,
+            message: args.message,
+            session_id: args.session_id || "",
+            model: args.model || "",
+            destination_dir: args.destination_dir || "",
+          });
+          const idempotency_key = createHash("sha256")
+            .update(idempotencyPayload)
+            .digest("hex")
+            .substring(0, 32);
+
           response = await client.chat({
             chat_id: args.chat_id,
             message: args.message,
@@ -130,6 +144,7 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
             model: args.model,
             destination_dir: args.destination_dir,
             file_paths: fileTransfers,
+            idempotency_key,
           });
         } catch (error) {
           if (
@@ -166,6 +181,9 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
 
         // Async mode: agent runs in background
         if (response.state === "busy") {
+          const idempotentNote = (response as any).idempotent
+            ? " (повторный запрос — та же команда)"
+            : "";
           return {
             content: [{
               type: "text",
@@ -175,9 +193,32 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
                 request_id: response.request_id,
                 session_id: response.session_id,
                 state: "busy",
+                idempotent: (response as any).idempotent || false,
                 next_action: response.next_action,
                 retry_after_ms: response.retry_after_ms,
-                notification: `Команда принята. request_id: ${response.request_id}. Используй session-status с этим request_id для отслеживания.`,
+                notification: `Команда принята${idempotentNote}. request_id: ${response.request_id}. Используй session-status с этим request_id для отслеживания.`,
+              }),
+            }],
+          };
+        }
+
+        // Idempotent completed: same request was already executed
+        if ((response as any).idempotent && response.state === "completed") {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                ok: true,
+                idempotent: true,
+                chat_id: response.chat_id,
+                request_id: response.request_id,
+                session_id: response.session_id,
+                state: "completed",
+                next_action: "session-output",
+                notification: `Задача уже выполнена ранее. Используй session-output с request_id: ${response.request_id} для чтения результата.`,
+                created_at: response.created_at,
+                completed_at: (response as any).completed_at,
+                execution_ms: (response as any).execution_ms,
               }),
             }],
           };
