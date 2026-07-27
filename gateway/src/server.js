@@ -43,9 +43,19 @@ app.get('/health', auth, (req, res) => {
 });
 
 app.get('/status', auth, (req, res) => {
-  const { chat_id: chatId, session_id: sessionId } = req.query;
+  const { chat_id: chatId, session_id: sessionId, request_id: requestId } = req.query;
+
+  // request_id lookup (primary path for async)
+  if (requestId) {
+    if (typeof requestId !== 'string' || !/^req_[A-Za-z0-9_-]{1,64}$/.test(requestId)) {
+      return res.status(400).json({ ok: false, error: 'invalid_request', details: 'request_id is invalid' });
+    }
+    return res.json({ ok: true, ...concurrency.getRequestStatus(requestId) });
+  }
+
+  // session_id lookup (backward compat)
   if (!chatId || typeof chatId !== 'string') {
-    return res.status(400).json({ ok: false, error: 'invalid_request', details: 'chat_id is required' });
+    return res.status(400).json({ ok: false, error: 'invalid_request', details: 'chat_id or request_id is required' });
   }
   if (sessionId !== undefined &&
       (typeof sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId))) {

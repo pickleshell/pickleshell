@@ -135,3 +135,64 @@ assert(concurrency.sessionStatus('progress-test', 'sess-prog').state === 'busy',
 concurrency.release(nextCommand.slotKey);
 
 console.log(`All tests: ${passed} passed`);
+
+// === request_id flow tests ===
+
+// Test: acquire returns request_id
+const reqTest = concurrency.acquire('req-test', 'sess-req');
+assert(reqTest.ok, 'acquire returns ok');
+assert(typeof reqTest.request_id === 'string', 'acquire returns request_id');
+assert(reqTest.request_id.startsWith('req_'), 'request_id starts with req_');
+concurrency.setTask(reqTest.slotKey, 'Test request_id');
+
+// Test: getRequestStatus returns busy for active request
+const reqBusy = concurrency.getRequestStatus(reqTest.request_id);
+assert(reqBusy.state === 'busy', 'getRequestStatus returns busy for active request');
+assert(reqBusy.chat_id === 'req-test', 'getRequestStatus includes chat_id');
+assert(reqBusy.session_id === 'sess-req', 'getRequestStatus includes session_id');
+assert(reqBusy.current_task === 'Test request_id', 'getRequestStatus includes task');
+
+// Test: getRequestStatus returns unknown for nonexistent request_id
+const reqUnknown = concurrency.getRequestStatus('req_nonexistent');
+assert(reqUnknown.state === 'unknown', 'getRequestStatus returns unknown for nonexistent request_id');
+
+// Test: complete + release stores by request_id
+concurrency.complete(reqTest.slotKey, { reply: 'Request done', trace: ['✓ done'], session_id: 'sess-req' });
+concurrency.release(reqTest.slotKey);
+
+const reqCompleted = concurrency.getRequestStatus(reqTest.request_id);
+assert(reqCompleted.state === 'completed', 'getRequestStatus returns completed after completion');
+assert(reqCompleted.output.reply === 'Request done', 'completed output includes reply');
+assert(reqCompleted.output.session_id === 'sess-req', 'completed output includes session_id');
+
+// Test: sessionStatus also has the result (backward compat via sessionKey)
+const sessCompleted = concurrency.sessionStatus('req-test', 'sess-req');
+assert(sessCompleted.state === 'completed', 'sessionStatus also returns completed for same session');
+assert(sessCompleted.output.reply === 'Request done', 'sessionStatus output matches');
+
+// === Critical: no-session-id flow ===
+// Simulates: POST /chat without session_id → busy → complete → status by request_id
+const noSession = concurrency.acquire('fire-and-forget');
+assert(noSession.ok, 'acquire without session_id succeeds');
+assert(typeof noSession.request_id === 'string', 'acquire without session_id returns request_id');
+concurrency.setTask(noSession.slotKey, 'Quick ping');
+
+// Status by request_id while busy
+const noSessionBusy = concurrency.getRequestStatus(noSession.request_id);
+assert(noSessionBusy.state === 'busy', 'no-session request shows busy by request_id');
+assert(noSessionBusy.session_id === null, 'no-session request has null session_id');
+
+// Complete and check by request_id
+concurrency.complete(noSession.slotKey, { reply: 'pong', trace: [], session_id: null });
+concurrency.release(noSession.slotKey);
+
+const noSessionDone = concurrency.getRequestStatus(noSession.request_id);
+assert(noSessionDone.state === 'completed', 'no-session request shows completed by request_id');
+assert(noSessionDone.output.reply === 'pong', 'no-session completed output includes reply');
+assert(noSessionDone.output.session_id === null, 'no-session completed has null session_id');
+
+// sessionStatus without session_id returns new_session (no data for anonymous)
+const noSessionStatus = concurrency.sessionStatus('fire-and-forget');
+assert(noSessionStatus.state === 'new_session', 'sessionStatus without session_id still returns new_session');
+
+console.log(`request_id tests: ${passed} passed`);

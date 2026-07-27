@@ -58,11 +58,17 @@ export class GatewayClient {
     }
   }
 
-  async sessionStatus(chatId: string, sessionId?: string): Promise<SessionStatusResponse> {
+  async sessionStatus(chatId: string, sessionId?: string, requestId?: string): Promise<SessionStatusResponse> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeout_ms);
-    const params = new URLSearchParams({ chat_id: chatId });
-    if (sessionId !== undefined) params.set("session_id", sessionId);
+    const params = new URLSearchParams();
+    if (requestId) {
+      params.set("request_id", requestId);
+    } else {
+      if (!chatId) throw new Error("chat_id is required when request_id is not provided");
+      params.set("chat_id", chatId);
+      if (sessionId !== undefined) params.set("session_id", sessionId);
+    }
 
     try {
       const response = await fetch(`${this.config.url}/status?${params}`, {

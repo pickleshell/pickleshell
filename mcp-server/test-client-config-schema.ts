@@ -185,7 +185,9 @@ assert(sessionStatusSchema.chat_id.safeParse("pickleshell-main").success, "statu
 assert(sessionStatusSchema.session_id.safeParse("ses_abc").success, "status session_id accepted");
 assert(!sessionStatusSchema.session_id.safeParse("bad session").success, "status invalid session_id rejected");
 assert(sessionOutputSchema.session_id.safeParse("ses_abc").success, "output session_id accepted");
-assert(!sessionOutputSchema.session_id.safeParse(undefined).success, "output session_id required");
+assert(sessionOutputSchema.session_id.safeParse(undefined).success, "output session_id optional (request_id alternative)");
+assert(sessionOutputSchema.request_id.safeParse("req_abc123").success, "output request_id accepted");
+assert(!sessionOutputSchema.request_id.safeParse("bad-format").success, "output invalid request_id rejected");
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

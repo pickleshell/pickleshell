@@ -27,22 +27,31 @@ export interface ChatRequest {
 export interface ChatResponse {
   ok: boolean;
   chat_id: string;
-  session_id: string;
-  reply: string;
+  request_id: string;
+  session_id: string | null;
+  state?: "busy" | "completed";
+  reply?: string;
   trace?: string[];
 }
 
 export interface SessionStatusResponse {
   ok: boolean;
-  chat_id: string;
+  chat_id?: string;
   session_id: string | null;
+  request_id?: string;
   ready: boolean;
-  state: "ready" | "busy" | "new_session";
+  state: "ready" | "busy" | "new_session" | "completed" | "unknown";
   error?: string;
   notification?: string;
   current_task?: string;
   elapsed_s?: number;
   progress?: unknown;
+  output?: {
+    reply?: string;
+    trace?: string[];
+    session_id?: string | null;
+    error?: string | null;
+  };
 }
 
 export interface HealthResponse {

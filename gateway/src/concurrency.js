@@ -1,8 +1,11 @@
 const { staleTimeoutMs } = require('./timeout');
+const crypto = require('crypto');
 
 const slots = new Map();
 const activeSessions = new Map();
-const completedTasks = new Map();
+const completedByRequestId = new Map();
+const completedBySessionKey = new Map();
+const requestIdToSlotKey = new Map();
 const COMPLETED_TTL_MS = 60 * 60 * 1000;
 
 let slotCounter = 0;
@@ -11,10 +14,17 @@ function getSessionKey(chatId, sessionId) {
   return sessionId ? `${chatId}\0${sessionId}` : null;
 }
 
+function generateRequestId() {
+  const ts = Date.now().toString(36);
+  const rand = crypto.randomBytes(4).toString('hex');
+  return `req_${ts}-${rand}`;
+}
+
 function release(slotKey) {
   const entry = slots.get(slotKey);
   if (!entry) return;
 
+  if (entry.requestId) requestIdToSlotKey.delete(entry.requestId);
   slots.delete(slotKey);
   if (entry.sessionKey && activeSessions.get(entry.sessionKey) === slotKey) {
     activeSessions.delete(entry.sessionKey);
@@ -23,8 +33,11 @@ function release(slotKey) {
 
 function reapStale() {
   const now = Date.now();
-  for (const [key, result] of completedTasks) {
-    if (now - result.completedAt > COMPLETED_TTL_MS) completedTasks.delete(key);
+  for (const [key, result] of completedByRequestId) {
+    if (now - result.completedAt > COMPLETED_TTL_MS) completedByRequestId.delete(key);
+  }
+  for (const [key, result] of completedBySessionKey) {
+    if (now - result.completedAt > COMPLETED_TTL_MS) completedBySessionKey.delete(key);
   }
   for (const [key, entry] of slots) {
     if (now - entry.started > staleTimeoutMs) {
@@ -53,13 +66,17 @@ function acquire(chatId, sessionId) {
     };
   }
 
-  if (sessionKey) completedTasks.delete(sessionKey);
+  if (sessionKey) {
+    completedBySessionKey.delete(sessionKey);
+  }
 
+  const requestId = generateRequestId();
   const key = `slot:${++slotCounter}`;
   slots.set(key, {
     chatId,
     sessionId,
     sessionKey,
+    requestId,
     task: null,
     progress: [],
     started: Date.now(),
@@ -67,17 +84,29 @@ function acquire(chatId, sessionId) {
   if (sessionKey) {
     activeSessions.set(sessionKey, key);
   }
+  requestIdToSlotKey.set(requestId, key);
 
-  return { ok: true, slotKey: key };
+  return { ok: true, slotKey: key, request_id: requestId };
 }
 
 function complete(slotKey, output) {
   const entry = slots.get(slotKey);
-  if (!entry || !entry.sessionKey) return;
-  completedTasks.set(entry.sessionKey, {
+  if (!entry) return;
+
+  const record = {
     ...output,
     completedAt: Date.now(),
-  });
+  };
+
+  // Store by request_id (primary)
+  if (entry.requestId) {
+    completedByRequestId.set(entry.requestId, record);
+  }
+
+  // Store by sessionKey (backward compat for sync callers)
+  if (entry.sessionKey) {
+    completedBySessionKey.set(entry.sessionKey, record);
+  }
 }
 
 function setTask(slotKey, task) {
@@ -103,7 +132,6 @@ function updateProgress(slotKey, event) {
     const output = event.part?.state?.output || '';
 
     if (status === 'completed') {
-      // Remove any pending entry for this tool, add completed
       const pendingIdx = progress.findIndex(p => p.type === 'tool' && p.tool === tool && p.status === 'running');
       if (pendingIdx !== -1) progress.splice(pendingIdx, 1);
       progress.push({
@@ -115,7 +143,6 @@ function updateProgress(slotKey, event) {
         ts: now,
       });
     } else {
-      // Running — update or add
       const existing = progress.findIndex(p => p.type === 'tool' && p.tool === tool && p.status === 'running');
       const entry = {
         type: 'tool',
@@ -138,7 +165,6 @@ function updateProgress(slotKey, event) {
     });
   }
 
-  // Keep last 20 events max
   while (progress.length > 20) {
     progress.shift();
   }
@@ -150,7 +176,7 @@ function getProgress(slotKey) {
   return {
     task: entry.task,
     elapsed_s: Math.round((Date.now() - entry.started) / 1000),
-    events: entry.progress.slice(-10), // last 10 events
+    events: entry.progress.slice(-10),
   };
 }
 
@@ -160,6 +186,44 @@ function getProgressBySession(chatId, sessionId) {
   const slotKey = activeSessions.get(sessionKey);
   if (!slotKey) return null;
   return getProgress(slotKey);
+}
+
+function getRequestStatus(requestId) {
+  reapStale();
+
+  const slotKey = requestIdToSlotKey.get(requestId);
+  const active = slotKey ? slots.get(slotKey) : null;
+  if (active) {
+    return {
+      ready: false,
+      state: 'busy',
+      chat_id: active.chatId,
+      session_id: active.sessionId || null,
+      request_id: requestId,
+      error: 'session_busy',
+      notification: 'Задача выполняется.',
+      current_task: active.task || 'Задача запускается',
+      elapsed_s: Math.max(0, Math.round((Date.now() - active.started) / 1000)),
+      progress: getProgress(slotKey),
+    };
+  }
+
+  const completed = completedByRequestId.get(requestId);
+  if (completed) {
+    return {
+      ready: true,
+      state: 'completed',
+      request_id: requestId,
+      output: {
+        reply: completed.reply,
+        trace: completed.trace || [],
+        session_id: completed.session_id || null,
+        error: completed.error || null,
+      },
+    };
+  }
+
+  return { ready: true, state: 'unknown', request_id: requestId };
 }
 
 function sessionStatus(chatId, sessionId) {
@@ -176,13 +240,17 @@ function sessionStatus(chatId, sessionId) {
   const slotKey = activeSessions.get(sessionKey);
   const active = slotKey ? slots.get(slotKey) : null;
   if (!active) {
-    const completed = completedTasks.get(sessionKey);
+    const completed = completedBySessionKey.get(sessionKey);
     if (completed) {
       return {
         ready: true,
         state: 'completed',
         session_id: sessionId,
-        output: completed,
+        output: {
+          reply: completed.reply,
+          trace: completed.trace || [],
+          error: completed.error || null,
+        },
       };
     }
     return { ready: true, state: 'ready', session_id: sessionId };
@@ -192,6 +260,7 @@ function sessionStatus(chatId, sessionId) {
     ready: false,
     state: 'busy',
     session_id: sessionId,
+    request_id: active.requestId,
     error: 'session_busy',
     notification: 'Сессия занята.',
     current_task: active.task || 'Задача запускается',
@@ -210,6 +279,7 @@ function status() {
       key: k,
       chat_id: v.chatId,
       session_id: v.sessionId,
+      request_id: v.requestId,
       task: v.task,
       elapsed_s: Math.round((Date.now() - v.started) / 1000),
       progress_count: v.progress.length,
@@ -217,4 +287,8 @@ function status() {
   };
 }
 
-module.exports = { acquire, setTask, complete, release, status, updateProgress, getProgress, getProgressBySession, sessionStatus };
+module.exports = {
+  acquire, setTask, complete, release, status,
+  updateProgress, getProgress, getProgressBySession,
+  sessionStatus, getRequestStatus,
+};

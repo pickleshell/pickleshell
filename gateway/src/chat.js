@@ -83,7 +83,7 @@ const chatHandler = async (req, res) => {
       }
     }
 
-    // Unlimited across sessions; one active request per explicit session.
+    // One active request per session (tracks in activeSessions only if session_id provided)
     const acquireResult = concurrency.acquire(chat_id, session_id);
     if (!acquireResult.ok) {
       const progress = concurrency.getProgressBySession(chat_id, session_id);
@@ -123,36 +123,43 @@ const chatHandler = async (req, res) => {
     const taskSnippet = message.replace(/\s+/g, ' ').trim().substring(0, 80);
     concurrency.setTask(slotKey, taskSnippet);
 
-    // Send to agent with streaming progress updates
-    const agentResult = await agent.sendMessage(
+    // Respond immediately — agent runs in background
+    const requestId = acquireResult.request_id;
+    res.json({
+      ok: true,
+      chat_id,
+      request_id: requestId,
+      session_id: session_id || null,
+      state: 'busy',
+    });
+
+    // Fire agent in background (no await)
+    agent.sendMessage(
       chat_id, message, chatConfig, timeoutSec, session_id, resolvedModel,
       fileSummary,
       (event) => concurrency.updateProgress(slotKey, event)
-    );
-
-    // Collect final progress trace
-    const finalProgress = concurrency.getProgress(slotKey);
-    const trace = finalProgress && finalProgress.events.length > 0
-      ? finalProgress.events.map(e => {
-          if (e.type === 'tool') return `${e.status === 'running' ? '...' : '✓'} ${e.tool}: ${e.title}`;
-          if (e.type === 'text') return `→ ${e.text}`;
-          return null;
-        }).filter(Boolean)
-      : [];
-    concurrency.complete(slotKey, { reply: agentResult.reply, trace });
-    concurrency.release(slotKey);
-    slotKey = null;
-
-    const result = {
-      ok: true,
-      chat_id,
-      session_id: agentResult.sessionId || session_id || undefined,
-      reply: agentResult.reply,
-    };
-
-    if (trace.length > 0) result.trace = trace;
-
-    return res.json(result);
+    ).then((agentResult) => {
+      const finalProgress = concurrency.getProgress(slotKey);
+      const trace = finalProgress && finalProgress.events.length > 0
+        ? finalProgress.events.map(e => {
+            if (e.type === 'tool') return `${e.status === 'running' ? '...' : '✓'} ${e.tool}: ${e.title}`;
+            if (e.type === 'text') return `→ ${e.text}`;
+            return null;
+          }).filter(Boolean)
+        : [];
+      concurrency.complete(slotKey, {
+        reply: agentResult.reply,
+        trace,
+        session_id: agentResult.sessionId || session_id || null,
+      });
+      concurrency.release(slotKey);
+      slotKey = null;
+    }).catch((error) => {
+      console.error('Chat error:', error.message);
+      concurrency.complete(slotKey, { error: error.message });
+      concurrency.release(slotKey);
+      slotKey = null;
+    });
 
   } catch (error) {
     if (slotKey) concurrency.release(slotKey);

@@ -66,7 +66,9 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
   mcp.tool(
     "send-chat",
     "Send a message to a local project workspace via the PickleShell Gateway. " +
-      "Returns the agent's reply. Use session_id to continue a previous conversation. " +
+      "The command is submitted asynchronously — returns immediately with session_id. " +
+      "Use session-status to poll for progress and completion. " +
+      "Use session-output to read the final output when state is 'completed'. " +
       "Optionally include small files (base64-encoded, max 20 files, 2 MiB each, 10 MiB total) " +
       "to transfer them into the workspace. " +
       "Use destination_dir to place all files in a specific subdirectory, " +
@@ -158,6 +160,24 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
           throw error;
         }
 
+        // Async mode: agent runs in background
+        if (response.state === "busy") {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                ok: true,
+                chat_id: response.chat_id,
+                request_id: response.request_id,
+                session_id: response.session_id,
+                state: "busy",
+                notification: `Команда принята. request_id: ${response.request_id}. Используй session-status с этим request_id для отслеживания.`,
+              }),
+            }],
+          };
+        }
+
+        // Sync fallback: agent completed inline (legacy)
         return {
           content: [{
             type: "text",
