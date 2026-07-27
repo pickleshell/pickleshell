@@ -1,4 +1,4 @@
-const DEFAULT_TIMEOUT_SEC = 300;
+const DEFAULT_TIMEOUT_SEC = 3600;
 const STALE_BUFFER_SEC = 30;
 
 function parseAgentTimeoutSec(raw) {

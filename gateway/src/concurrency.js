@@ -8,7 +8,7 @@ const completedBySessionKey = new Map();
 const requestIdToSlotKey = new Map();
 const activeByIdempotencyKey = new Map();
 const completedByIdempotencyKey = new Map();
-const COMPLETED_TTL_MS = 60 * 60 * 1000;
+const COMPLETED_TTL_MS = 24 * 60 * 60 * 1000;
 const RETRY_MS = 2000;
 
 let slotCounter = 0;
