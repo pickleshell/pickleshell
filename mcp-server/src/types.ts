@@ -63,6 +63,13 @@ export interface SessionStatusResponse {
     trace?: string[];
     session_id?: string | null;
     error?: string | null;
+    metadata?: {
+      files_modified?: string[];
+      tools_used?: string[];
+      test_result?: { passed: number | null; failed: number | null; total: number | null } | null;
+      git_commit?: string | null;
+      error_class?: string | null;
+    } | null;
   };
 }
 
