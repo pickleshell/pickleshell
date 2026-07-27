@@ -7,7 +7,17 @@
   },
   "allowed_models": [
     "opencode/big-pickle",
-    "opencode/ling-3.0-flash-free"
+    "opencode/deepseek-v4-flash-free",
+    "opencode/mimo-v2.5-free",
+    "opencode/mimo-v2-pro-free",
+    "opencode/laguna-s-2.1-free",
+    "opencode/ling-3.0-flash-free",
+    "opencode/north-mini-code-free",
+    "opencode/nemotron-3-ultra-free",
+    "opencode/minimax-m2.5-free",
+    "opencode/qwen3.6-plus-free",
+    "anthropic/claude-sonnet-4-20250514",
+    "qwen/qwen3-coder"
   ],
   "default_model": "opencode/ling-3.0-flash-free"
 }
