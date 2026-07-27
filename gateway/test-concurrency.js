@@ -115,6 +115,13 @@ assert(bySession.events.length === 2, 'getProgressBySession returns same events'
 const noProgress = concurrency.getProgressBySession('progress-test', 'nonexistent');
 assert(noProgress === null, 'getProgressBySession returns null for unknown session');
 
+const readyStatus = concurrency.sessionStatus('status-test', 'sess-ready');
+assert(readyStatus.ready === true && readyStatus.state === 'ready', 'free session reports ready');
+const busyStatus = concurrency.sessionStatus('progress-test', 'sess-prog');
+assert(busyStatus.ready === false && busyStatus.state === 'busy', 'active session reports busy');
+const newStatus = concurrency.sessionStatus('status-test');
+assert(newStatus.ready === true && newStatus.state === 'new_session', 'missing session reports new_session');
+
 concurrency.release(progressSession.slotKey);
 
 console.log(`All tests: ${passed} passed`);

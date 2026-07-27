@@ -42,6 +42,21 @@ app.get('/health', auth, (req, res) => {
   });
 });
 
+app.get('/status', auth, (req, res) => {
+  const { chat_id: chatId, session_id: sessionId } = req.query;
+  if (!chatId || typeof chatId !== 'string') {
+    return res.status(400).json({ ok: false, error: 'invalid_request', details: 'chat_id is required' });
+  }
+  if (sessionId !== undefined &&
+      (typeof sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId))) {
+    return res.status(400).json({ ok: false, error: 'invalid_request', details: 'session_id is invalid' });
+  }
+  if (!config.getChatConfig(chatId)) {
+    return res.status(404).json({ ok: false, error: 'unknown_chat_id', details: `No workspace configured for chat_id: ${chatId}` });
+  }
+  return res.json({ ok: true, chat_id: chatId, ...concurrency.sessionStatus(chatId, sessionId) });
+});
+
 // Chat endpoint
 app.post('/chat', limiter, auth, chatHandler);
 

@@ -146,6 +146,35 @@ function getProgressBySession(chatId, sessionId) {
   return getProgress(slotKey);
 }
 
+function sessionStatus(chatId, sessionId) {
+  reapStale();
+  const sessionKey = getSessionKey(chatId, sessionId);
+  if (!sessionKey) {
+    return {
+      ready: true,
+      state: 'new_session',
+      session_id: null,
+    };
+  }
+
+  const slotKey = activeSessions.get(sessionKey);
+  const active = slotKey ? slots.get(slotKey) : null;
+  if (!active) {
+    return { ready: true, state: 'ready', session_id: sessionId };
+  }
+
+  return {
+    ready: false,
+    state: 'busy',
+    session_id: sessionId,
+    error: 'session_busy',
+    notification: 'Сессия занята.',
+    current_task: active.task || 'Задача запускается',
+    elapsed_s: Math.max(0, Math.round((Date.now() - active.started) / 1000)),
+    progress: getProgress(slotKey),
+  };
+}
+
 function status() {
   reapStale();
   return {
@@ -163,4 +192,4 @@ function status() {
   };
 }
 
-module.exports = { acquire, setTask, release, status, updateProgress, getProgress, getProgressBySession };
+module.exports = { acquire, setTask, release, status, updateProgress, getProgress, getProgressBySession, sessionStatus };

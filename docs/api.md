@@ -86,3 +86,11 @@ Common errors:
 
 `GET /health` requires Bearer token authentication (same as POST /chat) and returns service
 identity, uptime, configured chat IDs, active work, and concurrency policy.
+
+`GET /status?chat_id=<id>&session_id=<id>` is an authenticated preflight check for
+one session. It returns `state: "ready"` for a free explicit session, or
+`state: "new_session"` when `session_id` is omitted (the next request creates a
+new OpenCode session). An active session returns `state: "busy"` with its task,
+elapsed time, and recent progress. This check is advisory; callers must still
+handle `409 session_busy` from `POST /chat` because another request can start
+between the check and the command.
