@@ -10,6 +10,8 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#requirements)
 
+**Website:** [pickleshell.github.io](https://pickleshell.github.io/)
+
 PickleShell connects ChatGPT to a locally operated
 [OpenCode](https://opencode.ai/) agent through an outbound-only OpenAI Secure
 MCP Tunnel. Your Gateway stays off the public Internet.
