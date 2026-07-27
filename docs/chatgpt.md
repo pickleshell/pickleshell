@@ -10,6 +10,14 @@ PickleShell in ChatGPT.
 - a Secure MCP Tunnel created in the OpenAI Platform;
 - `tunnel-client` running on the PickleShell host.
 
+## Identifier terminology
+
+| Identifier | Meaning |
+|---|---|
+| `chat_id` | Workspace/configuration identifier (maps to a directory on disk) |
+| `session_id` | Real OpenCode conversation identifier (`ses_...`), used to continue context |
+| `request_id` | Single command execution identifier (`req_...`), returned by send-chat |
+
 ## 1. Enable Developer mode
 
 1. Open **Settings → Security and login**.
@@ -72,12 +80,12 @@ After changing the MCP schema:
 4. Enable the updated action;
 5. Start a new conversation.
 
-The connected plugin should expose `send-chat`, `session-status`, and
-`session-output`. If Refresh completes but the old schema still exposes only
-`send-chat`, do a full connector reset: remove the PickleShell plugin/connector,
-create it again using the current PickleShell tunnel, and open a new
-conversation. A new chat alone is not sufficient when ChatGPT has retained the
-old connector registration.
+The connected plugin should expose `send-chat`, `session-status`,
+`session-output`, and `cancel-request`. If Refresh completes but the old schema
+still exposes only `send-chat`, do a full connector reset: remove the
+PickleShell plugin/connector, create it again using the current PickleShell
+tunnel, and open a new conversation. A new chat alone is not sufficient when
+ChatGPT has retained the old connector registration.
 
 ## 8. Test the connection
 
@@ -89,8 +97,11 @@ chat_id: pickleshell-main
 message: Reply with exactly: pong. Do not use tools or modify files.
 ```
 
-For continued work, pass the `session_id` returned by the previous call. Use a
-different session for unrelated work.
+The response includes `request_id` and `state: "busy"`. Use `session-status`
+with the `request_id` to poll progress, then `session-output` to read the reply.
+
+For continued work, pass the `session_id` from the session-output response. Use
+a different session for unrelated work.
 
 ## 9. Plugin tool smoke test
 
@@ -98,31 +109,33 @@ Use this checklist in a fresh ChatGPT conversation after the initial `pong`
 test. All messages below target `chat_id: pickleshell-main` and must not edit
 files.
 
-1. Call `session-status` without `session_id`. Expect `state: "new_session"`.
-2. Call `send-chat` with the message: `Reply exactly: PONG_TEST. Do not use tools or modify files.`
-   Save the returned `session_id` and confirm the reply is `PONG_TEST`.
-3. Call `session-status` with that `session_id`. Expect `state: "completed"`.
-4. Call `session-output` with that `session_id`. Confirm it returns the previous
-   reply and, when available, a `trace`.
-5. Call `send-chat` again with the same session: `Reply exactly: SECOND_TEST. Do not use tools or modify files.`
-6. Call `session-output` after completion. Confirm the buffer now contains
+1. Call `send-chat` with: `Reply exactly: PONG_TEST. Do not use tools or modify files.`
+   Save the returned `request_id` and `session_id`.
+2. Call `session-status` with the `request_id`. Expect `state: "busy"`.
+3. Poll `session-status` until `state: "completed"`.
+4. Call `session-output` with the `request_id`. Confirm it returns `PONG_TEST`
+   and a `trace`.
+5. Call `send-chat` again with the same `session_id`: `Reply exactly: SECOND_TEST. Do not use tools or modify files.`
+6. Call `session-output` with the new `request_id`. Confirm it returns
    `SECOND_TEST`, not `PONG_TEST`.
 
-To test the busy state, start a separate explicit session with:
-`Wait 10 seconds, then reply exactly: BUSY_TEST_DONE. Do not use tools or modify files.`
-While it runs, call `session-status` and `session-output` for that session.
-Both must report `state: "busy"` and include elapsed time or progress. After
-completion, repeat `session-output` and expect `BUSY_TEST_DONE`.
+To test cancel:
+
+1. Call `send-chat` with: `Wait 30 seconds, then reply exactly: CANCEL_TEST. Do not use tools.`
+2. Call `cancel-request` with the `request_id`. Expect `status: "cancelled"`.
+3. Call `session-output` with the `request_id`. Expect error or partial output.
 
 The expected tool sequence is:
 
 ```text
-session-status -> send-chat -> session-status -> session-output
-                -> send-chat -> session-output
+send-chat -> session-status (poll) -> session-output
+          -> send-chat -> session-output
+          -> send-chat -> cancel-request -> session-output
 ```
 
-Receiving `409 session_busy` during a race is expected; wait and repeat the
-status check rather than sending a second command to the same session.
+Receiving `409 session_busy` (state: "rejected") during a race is expected;
+use `next_action: "session-status"` and `retry_after_ms` from the response
+to wait and retry.
 
 ## 10. Async chat smoke test
 

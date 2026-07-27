@@ -21,13 +21,15 @@ export const sessionOutputSchema = {
 export function registerSessionOutput(mcp: any, client: GatewayClient) {
   mcp.tool(
     "session-output",
-    "Read the output of a completed PickleShell task. " +
-      "Provide request_id (from send-chat) or chat_id + session_id. " +
-      "Returns the agent's reply, trace, and any errors.",
+    "Read the full output of a completed PickleShell task. " +
+      "Provide request_id (from send-chat) for an async task, " +
+      "or chat_id + session_id for an OpenCode session. " +
+      "Returns the agent's reply, execution trace, errors, and timestamps. " +
+      "Call this after session-status reports state 'completed'.",
     sessionOutputSchema,
     async (args: { request_id?: string; chat_id?: string; session_id?: string }) => {
       if (args.request_id) {
-        const status = await client.sessionStatus("", undefined, args.request_id);
+        const status = await client.getOutput("", undefined, args.request_id);
         return { content: [{ type: "text", text: JSON.stringify(status) }] };
       }
       if (!args.chat_id || !args.session_id) {
@@ -38,7 +40,7 @@ export function registerSessionOutput(mcp: any, client: GatewayClient) {
           }],
         };
       }
-      const status = await client.sessionStatus(args.chat_id, args.session_id);
+      const status = await client.getOutput(args.chat_id, args.session_id);
       return { content: [{ type: "text", text: JSON.stringify(status) }] };
     },
   );

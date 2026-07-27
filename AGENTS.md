@@ -9,6 +9,19 @@ PickleShell is a Linux-only monorepo:
 - `mcp-server/` is TypeScript/ESM and owns the public MCP schema, Base64 file
   validation, temporary decoding, and Gateway HTTP client.
 
+## Identifier terminology
+
+| Identifier | Meaning |
+|---|---|
+| `chat_id` | Workspace/configuration identifier (maps to a directory on disk) |
+| `session_id` | Real OpenCode conversation identifier (`ses_...`), used to continue context |
+| `request_id` | Single command execution identifier (`req_...`), returned by send-chat |
+
+Rules:
+- `request_id` cannot be used instead of `session_id` (or vice versa);
+- for a new command without `session_id`, use `request_id` to track progress;
+- after completion, the real `session_id` is read from `session-output`.
+
 ## Required checks
 
 Run before every commit:

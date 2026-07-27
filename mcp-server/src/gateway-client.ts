@@ -58,7 +58,7 @@ export class GatewayClient {
     }
   }
 
-  async sessionStatus(chatId: string, sessionId?: string, requestId?: string): Promise<SessionStatusResponse> {
+  async getStatus(chatId: string, sessionId?: string, requestId?: string): Promise<SessionStatusResponse> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeout_ms);
     const params = new URLSearchParams();
@@ -81,6 +81,55 @@ export class GatewayClient {
         throw new GatewayError(response.status, error);
       }
       return (await response.json()) as SessionStatusResponse;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async getOutput(chatId: string, sessionId?: string, requestId?: string): Promise<SessionStatusResponse> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeout_ms);
+    const params = new URLSearchParams();
+    if (requestId) {
+      params.set("request_id", requestId);
+    } else {
+      if (!chatId) throw new Error("chat_id is required when request_id is not provided");
+      params.set("chat_id", chatId);
+      if (sessionId !== undefined) params.set("session_id", sessionId);
+    }
+
+    try {
+      const response = await fetch(`${this.config.url}/output?${params}`, {
+        headers: { Authorization: `Bearer ${this.config.api_key}` },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        console.error(`[gateway] error ${response.status}:`, JSON.stringify(error));
+        throw new GatewayError(response.status, error);
+      }
+      return (await response.json()) as SessionStatusResponse;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async cancelRequest(requestId: string): Promise<{ ok: boolean; status: string; request_id: string }> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeout_ms);
+
+    try {
+      const response = await fetch(`${this.config.url}/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.api_key}`,
+        },
+        body: JSON.stringify({ request_id: requestId }),
+        signal: controller.signal,
+      });
+      const data = await response.json();
+      return data as { ok: boolean; status: string; request_id: string };
     } finally {
       clearTimeout(timeout);
     }

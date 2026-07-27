@@ -1,5 +1,19 @@
 # API Reference
 
+## Identifier terminology
+
+| Identifier | Meaning |
+|---|---|
+| `chat_id` | Workspace/configuration identifier (maps to a directory on disk) |
+| `session_id` | Real OpenCode conversation identifier (`ses_...`), used to continue context |
+| `request_id` | Single command execution identifier (`req_...`), returned by send-chat |
+
+Rules:
+- `request_id` cannot be used instead of `session_id` (or vice versa);
+- for a new command without `session_id`, use `request_id` to track progress;
+- after completion, the real `session_id` is read from `session-output`;
+- errors clearly indicate which identifier is expected.
+
 ## Interface layers
 
 ChatGPT sees MCP tools exposed by the PickleShell plugin. The Gateway HTTP
@@ -8,19 +22,73 @@ they are not separate ChatGPT tools and must not be exposed publicly.
 
 ```text
 ChatGPT
-  -> MCP tool: session-status  -> GET  /status
-  -> MCP tool: send-chat       -> POST /chat -> OpenCode
-  -> MCP tool: session-output  -> GET  /status (reads progress/buffer)
+  -> MCP tool: send-chat       -> POST /chat -> OpenCode (async)
+  -> MCP tool: session-status  -> GET  /status  (lightweight polling)
+  -> MCP tool: session-output  -> GET  /output  (full result reading)
+  -> MCP tool: cancel-request  -> POST /cancel  (abort in-flight task)
 
 Gateway health check           -> GET  /health
 ```
 
-Refresh the PickleShell plugin after MCP tools or their schemas change. A
+Refresh the PickleShell plugin after MCP tools or their schema change. A
 Gateway endpoint change alone does not require a plugin refresh.
+
+## Async workflow
+
+```
+POST /chat { chat_id, message }
+  -> { request_id, state: "busy", next_action: "session-status", retry_after_ms: 2000 }
+
+GET /status?request_id=req_...
+  -> { state: "busy", progress: [...], next_action: "session-status", retry_after_ms: 2000 }
+
+GET /status?request_id=req_...
+  -> { state: "completed", next_action: "session-output", retry_after_ms: 0 }
+
+GET /output?request_id=req_...
+  -> { state: "completed", output: { reply, trace, session_id, error }, next_action: null }
+```
+
+## Response fields
+
+### next_action
+
+Tells the client which tool to call next:
+
+| State | next_action | Meaning |
+|---|---|---|
+| `busy` | `"session-status"` | Keep polling |
+| `completed` (status) | `"session-output"` | Read the result |
+| `completed` (output) | `null` | Done |
+| `rejected` (409) | `"session-status"` | Wait and retry |
+| `unknown` | `null` | No action |
+
+### retry_after_ms
+
+Suggested polling interval in milliseconds:
+
+| State | retry_after_ms |
+|---|---|
+| `busy` | 2000 |
+| `completed` | 0 |
+| `rejected` (409) | 2000 |
+
+### Timestamps (ISO 8601 UTC)
+
+| Field | Meaning | busy | completed |
+|---|---|---|---|
+| `created_at` | Request accepted by Gateway | present | present |
+| `started_at` | OpenCode process launched | null or present | present |
+| `completed_at` | Execution finished | null | present |
+| `queue_ms` | `started_at - created_at` | null or number | number |
+| `execution_ms` | `completed_at - started_at` | null or number | number |
 
 ## MCP tool: `send-chat`
 
-This is the public PickleShell interface exposed to ChatGPT.
+Submit a command asynchronously. The response returns immediately with
+`request_id` and `state: "busy"`. For a new conversation, `session_id` may be
+null until execution completes. After completion, the real OpenCode `session_id`
+appears in the session-output response.
 
 ```json
 {
@@ -43,52 +111,91 @@ This is the public PickleShell interface exposed to ChatGPT.
 
 `chat_id` and `message` are required. Other fields are optional.
 
-File limits:
+File limits: 20 files per request, 2 MiB per file, 10 MiB total.
 
-- 20 files per request;
-- 2 MiB decoded per file;
-- 10 MiB decoded total.
+Destination resolution: `files[].dest_dir` > `destination_dir` > `.inbox/<request-id>/`.
 
-Destination resolution:
-
-1. `files[].dest_dir`;
-2. request-level `destination_dir`;
-3. `.inbox/<request-id>/`.
-
-All destinations are relative to the configured workspace. `overwrite`
-defaults to false.
-
-When an explicit session is already active, `send-chat` returns a short
-notification containing the current task and elapsed time. It does not queue
-the second request.
-
-## Internal HTTP Gateway
-
-The MCP server sends authenticated requests to `POST /chat`. This interface is
-for same-host component communication and must not be exposed publicly.
-
-The internal request uses `file_paths`, not Base64 `files`:
+### Response (async)
 
 ```json
 {
+  "ok": true,
   "chat_id": "pickleshell-main",
-  "message": "Review the delivered file",
-  "session_id": "ses_example",
-  "model": "opencode/big-pickle",
-  "destination_dir": "docs",
-  "file_paths": [
-    {
-      "name": "notes.txt",
-      "path": "/home/pickleshell/.mcp-temp/request/notes.txt",
-      "mime_type": "text/plain",
-      "dest_dir": "docs",
-      "overwrite": false
-    }
-  ]
+  "request_id": "req_abc123",
+  "session_id": null,
+  "state": "busy",
+  "next_action": "session-status",
+  "retry_after_ms": 2000
 }
 ```
 
-Common errors:
+### Error: session busy (409)
+
+```json
+{
+  "ok": false,
+  "state": "rejected",
+  "error": "session_busy",
+  "current_task": "Build forecast widget",
+  "elapsed_s": 42,
+  "next_action": "session-status",
+  "retry_after_ms": 2000
+}
+```
+
+## MCP tool: `session-status`
+
+Lightweight status check (no output included). Use `request_id` to track a
+specific async execution, or `chat_id` + `session_id` to check an OpenCode
+session.
+
+States: `new_session`, `busy`, `completed`, `ready`, `unknown`.
+
+Poll with the `retry_after_ms` interval from the response.
+
+## MCP tool: `session-output`
+
+Read the full output of a completed task. Provide `request_id` for an async
+task, or `chat_id` + `session_id` for an OpenCode session. Returns the agent's
+reply, execution trace, errors, and timestamps. Call after session-status
+reports `state: "completed"`.
+
+## MCP tool: `cancel-request`
+
+Cancel an in-flight task by `request_id`. Returns: `cancelled`,
+`already_completed`, or `not_found`.
+
+## Internal HTTP Gateway
+
+The MCP server sends authenticated requests to the Gateway endpoints. This
+interface is for same-host component communication and must not be exposed
+publicly.
+
+### POST /chat
+
+Internal request uses `file_paths` (not Base64 `files`).
+
+### GET /status
+
+`?request_id=req_...` — lightweight status by request (no output).
+`?chat_id=<id>&session_id=<id>` — lightweight status by session.
+
+### GET /output
+
+`?request_id=req_...` — full output by request.
+`?chat_id=<id>&session_id=<id>` — full output by session.
+
+### POST /cancel
+
+Body: `{ "request_id": "req_..." }`. Returns `cancelled`, `already_completed`,
+or `not_found`.
+
+### GET /health
+
+Requires Bearer token authentication. Returns service identity, uptime,
+configured chat IDs, active work, and concurrency policy.
+
+### Error responses
 
 | Status | Error |
 |---|---|
@@ -101,20 +208,3 @@ Common errors:
 | 429 | `rate_limit` |
 | 502 | `agent_error` |
 | 504 | `agent_timeout` |
-
-`GET /health` requires Bearer token authentication (same as POST /chat) and returns service
-identity, uptime, configured chat IDs, active work, and concurrency policy.
-
-`GET /status?chat_id=<id>&session_id=<id>` is an authenticated preflight check for
-one session. It returns `state: "ready"` for a free explicit session,
-`state: "new_session"` when `session_id` is omitted (the next request creates a
-new OpenCode session), `state: "busy"` with the current task and progress while
-running, or `state: "completed"` with the buffered reply and trace after the
-last command finishes. The completed buffer is cleared when the next command
-for that explicit session starts and expires automatically after one hour.
-This check is advisory; callers must still handle `409 session_busy` from
-`POST /chat` because another request can start between the check and the command.
-
-The MCP `session-output` tool reads this same buffer. Read it after observing
-`ready`/`completed` and before sending the next command; sessions without an
-explicit `session_id` do not have a readable persistent buffer.

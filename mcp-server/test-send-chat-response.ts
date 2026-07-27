@@ -88,8 +88,9 @@ const busyResult = await busyHandler({
   session_id: "ses_busy789",
 });
 const busyPayload = JSON.parse(busyResult.content[0].text);
-if (busyPayload.state !== "busy" || busyPayload.error !== "session_busy" ||
-    busyPayload.current_task !== "building" || busyPayload.elapsed_s !== 42) {
+if (busyPayload.state !== "rejected" || busyPayload.error !== "session_busy" ||
+    busyPayload.current_task !== "building" || busyPayload.elapsed_s !== 42 ||
+    busyPayload.next_action !== "session-status" || busyPayload.retry_after_ms !== 2000) {
   throw new Error(`Unexpected busy payload: ${busyResult.content[0].text}`);
 }
 

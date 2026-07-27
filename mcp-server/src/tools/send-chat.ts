@@ -65,10 +65,12 @@ export const sendChatSchema = {
 export function registerSendChat(mcp: any, client: GatewayClient) {
   mcp.tool(
     "send-chat",
-    "Send a message to a local project workspace via the PickleShell Gateway. " +
-      "The command is submitted asynchronously — returns immediately with session_id. " +
-      "Use session-status to poll for progress and completion. " +
-      "Use session-output to read the final output when state is 'completed'. " +
+    "Submit a command to a local project workspace via PickleShell. " +
+      "The command executes asynchronously — the response returns immediately with request_id and state 'busy'. " +
+      "For a new conversation, session_id may be null until execution completes. " +
+      "After completion, the real OpenCode session_id appears in the session-output response. " +
+      "Use session-status with request_id to poll progress, " +
+      "then use session-output to read the final reply and trace. " +
       "Optionally include small files (base64-encoded, max 20 files, 2 MiB each, 10 MiB total) " +
       "to transfer them into the workspace. " +
       "Use destination_dir to place all files in a specific subdirectory, " +
@@ -146,12 +148,14 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
                   text: JSON.stringify({
                     ok: false,
                     chat_id: args.chat_id,
-                    state: "busy",
+                    state: "rejected",
                     error: "session_busy",
                     notification: `Сессия занята: ${task}${suffix}.`,
                     current_task: task,
                     elapsed_s: elapsed,
                     progress: error.payload.progress,
+                    next_action: "session-status",
+                    retry_after_ms: 2000,
                   }),
                 },
               ],
@@ -171,6 +175,8 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
                 request_id: response.request_id,
                 session_id: response.session_id,
                 state: "busy",
+                next_action: response.next_action,
+                retry_after_ms: response.retry_after_ms,
                 notification: `Команда принята. request_id: ${response.request_id}. Используй session-status с этим request_id для отслеживания.`,
               }),
             }],

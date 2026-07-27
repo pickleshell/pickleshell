@@ -21,14 +21,17 @@ export const sessionStatusSchema = {
 export function registerSessionStatus(mcp: any, client: GatewayClient) {
   mcp.tool(
     "session-status",
-    "Check the status of a PickleShell task or session. " +
-      "Provide request_id (from send-chat) to track an async task, " +
+    "Check the status of a PickleShell task or session (lightweight — no output included). " +
+      "Provide request_id (from send-chat) to track a specific async execution, " +
       "or chat_id + session_id to check an OpenCode session. " +
-      "Returns state: busy/completed/ready/new_session/unknown.",
+      "States: new_session (no session_id provided), busy (executing), " +
+      "completed (finished, use session-output to read result), " +
+      "ready (session_id exists but idle), unknown (request_id not found). " +
+      "Poll with the retry_after_ms interval from the response.",
     sessionStatusSchema,
     async (args: { request_id?: string; chat_id?: string; session_id?: string }) => {
       if (args.request_id) {
-        const status = await client.sessionStatus("", undefined, args.request_id);
+        const status = await client.getStatus("", undefined, args.request_id);
         return { content: [{ type: "text", text: JSON.stringify(status) }] };
       }
       if (!args.chat_id) {
@@ -39,7 +42,7 @@ export function registerSessionStatus(mcp: any, client: GatewayClient) {
           }],
         };
       }
-      const status = await client.sessionStatus(args.chat_id, args.session_id);
+      const status = await client.getStatus(args.chat_id, args.session_id);
       return { content: [{ type: "text", text: JSON.stringify(status) }] };
     },
   );

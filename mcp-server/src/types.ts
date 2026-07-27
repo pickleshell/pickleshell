@@ -29,7 +29,11 @@ export interface ChatResponse {
   chat_id: string;
   request_id: string;
   session_id: string | null;
-  state?: "busy" | "completed";
+  state: "busy" | "completed" | "rejected";
+  next_action: string | null;
+  retry_after_ms: number;
+  created_at?: string;
+  started_at?: string;
   reply?: string;
   trace?: string[];
 }
@@ -41,11 +45,18 @@ export interface SessionStatusResponse {
   request_id?: string;
   ready: boolean;
   state: "ready" | "busy" | "new_session" | "completed" | "unknown";
+  next_action: string | null;
+  retry_after_ms: number;
   error?: string;
   notification?: string;
   current_task?: string;
   elapsed_s?: number;
   progress?: unknown;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  queue_ms?: number | null;
+  execution_ms?: number | null;
   output?: {
     reply?: string;
     trace?: string[];
