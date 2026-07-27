@@ -72,6 +72,13 @@ After changing the MCP schema:
 4. Enable the updated action;
 5. Start a new conversation.
 
+The connected plugin should expose `send-chat`, `session-status`, and
+`session-output`. If Refresh completes but the old schema still exposes only
+`send-chat`, do a full connector reset: remove the PickleShell plugin/connector,
+create it again using the current PickleShell tunnel, and open a new
+conversation. A new chat alone is not sufficient when ChatGPT has retained the
+old connector registration.
+
 ## 8. Test the connection
 
 Test:
