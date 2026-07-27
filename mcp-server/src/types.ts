@@ -31,6 +31,19 @@ export interface ChatResponse {
   reply: string;
 }
 
+export interface SessionStatusResponse {
+  ok: boolean;
+  chat_id: string;
+  session_id: string | null;
+  ready: boolean;
+  state: "ready" | "busy" | "new_session";
+  error?: string;
+  notification?: string;
+  current_task?: string;
+  elapsed_s?: number;
+  progress?: unknown;
+}
+
 export interface HealthResponse {
   ok: boolean;
   service: string;

@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { loadConfig } from "./config.js";
 import { GatewayClient } from "./gateway-client.js";
 import { registerSendChat } from "./tools/send-chat.js";
+import { registerSessionStatus } from "./tools/session-status.js";
 
 const config = loadConfig();
 const client = new GatewayClient(config);
@@ -12,6 +13,7 @@ const mcp = new McpServer({
 });
 
 registerSendChat(mcp, client);
+registerSessionStatus(mcp, client);
 
 async function main() {
   const transport = new StdioServerTransport();
