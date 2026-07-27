@@ -7,6 +7,7 @@ const completedByRequestId = new Map();
 const completedBySessionKey = new Map();
 const requestIdToSlotKey = new Map();
 const COMPLETED_TTL_MS = 60 * 60 * 1000;
+const RETRY_MS = 2000;
 
 let slotCounter = 0;
 
@@ -18,6 +19,10 @@ function generateRequestId() {
   const ts = Date.now().toString(36);
   const rand = crypto.randomBytes(4).toString('hex');
   return `req_${ts}-${rand}`;
+}
+
+function isoNow() {
+  return new Date().toISOString();
 }
 
 function release(slotKey) {
@@ -63,6 +68,8 @@ function acquire(chatId, sessionId) {
       notification: 'Сессия занята.',
       current_task: active?.task || 'Задача запускается',
       elapsed_s: elapsedS,
+      next_action: 'session-status',
+      retry_after_ms: RETRY_MS,
     };
   }
 
@@ -71,6 +78,7 @@ function acquire(chatId, sessionId) {
   }
 
   const requestId = generateRequestId();
+  const createdAt = isoNow();
   const key = `slot:${++slotCounter}`;
   slots.set(key, {
     chatId,
@@ -80,6 +88,10 @@ function acquire(chatId, sessionId) {
     task: null,
     progress: [],
     started: Date.now(),
+    createdAt,
+    startedAt: null,
+    cancelFn: null,
+    cancelling: false,
   });
   if (sessionKey) {
     activeSessions.set(sessionKey, key);
@@ -89,24 +101,98 @@ function acquire(chatId, sessionId) {
   return { ok: true, slotKey: key, request_id: requestId };
 }
 
+function setStarted(slotKey) {
+  const entry = slots.get(slotKey);
+  if (entry && !entry.startedAt) {
+    entry.startedAt = isoNow();
+  }
+}
+
+function setCancelFn(slotKey, fn) {
+  const entry = slots.get(slotKey);
+  if (entry) entry.cancelFn = fn;
+}
+
+function cancelRequest(requestId) {
+  const slotKey = requestIdToSlotKey.get(requestId);
+  const active = slotKey ? slots.get(slotKey) : null;
+
+  if (active) {
+    if (active.cancelling) {
+      return { ok: false, status: 'already_cancelling', request_id: requestId };
+    }
+    active.cancelling = true;
+    if (active.cancelFn) {
+      try { active.cancelFn(); } catch (_) {}
+    }
+    return { ok: true, status: 'cancelling', request_id: requestId };
+  }
+
+  const completed = completedByRequestId.get(requestId);
+  if (completed) {
+    return { ok: false, status: 'already_completed', request_id: requestId };
+  }
+
+  return { ok: false, status: 'not_found', request_id: requestId };
+}
+
 function complete(slotKey, output) {
   const entry = slots.get(slotKey);
   if (!entry) return;
 
+  const completedAt = isoNow();
   const record = {
     ...output,
-    completedAt: Date.now(),
+    completedAt,
+    createdAt: entry.createdAt,
+    startedAt: entry.startedAt,
+    queue_ms: entry.startedAt
+      ? Math.max(0, new Date(entry.startedAt) - new Date(entry.createdAt))
+      : null,
+    execution_ms: entry.startedAt
+      ? Math.max(0, new Date(completedAt) - new Date(entry.startedAt))
+      : null,
   };
 
-  // Store by request_id (primary)
   if (entry.requestId) {
     completedByRequestId.set(entry.requestId, record);
   }
 
-  // Store by sessionKey (backward compat for sync callers)
   if (entry.sessionKey) {
     completedBySessionKey.set(entry.sessionKey, record);
   }
+}
+
+function completeCancel(slotKey, output) {
+  const entry = slots.get(slotKey);
+  if (!entry) return;
+
+  const completedAt = isoNow();
+  const record = {
+    reply: null,
+    trace: [],
+    cancelled: true,
+    ...output,
+    completedAt,
+    createdAt: entry.createdAt,
+    startedAt: entry.startedAt,
+    queue_ms: entry.startedAt
+      ? Math.max(0, new Date(entry.startedAt) - new Date(entry.createdAt))
+      : null,
+    execution_ms: entry.startedAt
+      ? Math.max(0, new Date(completedAt) - new Date(entry.startedAt))
+      : null,
+  };
+
+  if (entry.requestId) {
+    completedByRequestId.set(entry.requestId, record);
+  }
+
+  if (entry.sessionKey) {
+    completedBySessionKey.set(entry.sessionKey, record);
+  }
+
+  release(slotKey);
 }
 
 function setTask(slotKey, task) {
@@ -188,23 +274,77 @@ function getProgressBySession(chatId, sessionId) {
   return getProgress(slotKey);
 }
 
+function busyTimestamps(entry) {
+  const now = isoNow();
+  return {
+    created_at: entry.createdAt,
+    started_at: entry.startedAt,
+    completed_at: null,
+    queue_ms: entry.startedAt
+      ? Math.max(0, new Date(entry.startedAt) - new Date(entry.createdAt))
+      : null,
+    execution_ms: entry.startedAt
+      ? Math.max(0, new Date(now) - new Date(entry.startedAt))
+      : null,
+  };
+}
+
+// Lightweight: state + progress only (no output) — for polling
 function getRequestStatus(requestId) {
   reapStale();
 
   const slotKey = requestIdToSlotKey.get(requestId);
   const active = slotKey ? slots.get(slotKey) : null;
   if (active) {
+    const state = active.cancelling ? 'cancelling' : 'busy';
     return {
       ready: false,
-      state: 'busy',
+      state,
       chat_id: active.chatId,
       session_id: active.sessionId || null,
       request_id: requestId,
-      error: 'session_busy',
-      notification: 'Задача выполняется.',
       current_task: active.task || 'Задача запускается',
       elapsed_s: Math.max(0, Math.round((Date.now() - active.started) / 1000)),
       progress: getProgress(slotKey),
+      next_action: 'session-status',
+      retry_after_ms: RETRY_MS,
+      ...busyTimestamps(active),
+    };
+  }
+
+  if (completedByRequestId.has(requestId)) {
+    return {
+      ready: true,
+      state: 'completed',
+      request_id: requestId,
+      next_action: 'session-output',
+      retry_after_ms: 0,
+    };
+  }
+
+  return { ready: true, state: 'unknown', request_id: requestId, next_action: null, retry_after_ms: 0 };
+}
+
+// Full output — for reading results
+function getRequestOutput(requestId) {
+  reapStale();
+
+  const slotKey = requestIdToSlotKey.get(requestId);
+  const active = slotKey ? slots.get(slotKey) : null;
+  if (active) {
+    const state = active.cancelling ? 'cancelling' : 'busy';
+    return {
+      ready: false,
+      state,
+      chat_id: active.chatId,
+      session_id: active.sessionId || null,
+      request_id: requestId,
+      current_task: active.task || 'Задача запускается',
+      elapsed_s: Math.max(0, Math.round((Date.now() - active.started) / 1000)),
+      progress: getProgress(slotKey),
+      next_action: 'session-status',
+      retry_after_ms: RETRY_MS,
+      ...busyTimestamps(active),
     };
   }
 
@@ -219,11 +359,19 @@ function getRequestStatus(requestId) {
         trace: completed.trace || [],
         session_id: completed.session_id || null,
         error: completed.error || null,
+        cancelled: completed.cancelled || false,
       },
+      next_action: null,
+      retry_after_ms: 0,
+      created_at: completed.createdAt,
+      started_at: completed.startedAt,
+      completed_at: completed.completedAt,
+      queue_ms: completed.queue_ms,
+      execution_ms: completed.execution_ms,
     };
   }
 
-  return { ready: true, state: 'unknown', request_id: requestId };
+  return { ready: true, state: 'unknown', request_id: requestId, next_action: null, retry_after_ms: 0 };
 }
 
 function sessionStatus(chatId, sessionId) {
@@ -234,6 +382,8 @@ function sessionStatus(chatId, sessionId) {
       ready: true,
       state: 'new_session',
       session_id: null,
+      next_action: null,
+      retry_after_ms: 0,
     };
   }
 
@@ -246,27 +396,72 @@ function sessionStatus(chatId, sessionId) {
         ready: true,
         state: 'completed',
         session_id: sessionId,
-        output: {
-          reply: completed.reply,
-          trace: completed.trace || [],
-          error: completed.error || null,
-        },
+        next_action: 'session-output',
+        retry_after_ms: 0,
       };
     }
-    return { ready: true, state: 'ready', session_id: sessionId };
+    return { ready: true, state: 'ready', session_id: sessionId, next_action: null, retry_after_ms: 0 };
   }
 
   return {
     ready: false,
-    state: 'busy',
+    state: active.cancelling ? 'cancelling' : 'busy',
     session_id: sessionId,
     request_id: active.requestId,
-    error: 'session_busy',
-    notification: 'Сессия занята.',
     current_task: active.task || 'Задача запускается',
     elapsed_s: Math.max(0, Math.round((Date.now() - active.started) / 1000)),
     progress: getProgress(slotKey),
+    next_action: 'session-status',
+    retry_after_ms: RETRY_MS,
+    ...busyTimestamps(active),
   };
+}
+
+function sessionOutput(chatId, sessionId) {
+  reapStale();
+  const sessionKey = getSessionKey(chatId, sessionId);
+  if (!sessionKey) {
+    return { ready: true, state: 'new_session', session_id: null, next_action: null, retry_after_ms: 0 };
+  }
+
+  const slotKey = activeSessions.get(sessionKey);
+  const active = slotKey ? slots.get(slotKey) : null;
+  if (active) {
+    return {
+      ready: false,
+      state: active.cancelling ? 'cancelling' : 'busy',
+      session_id: sessionId,
+      request_id: active.requestId,
+      progress: getProgress(slotKey),
+      next_action: 'session-status',
+      retry_after_ms: RETRY_MS,
+      ...busyTimestamps(active),
+    };
+  }
+
+  const completed = completedBySessionKey.get(sessionKey);
+  if (completed) {
+    return {
+      ready: true,
+      state: 'completed',
+      session_id: sessionId,
+      output: {
+        reply: completed.reply,
+        trace: completed.trace || [],
+        error: completed.error || null,
+        cancelled: completed.cancelled || false,
+      },
+      next_action: null,
+      retry_after_ms: 0,
+      created_at: completed.createdAt,
+      started_at: completed.startedAt,
+      completed_at: completed.completedAt,
+      queue_ms: completed.queue_ms,
+      execution_ms: completed.execution_ms,
+    };
+  }
+
+  return { ready: true, state: 'ready', session_id: sessionId, next_action: null, retry_after_ms: 0 };
 }
 
 function status() {
@@ -288,7 +483,9 @@ function status() {
 }
 
 module.exports = {
-  acquire, setTask, complete, release, status,
+  acquire, setTask, complete, completeCancel, release, status, setStarted,
   updateProgress, getProgress, getProgressBySession,
-  sessionStatus, getRequestStatus,
+  sessionStatus, sessionOutput,
+  getRequestStatus, getRequestOutput,
+  setCancelFn, cancelRequest,
 };

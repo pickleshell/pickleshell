@@ -83,19 +83,21 @@ const chatHandler = async (req, res) => {
       }
     }
 
-    // One active request per session (tracks in activeSessions only if session_id provided)
+    // One active request per session
     const acquireResult = concurrency.acquire(chat_id, session_id);
     if (!acquireResult.ok) {
       const progress = concurrency.getProgressBySession(chat_id, session_id);
       return res.status(409).json({
         ok: false,
         chat_id,
-        status: 'busy',
+        state: 'rejected',
         error: acquireResult.error,
         notification: acquireResult.notification,
         current_task: acquireResult.current_task,
         elapsed_s: acquireResult.elapsed_s,
         progress: progress || undefined,
+        next_action: acquireResult.next_action,
+        retry_after_ms: acquireResult.retry_after_ms,
       });
     }
     slotKey = acquireResult.slotKey;
@@ -131,14 +133,32 @@ const chatHandler = async (req, res) => {
       request_id: requestId,
       session_id: session_id || null,
       state: 'busy',
+      next_action: 'session-status',
+      retry_after_ms: 2000,
     });
 
-    // Fire agent in background (no await)
-    agent.sendMessage(
+    // Mark agent as started (sets started_at timestamp)
+    concurrency.setStarted(slotKey);
+
+    // Fire agent in background
+    const { promise, cancel } = agent.sendMessage(
       chat_id, message, chatConfig, timeoutSec, session_id, resolvedModel,
       fileSummary,
       (event) => concurrency.updateProgress(slotKey, event)
-    ).then((agentResult) => {
+    );
+
+    // Store cancel function for cancel-request tool
+    concurrency.setCancelFn(slotKey, cancel);
+
+    promise.then((agentResult) => {
+      if (agentResult.cancelled) {
+        concurrency.completeCancel(slotKey, {
+          session_id: agentResult.sessionId || session_id || null,
+        });
+        slotKey = null;
+        return;
+      }
+
       const finalProgress = concurrency.getProgress(slotKey);
       const trace = finalProgress && finalProgress.events.length > 0
         ? finalProgress.events.map(e => {

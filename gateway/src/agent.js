@@ -53,7 +53,7 @@ const parseJsonOutput = (stdout) => {
   return { text: textParts.join('\n'), sessionId };
 };
 
-const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, model, fileSummary, onProgress) => {
+const sendMessage = (chatId, message, chatConfig, timeoutSec, sessionId, model, fileSummary, onProgress) => {
   const filePrompt = fileSummary
     ? require('./file-transfer').buildFileSummaryPrompt(fileSummary)
     : '';
@@ -75,8 +75,13 @@ const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, m
     model || '',
   ];
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn('bash', args, {
+  let proc = null;
+  let settled = false;
+  let cancelled = false;
+  let timer = null;
+
+  const promise = new Promise((resolve, reject) => {
+    proc = spawn('bash', args, {
       cwd: chatConfig.workspace,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
@@ -135,9 +140,7 @@ const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, m
       stderr += chunk.toString();
     });
 
-    let settled = false;
-
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       proc.kill('SIGKILL');
@@ -173,6 +176,12 @@ const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, m
         } catch (e) {}
       }
 
+      if (cancelled) {
+        console.log(`[OPENCODE] Cancelled for ${chatId} session=${sessionIdFound || '(none)'} code=${code}`);
+        resolve({ reply: null, sessionId: sessionIdFound, cancelled: true });
+        return;
+      }
+
       if (agentError) {
         reject(new Error(agentError));
         return;
@@ -189,10 +198,30 @@ const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, m
 
     proc.on('error', (err) => {
       clearTimeout(timer);
+      if (cancelled) {
+        console.error(`[OPENCODE] Spawn error after cancel for ${chatId}:`, err.message);
+        resolve({ reply: null, sessionId: null, cancelled: true });
+        return;
+      }
       console.error(`[OPENCODE] Spawn error for ${chatId}:`, err.message);
       reject(err);
     });
   });
+
+  const cancel = () => {
+    if (settled || cancelled) return false;
+    cancelled = true;
+    if (timer) clearTimeout(timer);
+    if (proc && !proc.killed) {
+      proc.kill('SIGTERM');
+      setTimeout(() => {
+        if (proc && !proc.killed) proc.kill('SIGKILL');
+      }, 2000);
+    }
+    return true;
+  };
+
+  return { promise, cancel };
 };
 
 module.exports = {

@@ -125,9 +125,14 @@ assert(newStatus.ready === true && newStatus.state === 'new_session', 'missing s
 concurrency.complete(progressSession.slotKey, { reply: 'Done', trace: ['✓ write: test.txt'] });
 concurrency.release(progressSession.slotKey);
 const completedStatus = concurrency.sessionStatus('progress-test', 'sess-prog');
-assert(completedStatus.state === 'completed', 'completed session exposes buffered output');
-assert(completedStatus.output.reply === 'Done', 'completed buffer includes reply');
-assert(completedStatus.output.trace.length === 1, 'completed buffer includes trace');
+assert(completedStatus.state === 'completed', 'completed session reports completed');
+assert(completedStatus.output === undefined, 'sessionStatus is lightweight — no output');
+
+// sessionOutput returns full output
+const completedOutput = concurrency.sessionOutput('progress-test', 'sess-prog');
+assert(completedOutput.state === 'completed', 'sessionOutput reports completed');
+assert(completedOutput.output.reply === 'Done', 'sessionOutput includes reply');
+assert(completedOutput.output.trace.length === 1, 'sessionOutput includes trace');
 
 const nextCommand = concurrency.acquire('progress-test', 'sess-prog');
 assert(nextCommand.ok, 'same session accepts next command');
@@ -162,13 +167,22 @@ concurrency.release(reqTest.slotKey);
 
 const reqCompleted = concurrency.getRequestStatus(reqTest.request_id);
 assert(reqCompleted.state === 'completed', 'getRequestStatus returns completed after completion');
-assert(reqCompleted.output.reply === 'Request done', 'completed output includes reply');
-assert(reqCompleted.output.session_id === 'sess-req', 'completed output includes session_id');
+assert(reqCompleted.output === undefined, 'getRequestStatus is lightweight — no output');
 
-// Test: sessionStatus also has the result (backward compat via sessionKey)
+const reqOutput = concurrency.getRequestOutput(reqTest.request_id);
+assert(reqOutput.state === 'completed', 'getRequestOutput returns completed');
+assert(reqOutput.output.reply === 'Request done', 'getRequestOutput includes reply');
+assert(reqOutput.output.session_id === 'sess-req', 'getRequestOutput includes session_id');
+
+// Test: sessionStatus also reports completed (lightweight, no output)
 const sessCompleted = concurrency.sessionStatus('req-test', 'sess-req');
 assert(sessCompleted.state === 'completed', 'sessionStatus also returns completed for same session');
-assert(sessCompleted.output.reply === 'Request done', 'sessionStatus output matches');
+assert(sessCompleted.output === undefined, 'sessionStatus is lightweight — no output');
+
+// Test: sessionOutput returns full output (backward compat via sessionKey)
+const sessOutput = concurrency.sessionOutput('req-test', 'sess-req');
+assert(sessOutput.state === 'completed', 'sessionOutput returns completed');
+assert(sessOutput.output.reply === 'Request done', 'sessionOutput includes reply');
 
 // === Critical: no-session-id flow ===
 // Simulates: POST /chat without session_id → busy → complete → status by request_id
@@ -186,13 +200,207 @@ assert(noSessionBusy.session_id === null, 'no-session request has null session_i
 concurrency.complete(noSession.slotKey, { reply: 'pong', trace: [], session_id: null });
 concurrency.release(noSession.slotKey);
 
+// getRequestStatus (lightweight) — NO output even when completed
 const noSessionDone = concurrency.getRequestStatus(noSession.request_id);
 assert(noSessionDone.state === 'completed', 'no-session request shows completed by request_id');
-assert(noSessionDone.output.reply === 'pong', 'no-session completed output includes reply');
-assert(noSessionDone.output.session_id === null, 'no-session completed has null session_id');
+assert(noSessionDone.output === undefined, 'getRequestStatus does NOT include output');
+
+// getRequestOutput (full) — HAS output
+const noSessionOutput = concurrency.getRequestOutput(noSession.request_id);
+assert(noSessionOutput.state === 'completed', 'getRequestOutput shows completed');
+assert(noSessionOutput.output.reply === 'pong', 'getRequestOutput includes reply');
+assert(noSessionOutput.output.session_id === null, 'getRequestOutput includes session_id');
 
 // sessionStatus without session_id returns new_session (no data for anonymous)
 const noSessionStatus = concurrency.sessionStatus('fire-and-forget');
 assert(noSessionStatus.state === 'new_session', 'sessionStatus without session_id still returns new_session');
 
 console.log(`request_id tests: ${passed} passed`);
+
+// === status/output split tests ===
+console.log('\n=== status/output split ===');
+
+const splitTest = concurrency.acquire('split-test', 'sess-split');
+assert(splitTest.ok, 'split test acquires');
+concurrency.setTask(splitTest.slotKey, 'Split task');
+
+// Busy: both have progress
+const splitBusyStatus = concurrency.getRequestStatus(splitTest.request_id);
+assert(splitBusyStatus.state === 'busy', 'split busy status');
+assert(splitBusyStatus.progress !== undefined, 'split busy status has progress');
+
+const splitBusyOutput = concurrency.getRequestOutput(splitTest.request_id);
+assert(splitBusyOutput.state === 'busy', 'split busy output');
+assert(splitBusyOutput.output === undefined, 'split busy output has no output yet');
+
+// Complete
+concurrency.complete(splitTest.slotKey, { reply: 'Split result', trace: ['✓ done'], session_id: 'sess-split' });
+concurrency.release(splitTest.slotKey);
+
+// Completed: status has NO output, output HAS output
+const splitDoneStatus = concurrency.getRequestStatus(splitTest.request_id);
+assert(splitDoneStatus.state === 'completed', 'split done status');
+assert(splitDoneStatus.output === undefined, 'split done status has NO output');
+
+const splitDoneOutput = concurrency.getRequestOutput(splitTest.request_id);
+assert(splitDoneOutput.state === 'completed', 'split done output');
+assert(splitDoneOutput.output.reply === 'Split result', 'split done output has reply');
+assert(splitDoneOutput.output.trace.length === 1, 'split done output has trace');
+assert(splitDoneOutput.output.session_id === 'sess-split', 'split done output has session_id');
+
+console.log(`status/output split tests: ${passed} passed`);
+
+// === cancel tests ===
+console.log('\n=== cancel tests ===');
+
+// Cancel active request — slot stays locked
+const cancelTarget = concurrency.acquire('cancel-test', 'sess-cancel');
+assert(cancelTarget.ok, 'cancel target acquires');
+concurrency.setTask(cancelTarget.slotKey, 'Should be cancelled');
+let cancelCalled = false;
+concurrency.setCancelFn(cancelTarget.slotKey, () => { cancelCalled = true; });
+
+const cancelResult = concurrency.cancelRequest(cancelTarget.request_id);
+assert(cancelResult.ok, 'cancel returns ok');
+assert(cancelResult.status === 'cancelling', 'cancel status is cancelling');
+assert(cancelCalled, 'cancel function was called');
+
+// Slot is still locked — new command to same session gets 409
+const raceAttempt = concurrency.acquire('cancel-test', 'sess-cancel');
+assert(!raceAttempt.ok, 'new command blocked during cancelling');
+assert(raceAttempt.error === 'session_busy', 'blocked command returns session_busy');
+
+// Status shows cancelling (not busy, not unknown)
+const cancellingStatus = concurrency.getRequestStatus(cancelTarget.request_id);
+assert(cancellingStatus.state === 'cancelling', 'status shows cancelling during cancel');
+assert(cancellingStatus.next_action === 'session-status', 'cancelling next_action is session-status');
+
+// Double cancel returns already_cancelling
+const doubleCancel = concurrency.cancelRequest(cancelTarget.request_id);
+assert(!doubleCancel.ok, 'double cancel returns not ok');
+assert(doubleCancel.status === 'already_cancelling', 'double cancel status is already_cancelling');
+
+// Simulate process settled — completeCancel releases the slot
+concurrency.completeCancel(cancelTarget.slotKey, { session_id: 'sess-cancel' });
+
+// After completeCancel, status shows completed with cancelled flag
+const afterCancel = concurrency.getRequestStatus(cancelTarget.request_id);
+assert(afterCancel.state === 'completed', 'cancelled request shows completed after settle');
+const afterCancelOutput = concurrency.getRequestOutput(cancelTarget.request_id);
+assert(afterCancelOutput.output.cancelled === true, 'cancelled output has cancelled:true');
+assert(afterCancelOutput.output.session_id === 'sess-cancel', 'cancelled output preserves session_id');
+
+// Session is now free
+const afterCancelAcquire = concurrency.acquire('cancel-test', 'sess-cancel');
+assert(afterCancelAcquire.ok, 'session free after completeCancel');
+concurrency.release(afterCancelAcquire.slotKey);
+
+// Cancel already completed
+const cancelCompleted = concurrency.acquire('cancel-test', 'sess-cancel-completed');
+assert(cancelCompleted.ok, 'cancel-completed acquires');
+concurrency.complete(cancelCompleted.slotKey, { reply: 'Done', trace: [] });
+concurrency.release(cancelCompleted.slotKey);
+
+const cancelAlreadyDone = concurrency.cancelRequest(cancelCompleted.request_id);
+assert(!cancelAlreadyDone.ok, 'cancel already completed returns not ok');
+assert(cancelAlreadyDone.status === 'already_completed', 'cancel already_completed status');
+
+// Cancel nonexistent
+const cancelMissing = concurrency.cancelRequest('req_nonexistent');
+assert(!cancelMissing.ok, 'cancel nonexistent returns not ok');
+assert(cancelMissing.status === 'not_found', 'cancel not_found status');
+
+console.log(`cancel tests: ${passed} passed`);
+
+// === next_action + retry_after_ms tests ===
+console.log('\n=== next_action + retry_after_ms ===');
+
+// acquire returns next_action in busy response
+const naTarget = concurrency.acquire('next-action-test', 'sess-na');
+assert(naTarget.ok, 'next_action test acquires');
+concurrency.setTask(naTarget.slotKey, 'NA task');
+
+// Busy: next_action = session-status
+const naBusy = concurrency.getRequestStatus(naTarget.request_id);
+assert(naBusy.next_action === 'session-status', 'busy getRequestStatus next_action is session-status');
+assert(naBusy.retry_after_ms === 2000, 'busy getRequestStatus retry_after_ms is 2000');
+
+// Complete
+concurrency.complete(naTarget.slotKey, { reply: 'NA done', trace: [] });
+concurrency.release(naTarget.slotKey);
+
+// Completed: next_action = session-output
+const naCompleted = concurrency.getRequestStatus(naTarget.request_id);
+assert(naCompleted.next_action === 'session-output', 'completed getRequestStatus next_action is session-output');
+assert(naCompleted.retry_after_ms === 0, 'completed getRequestStatus retry_after_ms is 0');
+
+// Output: next_action = null
+const naOutput = concurrency.getRequestOutput(naTarget.request_id);
+assert(naOutput.next_action === null, 'getRequestOutput next_action is null');
+assert(naOutput.retry_after_ms === 0, 'getRequestOutput retry_after_ms is 0');
+
+// Unknown: next_action = null
+const naUnknown = concurrency.getRequestStatus('req_nonexistent_na');
+assert(naUnknown.next_action === null, 'unknown next_action is null');
+
+// sessionStatus busy: next_action = session-status
+const naSessBusy = concurrency.acquire('na-session', 'sess-na-sess');
+assert(naSessBusy.ok, 'na session busy acquires');
+const naSessStatus = concurrency.sessionStatus('na-session', 'sess-na-sess');
+assert(naSessStatus.next_action === 'session-status', 'sessionStatus busy next_action is session-status');
+assert(naSessStatus.retry_after_ms === 2000, 'sessionStatus busy retry_after_ms is 2000');
+
+// sessionStatus completed: next_action = session-output
+concurrency.complete(naSessBusy.slotKey, { reply: 'done', trace: [] });
+concurrency.release(naSessBusy.slotKey);
+const naSessDone = concurrency.sessionStatus('na-session', 'sess-na-sess');
+assert(naSessDone.next_action === 'session-output', 'sessionStatus completed next_action is session-output');
+
+// sessionOutput completed: next_action = null
+const naSessOut = concurrency.sessionOutput('na-session', 'sess-na-sess');
+assert(naSessOut.next_action === null, 'sessionOutput completed next_action is null');
+
+console.log(`next_action tests: ${passed} passed`);
+
+// === timestamp tests ===
+console.log('\n=== timestamps ===');
+
+const tsTarget = concurrency.acquire('ts-test', 'sess-ts');
+assert(tsTarget.ok, 'timestamp test acquires');
+assert(typeof tsTarget.request_id === 'string', 'timestamp test has request_id');
+
+// Busy timestamps: created_at present, started_at null
+const tsBusy = concurrency.getRequestStatus(tsTarget.request_id);
+assert(typeof tsBusy.created_at === 'string', 'busy has created_at');
+assert(tsBusy.created_at.endsWith('Z'), 'created_at is ISO 8601');
+assert(tsBusy.started_at === null, 'busy started_at is null');
+assert(tsBusy.completed_at === null, 'busy completed_at is null');
+assert(tsBusy.queue_ms === null, 'busy queue_ms is null');
+assert(tsBusy.execution_ms === null, 'busy execution_ms is null before started');
+
+// Set started and check
+concurrency.setStarted(tsTarget.slotKey);
+const tsBusyStarted = concurrency.getRequestStatus(tsTarget.request_id);
+assert(typeof tsBusyStarted.started_at === 'string', 'busy started_at is string after setStarted');
+assert(tsBusyStarted.started_at.endsWith('Z'), 'started_at is ISO 8601');
+assert(typeof tsBusyStarted.queue_ms === 'number', 'busy has queue_ms after started');
+assert(tsBusyStarted.queue_ms >= 0, 'busy queue_ms is non-negative');
+assert(tsBusyStarted.completed_at === null, 'busy completed_at still null');
+assert(typeof tsBusyStarted.execution_ms === 'number', 'busy has execution_ms after started');
+assert(tsBusyStarted.execution_ms >= 0, 'busy execution_ms is non-negative');
+
+// Complete and check
+concurrency.complete(tsTarget.slotKey, { reply: 'ts done', trace: [], session_id: 'sess-ts' });
+concurrency.release(tsTarget.slotKey);
+
+const tsOutput = concurrency.getRequestOutput(tsTarget.request_id);
+assert(typeof tsOutput.created_at === 'string', 'completed has created_at');
+assert(typeof tsOutput.started_at === 'string', 'completed has started_at');
+assert(typeof tsOutput.completed_at === 'string', 'completed has completed_at');
+assert(tsOutput.completed_at.endsWith('Z'), 'completed_at is ISO 8601');
+assert(typeof tsOutput.queue_ms === 'number', 'completed has queue_ms');
+assert(tsOutput.queue_ms >= 0, 'completed queue_ms is non-negative');
+assert(typeof tsOutput.execution_ms === 'number', 'completed has execution_ms');
+assert(tsOutput.execution_ms >= 0, 'completed execution_ms is non-negative');
+
+console.log(`timestamp tests: ${passed} passed`);
