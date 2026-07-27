@@ -87,6 +87,7 @@ const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, m
     let buffer = '';
     let sessionIdFound = null;
     const textParts = [];
+    let agentError = null;
 
     proc.stdout.on('data', (chunk) => {
       buffer += chunk.toString();
@@ -113,6 +114,10 @@ const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, m
             if (output) {
               textParts.push(`[${event.part.state.title || 'tool'}]: ${output}`);
             }
+          }
+
+          if (event.type === 'error') {
+            agentError = event.error?.data?.message || event.error?.message || 'OpenCode returned an error';
           }
 
           if (onProgress) {
@@ -159,10 +164,18 @@ const sendMessage = async (chatId, message, chatConfig, timeoutSec, sessionId, m
               textParts.push(`[${event.part.state.title || 'tool'}]: ${output}`);
             }
           }
+          if (event.type === 'error') {
+            agentError = event.error?.data?.message || event.error?.message || 'OpenCode returned an error';
+          }
           if (onProgress) {
             try { onProgress(event); } catch (_) {}
           }
         } catch (e) {}
+      }
+
+      if (agentError) {
+        reject(new Error(agentError));
+        return;
       }
 
       let reply = textParts.join('\n');
