@@ -43,7 +43,7 @@ git diff --check
   docs together when file-transfer fields change.
 - Preserve immediate `409 session_busy` behavior for duplicate explicit
   sessions. Do not add a queue.
-- Keep requests without `session_id` independent.
+- Requests without `session_id` create a new opencode session each time; since each session is unique, these requests execute in parallel.
 - Keep deployment examples generic; do not add real domains, IP addresses,
   chat IDs, usernames, or filesystem layouts from production.
 
