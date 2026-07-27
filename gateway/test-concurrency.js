@@ -44,7 +44,7 @@ assert(
 );
 assert(
   timeoutSec > 0,
-  `timeoutSec (${timeoutSec}) must be positive (AGENT_TIMEOUT_SEC=0 falls back to 300)`
+  `timeoutSec (${timeoutSec}) must be positive (AGENT_TIMEOUT_SEC=0 falls back to 3600)`
 );
 
 console.log(`Concurrency tests: ${passed} passed`);
@@ -56,17 +56,17 @@ function assertEq(actual, expected, msg) {
   passed++;
 }
 
-assertEq(parseAgentTimeoutSec(undefined), 300, 'undefined → 300');
-assertEq(parseAgentTimeoutSec(''), 300, 'empty string → 300');
-assertEq(parseAgentTimeoutSec('0'), 300, '"0" → 300 (zero falls back)');
-assertEq(parseAgentTimeoutSec('-5'), 300, '"-5" → 300 (negative falls back)');
-assertEq(parseAgentTimeoutSec('NaN'), 300, '"NaN" → 300 (NaN falls back)');
-assertEq(parseAgentTimeoutSec('abc'), 300, '"abc" → 300 (non-numeric falls back)');
+assertEq(parseAgentTimeoutSec(undefined), 3600, 'undefined → 3600');
+assertEq(parseAgentTimeoutSec(''), 3600, 'empty string → 3600');
+assertEq(parseAgentTimeoutSec('0'), 3600, '"0" → 3600 (zero falls back)');
+assertEq(parseAgentTimeoutSec('-5'), 3600, '"-5" → 3600 (negative falls back)');
+assertEq(parseAgentTimeoutSec('NaN'), 3600, '"NaN" → 3600 (NaN falls back)');
+assertEq(parseAgentTimeoutSec('abc'), 3600, '"abc" → 3600 (non-numeric falls back)');
 assertEq(parseAgentTimeoutSec('300'), 300, '"300" → 300');
 assertEq(parseAgentTimeoutSec('60'), 60, '"60" → 60');
 assertEq(parseAgentTimeoutSec('999'), 999, '"999" → 999');
-assertEq(parseAgentTimeoutSec('Infinity'), 300, '"Infinity" → 300 (Infinity falls back)');
-assertEq(parseAgentTimeoutSec('-Infinity'), 300, '"-Infinity" → 300 (negative Infinity falls back)');
+assertEq(parseAgentTimeoutSec('Infinity'), 3600, '"Infinity" → 3600 (Infinity falls back)');
+assertEq(parseAgentTimeoutSec('-Infinity'), 3600, '"-Infinity" → 3600 (negative Infinity falls back)');
 
 console.log(`parseAgentTimeoutSec tests: ${passed} passed`);
 
@@ -509,3 +509,55 @@ assert(errOutput.output.metadata.error_class === 'timeout', 'error_class set to 
 concurrency.release(errTarget.slotKey);
 
 console.log(`metadata tests: ${passed} passed`);
+
+// === idempotency behavior tests ===
+console.log('\n=== idempotency behavior ===');
+
+// Same command WITHOUT idempotency_key → executes twice (two different request_ids)
+const ib1 = concurrency.acquire('ib-chat', 'sess-nokey');
+assert(ib1.ok, 'nokey acquire 1');
+concurrency.complete(ib1.slotKey, { reply: 'first', trace: [], session_id: 'sess-nokey' });
+concurrency.release(ib1.slotKey);
+
+const ib2 = concurrency.acquire('ib-chat', 'sess-nokey');
+assert(ib2.ok, 'nokey acquire 2');
+assert(ib2.request_id !== ib1.request_id, 'no key: second request has different request_id');
+concurrency.complete(ib2.slotKey, { reply: 'second', trace: [], session_id: 'sess-nokey' });
+concurrency.release(ib2.slotKey);
+
+// Same command WITH same idempotency_key → returns same request_id while active
+const ib3 = concurrency.acquire('ib-chat', 'sess-idkey', 'idem_explicit_1');
+assert(ib3.ok, 'idkey acquire 1');
+concurrency.setTask(ib3.slotKey, 'task with key');
+
+const ib3_dup = concurrency.checkIdempotency('idem_explicit_1');
+assert(ib3_dup !== null, 'idempotent key returns active result');
+assert(ib3_dup.type === 'active', 'idempotent type is active');
+assert(ib3_dup.request_id === ib3.request_id, 'idempotent: same request_id');
+
+// Duplicate acquire with same key → session_busy (session locked)
+const ib3_busy = concurrency.acquire('ib-chat', 'sess-idkey', 'idem_explicit_1');
+assert(!ib3_busy.ok, 'duplicate acquire blocked');
+assert(ib3_busy.error === 'session_busy', 'duplicate blocked with session_busy');
+
+concurrency.complete(ib3.slotKey, { reply: 'done', trace: [], session_id: 'sess-idkey' });
+concurrency.release(ib3.slotKey);
+
+// After completion, same key → completed result
+const ib3_completed = concurrency.checkIdempotency('idem_explicit_1');
+assert(ib3_completed !== null, 'completed idempotent key returns result');
+assert(ib3_completed.type === 'completed', 'completed type');
+assert(ib3_completed.output.reply === 'done', 'completed has correct reply');
+
+// Different idempotency_key → separate execution
+const ib4 = concurrency.acquire('ib-chat', 'sess-multikey-a', 'idem_key_a');
+assert(ib4.ok, 'key_a acquires');
+const ib5 = concurrency.acquire('ib-chat', 'sess-multikey-b', 'idem_key_b');
+assert(ib5.ok, 'key_b acquires separately');
+assert(ib4.request_id !== ib5.request_id, 'different keys get different request_ids');
+concurrency.complete(ib4.slotKey, { reply: 'a', trace: [], session_id: 'sess-multikey-a' });
+concurrency.release(ib4.slotKey);
+concurrency.complete(ib5.slotKey, { reply: 'b', trace: [], session_id: 'sess-multikey-b' });
+concurrency.release(ib5.slotKey);
+
+console.log(`idempotency behavior tests: ${passed} passed`);

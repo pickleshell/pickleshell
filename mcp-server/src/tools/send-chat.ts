@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { createHash } from "crypto";
 import { GatewayError, type GatewayClient } from "../gateway-client.js";
 import type { FileTransfer } from "../types.js";
 import {
@@ -61,6 +60,15 @@ export const sendChatSchema = {
         "Each file has a safe relative name and base64-encoded content. " +
         "Max 2 MiB per file, 10 MiB total."
     ),
+  idempotency_key: z
+    .string()
+    .max(128)
+    .optional()
+    .describe(
+      "Optional idempotency key for retry protection. " +
+        "If provided and the same key is sent again within 24h, the gateway returns the cached result instead of re-executing. " +
+        "If omitted, every send-chat is a new execution."
+    ),
 };
 
 export function registerSendChat(mcp: any, client: GatewayClient) {
@@ -90,6 +98,7 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
         dest_dir?: string;
         overwrite?: boolean;
       }>;
+      idempotency_key?: string;
     }) => {
       console.error(
         "[send-chat] args:",
@@ -124,19 +133,6 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
 
         let response: Awaited<ReturnType<GatewayClient["chat"]>>;
         try {
-          // Auto-generate idempotency key from request content
-          const idempotencyPayload = JSON.stringify({
-            chat_id: args.chat_id,
-            message: args.message,
-            session_id: args.session_id || "",
-            model: args.model || "",
-            destination_dir: args.destination_dir || "",
-          });
-          const idempotency_key = createHash("sha256")
-            .update(idempotencyPayload)
-            .digest("hex")
-            .substring(0, 32);
-
           response = await client.chat({
             chat_id: args.chat_id,
             message: args.message,
@@ -144,7 +140,7 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
             model: args.model,
             destination_dir: args.destination_dir,
             file_paths: fileTransfers,
-            idempotency_key,
+            idempotency_key: args.idempotency_key,
           });
         } catch (error) {
           if (
