@@ -21,6 +21,22 @@ ChatGPT delegates work through four MCP tools—`send-chat`, `session-status`,
 full traces. Continue local coding sessions, delegate to an operator-approved
 model, and transfer files into a controlled workspace.
 
+## What PickleShell Is For
+
+PickleShell solves a practical problem: ChatGPT can analyze software tasks, but
+it normally cannot work directly with a repository on your local machine.
+
+Through PickleShell, ChatGPT sends instructions and small files to a local
+OpenCode agent, follows the execution, reads the result, and continues the same
+conversation. The agent runs on your machine, inside a selected workspace,
+over a secure outbound-only tunnel.
+
+PickleShell is intended for developers and experienced users. The recommended
+installation workflow uses Codex: ask it to clone this repository, read
+`AGENTS.md`, and guide you through the setup step by step. `AGENTS.md` covers
+the architecture, installation, tunnel configuration, ChatGPT plugin setup,
+and troubleshooting.
+
 > [!WARNING]
 > **PickleShell is pre-release software (`0.1.0`).** Use it only with trusted
 > users and a dedicated service account. Read
