@@ -39,6 +39,21 @@ installation workflow uses Codex: ask it to clone this repository, read
 the architecture, installation, tunnel configuration, ChatGPT plugin setup,
 and troubleshooting.
 
+## Use Case
+
+Create three PickleShell tunnels to three different machines, then give the
+plugins unique names: `PickleShell Mars`, `PickleShell Moon`, and
+`PickleShell Starbase`. The first tunnel connects to a machine on Mars, the
+second to a machine on the Moon, and the third to a machine at Starbase. Tell
+ChatGPT which named plugin belongs to which machine, and it can route each task
+to the right destination.
+
+With this setup, ChatGPT can manage colonies on Mars and the Moon, as well as
+coordinate launches from Starbase to them—the big rockets Elon launches. The
+same pattern is useful today for everything from saving a technical
+specification to asking the OpenCode agent on a selected machine to carry out a
+complex task directly from ChatGPT.
+
 > [!WARNING]
 > **PickleShell is pre-release software (`0.1.0`).** Use it only with trusted
 > users and a dedicated service account. Read
