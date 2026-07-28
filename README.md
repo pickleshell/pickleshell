@@ -25,19 +25,21 @@ model, and transfer files into a controlled workspace.
 
 ## What PickleShell Is For
 
-PickleShell solves a practical problem: ChatGPT can analyze software tasks, but
-it normally cannot work directly with a repository on your local machine.
+PickleShell solves a practical problem: ChatGPT can analyze tasks, but it
+normally cannot work directly with a local repository.
 
 Through PickleShell, ChatGPT sends instructions and small files to a local
-OpenCode agent, follows the execution, reads the result, and continues the same
-conversation. The agent runs on your machine, inside a selected workspace,
-over a secure outbound-only tunnel.
+OpenCode agent, follows the execution, reads the result, and continues in the
+same session.
 
-PickleShell is intended for developers and experienced users. The recommended
-installation workflow uses Codex: ask it to clone this repository, read
-`AGENTS.md`, and guide you through the setup step by step. `AGENTS.md` covers
-the architecture, installation, tunnel configuration, ChatGPT plugin setup,
-and troubleshooting.
+The agent runs on your machine, inside a selected workspace, through a
+protected outbound-only tunnel. PickleShell removes the human relay between
+ChatGPT and OpenCode, while you remain the owner and observer.
+
+PickleShell is for developers and experienced users. Installation is designed
+to be guided by Codex: ask it to clone the repository, read `AGENTS.md`, and
+walk you through the setup step by step. `AGENTS.md` covers the architecture,
+installation, tunnel configuration, plugin setup, and troubleshooting.
 
 ## Use Case
 
