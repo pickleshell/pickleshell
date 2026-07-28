@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Linux with `/proc` mounted;
+- A standard Linux installation with the default `/proc` filesystem available;
 - Node.js 20 or newer;
 - OpenCode installed for a dedicated unprivileged user;
 - official OpenAI `tunnel-client`;
