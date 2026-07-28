@@ -3,7 +3,7 @@
   PickleShell
 </h1>
 
-<p align="center"><strong>Give ChatGPT a secure path to your local OpenCode agent</strong></p>
+<p align="center"><strong>Give ChatGPT a local machine to work with</strong></p>
 
 [![Release](https://img.shields.io/badge/release-v0.1.0-f5a623)](#project-status)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](#development)
@@ -12,9 +12,11 @@
 
 **Website:** [pickleshell.github.io](https://pickleshell.github.io/)
 
-PickleShell connects ChatGPT to a locally operated
-[OpenCode](https://opencode.ai/) agent through an outbound-only OpenAI Secure
-MCP Tunnel. Your Gateway stays off the public Internet.
+PickleShell connects ChatGPT to an [OpenCode](https://opencode.ai/) agent
+running on your machine. ChatGPT can inspect repositories, edit files, run
+tests, transfer small files, and coordinate long-running tasks. The connection
+uses an outbound-only OpenAI Secure MCP Tunnel, while execution remains inside
+your selected workspace.
 
 ChatGPT delegates work through four MCP tools—`send-chat`, `session-status`,
 `session-output`, and `cancel-request`—and receives structured results with
