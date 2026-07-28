@@ -29,8 +29,8 @@ PickleShell solves a practical problem: ChatGPT can analyze tasks, but it
 normally cannot work directly with a local repository.
 
 Through PickleShell, ChatGPT sends instructions and small files to a local
-OpenCode agent, follows the execution, reads the result, and continues in the
-same session.
+OpenCode agent, follows the execution, reads the result, and can continue in
+the same session when it passes the session ID.
 
 The agent runs on your machine, inside a selected workspace, through a
 protected outbound-only tunnel. PickleShell removes the human relay between
