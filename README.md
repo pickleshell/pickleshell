@@ -38,8 +38,11 @@ ChatGPT and OpenCode, while you remain the owner and observer.
 
 PickleShell is for developers and experienced users. Installation is designed
 to be guided by Codex: ask it to clone the repository, read `AGENTS.md`, and
-walk you through the setup step by step. `AGENTS.md` covers the architecture,
-installation, tunnel configuration, plugin setup, and troubleshooting.
+walk you through the setup step by step using
+[`docs/deployment.md`](docs/deployment.md) and
+[`docs/chatgpt.md`](docs/chatgpt.md). `AGENTS.md` is the contributor guide for
+the development workflow, architecture, security invariants, and change
+boundaries.
 
 ## Use Case
 
