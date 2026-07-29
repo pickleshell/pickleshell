@@ -58,15 +58,16 @@ and the PickleShell services must both report healthy/ready before continuing.
 
 ## 5. Create the PickleShell plugin
 
-Create a ChatGPT plugin named `PickleShell`, select the configured tunnel, and
-allow the `send-chat` action.
+In ChatGPT, open **Plugins** and press **+** to add a new plugin. Name it
+`PickleShell`, select the configured tunnel, and allow all four MCP tools:
+`send-chat`, `session-status`, `session-output`, and `cancel-request`.
 
 ![Create the PickleShell plugin in ChatGPT](assets/plugin-create.png)
 
 ## 6. Verify the connected plugin
 
-The connected PickleShell entry should show the `send-chat` action and the
-current schema.
+The connected PickleShell entry should show the selected tunnel and the four
+enabled MCP tools.
 
 ![Connected PickleShell plugin and send-chat action](assets/plugin-connected.png)
 
@@ -74,10 +75,10 @@ current schema.
 
 After changing the MCP schema:
 
-1. Open the plugin's action controls;
-2. Select **Refresh**;
-3. Review the action diff;
-4. Enable the updated action;
+1. Open the PickleShell plugin from **Plugins**;
+2. Press **Refresh**;
+3. Review the updated tool schema;
+4. Enable the updated tools if ChatGPT asks;
 5. Start a new conversation.
 
 The connected plugin should expose `send-chat`, `session-status`,
