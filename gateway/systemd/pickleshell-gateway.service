@@ -9,10 +9,9 @@ User=pickleshell
 Group=pickleshell
 WorkingDirectory=/opt/pickleshell/gateway
 Environment=NODE_ENV=production
-Environment=HOME=/home/pickleshell
-Environment=PATH=/home/pickleshell/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EnvironmentFile=/etc/pickleshell/gateway.env
-ExecStart=/usr/bin/node src/server.js
+ExecStart=/opt/pickleshell/runtime/node-v20.20.2/bin/node src/server.js
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=15
@@ -23,7 +22,9 @@ MemoryMax=4G
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
-ProtectSystem=full
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/pickleshell/workspace
 ProtectKernelTunables=true
 ProtectKernelLogs=true
 ProtectControlGroups=true
@@ -31,6 +32,23 @@ RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true
 SystemCallArchitectures=native
+ReadWritePaths=/var/lib/pickleshell/config/opencode
+ReadWritePaths=/var/lib/pickleshell/data/opencode
+ReadWritePaths=/var/lib/pickleshell/state/opencode
+ReadWritePaths=/var/lib/pickleshell/agent-home
+ReadWritePaths=/var/cache/pickleshell/opencode
+ReadWritePaths=/var/cache/pickleshell/npm
+ReadWritePaths=/var/cache/pickleshell/ms-playwright
+ReadWritePaths=/home/pickleshell/workspace
+ReadOnlyPaths=/opt/pickleshell
+ReadOnlyPaths=/etc/pickleshell/config.json
+ReadOnlyPaths=/etc/pickleshell/opencode.jsonc
+InaccessiblePaths=-/etc/pickleshell/control-plane.key
+InaccessiblePaths=-/etc/pickleshell/mcp.env
+InaccessiblePaths=-/etc/pickleshell/gateway.env
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

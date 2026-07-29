@@ -8,7 +8,7 @@ WORKSPACE="$2"
 SESSION_ID="${3:-}"
 MODEL="${4:-}"
 
-ARGS=(opencode run "$MESSAGE" --dir "$WORKSPACE" --format json --auto)
+ARGS=(/usr/local/bin/opencode run "$MESSAGE" --dir "$WORKSPACE" --format json --auto)
 if [ -n "$SESSION_ID" ]; then
   ARGS+=(-s "$SESSION_ID")
 fi

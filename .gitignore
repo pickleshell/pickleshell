@@ -10,3 +10,4 @@ config.json
 *.bak-*
 *.xcf
 .DS_Store
+/runtime/
