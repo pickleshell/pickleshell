@@ -11,12 +11,13 @@ const fakeWrapper = path.join(tempDir, 'fake-wrapper.sh');
 const fakeBin = path.join(tempDir, 'bin');
 const fakeOpenCode = path.join(fakeBin, 'opencode');
 const wrapperCapturePath = path.join(tempDir, 'opencode-args.bin');
+const testWrapper = path.join(tempDir, 'opencode-run-test.sh');
 
 fs.writeFileSync(
   fakeWrapper,
   [
     '#!/bin/bash',
-    'printf "%s\\0" "$@" > "$CAPTURE_FILE"',
+    `printf "%s\\0" "$@" > '${capturePath}'`,
     'printf \'%s\\n\' \'{"type":"text","part":{"text":"ok"}}\'',
   ].join('\n'),
   { mode: 0o700 }
@@ -31,7 +32,6 @@ fs.writeFileSync(
   { mode: 0o700 }
 );
 
-process.env.CAPTURE_FILE = capturePath;
 process.env.OPENCODE_WRAPPER_SCRIPT = fakeWrapper;
 
 const agent = require('./src/agent');
@@ -54,7 +54,7 @@ async function run() {
   const sessionId = `session"; touch ${sessionSentinel}; #`;
   const model = 'opencode/big-pickle';
 
-  const result = await agent.sendMessage(
+  const execution = agent.sendMessage(
     'pickleshell-main',
     message,
     { workspace: tempDir },
@@ -63,6 +63,7 @@ async function run() {
     model,
     null
   );
+  const result = await execution.promise;
 
   const args = fs
     .readFileSync(capturePath)
@@ -79,10 +80,18 @@ async function run() {
   assert(!fs.existsSync(messageSentinel), 'message command substitution is not executed');
   assert(!fs.existsSync(sessionSentinel), 'session_id shell injection is not executed');
 
+  const wrapperSource = fs.readFileSync(path.join(__dirname, 'opencode-run.sh'), 'utf8');
+  if (!wrapperSource.includes('/usr/local/bin/opencode')) {
+    throw new Error('opencode-run.sh does not contain /usr/local/bin/opencode');
+  }
+  const fakeOpenCodeEscaped = fakeOpenCode.replace(/'/g, "'\\''");
+  const patchedSource = wrapperSource.split('/usr/local/bin/opencode').join("'" + fakeOpenCodeEscaped + "'");
+  fs.writeFileSync(testWrapper, patchedSource, { mode: 0o700 });
+
   const wrapperResult = spawnSync(
     '/bin/bash',
     [
-      path.join(__dirname, 'opencode-run.sh'),
+      testWrapper,
       message,
       tempDir,
       sessionId,
@@ -92,7 +101,6 @@ async function run() {
       encoding: 'utf8',
       env: {
         ...process.env,
-        PATH: `${fakeBin}:${process.env.PATH}`,
         WRAPPER_CAPTURE_FILE: wrapperCapturePath,
       },
     }

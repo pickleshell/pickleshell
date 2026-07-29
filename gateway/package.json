@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node test-agent-command.js && node test-config.js && node test-auth.js && node test-file-transfer.js && node test-concurrency.js",
+    "test": "node test-agent-command.js && node test-env-isolation.js && node test-config.js && node test-auth.js && node test-file-transfer.js && node test-concurrency.js",
     "test:smoke": "node test.js"
   },
   "dependencies": {

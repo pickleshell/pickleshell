@@ -1,6 +1,30 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
+const ALLOWED_ENV_KEYS = new Set([
+  'PATH', 'HOME', 'LANG', 'LC_ALL',
+  'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR',
+  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME',
+  'NPM_CONFIG_CACHE', 'PLAYWRIGHT_BROWSERS_PATH',
+  'TMPDIR', 'TMP', 'TEMP',
+  'NODE_ENV',
+  'TZ', 'USER', 'LOGNAME',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
+  'http_proxy', 'https_proxy', 'no_proxy',
+  'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+]);
+
+function buildChildEnv(sourceEnv = process.env) {
+  const childEnv = {};
+  for (const key of ALLOWED_ENV_KEYS) {
+    if (sourceEnv[key] !== undefined) {
+      childEnv[key] = sourceEnv[key];
+    }
+  }
+  return childEnv;
+}
+
 const SYSTEM_INSTRUCTION = `You are a PickleShell Gateway worker.
 
 You receive high-level text instructions from an external architect.
@@ -85,6 +109,7 @@ const sendMessage = (chatId, message, chatConfig, timeoutSec, sessionId, model, 
       cwd: chatConfig.workspace,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
+      env: buildChildEnv(),
     });
 
     let stdout = '';
@@ -225,6 +250,7 @@ const sendMessage = (chatId, message, chatConfig, timeoutSec, sessionId, model, 
 };
 
 module.exports = {
+  buildChildEnv,
   parseJsonOutput,
   sendMessage,
 };
