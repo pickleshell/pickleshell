@@ -1,6 +1,6 @@
 {
   "name": "pickleshell",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Secure MCP bridge from ChatGPT to a locally operated OpenCode agent",
   "license": "MIT",
