@@ -229,6 +229,7 @@ Include the relevant setup details and steps to reproduce the problem.
 
 - [Create an issue](https://github.com/pickleshell/pickleshell/issues/new)
 - [Browse existing issues](https://github.com/pickleshell/pickleshell/issues)
+- Email: [pickleshell.plugin@gmail.com](mailto:pickleshell.plugin@gmail.com)
 
 ## Project Status
 
