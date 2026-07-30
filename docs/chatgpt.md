@@ -3,6 +3,14 @@
 This guide walks through every UI step from enabling developer mode to testing
 PickleShell in ChatGPT.
 
+<div align="center">
+
+![Compact overview of a typical PickleShell session in ChatGPT, not a readable text extract](assets/pickleshell-chatgpt-session.png)
+
+*A typical PickleShell session in ChatGPT.*
+
+</div>
+
 ## Prerequisites
 
 - an OpenAI account and workspace that support custom MCP apps;
