@@ -19,5 +19,5 @@
     "anthropic/claude-sonnet-4-20250514",
     "qwen/qwen3-coder"
   ],
-  "default_model": "opencode/ling-3.0-flash-free"
+  "default_model": "opencode/big-pickle"
 }
