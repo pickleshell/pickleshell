@@ -14,6 +14,10 @@
 
 > Want to give your ChatGPT a gift? Give it PickleShell.
 
+<p align="center">
+  <img src="docs/assets/pickleshell-crt-monitor.png" width="256" alt="PickleShell carrying a CRT monitor">
+</p>
+
 PickleShell connects ChatGPT to an [OpenCode](https://opencode.ai/) agent
 running on your machine. ChatGPT can inspect repositories, edit files, run
 tests, transfer small files, and coordinate long-running tasks. The connection
