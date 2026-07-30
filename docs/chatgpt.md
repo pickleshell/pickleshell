@@ -59,7 +59,7 @@ and the PickleShell services must both report healthy/ready before continuing.
 ## 5. Create the PickleShell plugin
 
 In ChatGPT, open **Plugins** and press **+** to add a new plugin. Name it
-`PickleShell`, select the configured tunnel, and allow all four MCP tools:
+`PickleShell`, select the configured tunnel, and allow all 56 MCP tools (4 PickleShell + 52 Playwright browser automation):
 `send-chat`, `session-status`, `session-output`, and `cancel-request`.
 
 ![Create the PickleShell plugin in ChatGPT](assets/plugin-create.png)
@@ -83,7 +83,7 @@ After changing the MCP schema:
 
 The connected plugin should expose `send-chat`, `session-status`,
 `session-output`, and `cancel-request`. If Refresh completes but the old schema
-still exposes only `send-chat`, do a full connector reset: remove the
+still shows the old tool set, do a full connector reset: remove the
 PickleShell plugin/connector, create it again using the current PickleShell
 tunnel, and open a new conversation. A new chat alone is not sufficient when
 ChatGPT has retained the old connector registration.
@@ -137,6 +137,28 @@ send-chat -> session-status (poll) -> session-output
 Receiving `409 session_busy` (state: "rejected") during a race is expected;
 use `next_action: "session-status"` and `retry_after_ms` from the response
 to wait and retry.
+
+
+## 11. Browser smoke test
+
+
+Use this test after the plugin shows all 56 tools in a fresh conversation.
+
+
+1. Call `browser_navigate` with `url: "about:blank"`.
+
+2. Confirm it returns a snapshot reference.
+
+3. Call `browser_snapshot` to inspect the blank page DOM.
+
+4. Navigate to a public URL and take a screenshot with `browser_screenshot`.
+
+
+Expected result: each tool returns a success response with page state or
+
+snapshot. Errors such as `Browser not connected` or `Target closed` indicate
+
+a Chromium launch problem; check the tunnel logs.
 
 ## 10. Async chat smoke test
 

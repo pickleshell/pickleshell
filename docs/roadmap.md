@@ -72,3 +72,24 @@ redaction.
 Create the next release only when the production verification checklist passes,
 the retry/idempotency behavior is documented, and restart semantics are honest
 and tested. Keep the full trace as the default output mode.
+
+## v1.1 — Playwright Browser Automation
+
+Integrated Playwright MCP (52 tools) into the PickleShell MCP server:
+
+### Completed
+
+- [x] `@playwright/mcp` installed and bridged via `InMemoryTransport`
+- [x] Chromium revision 1232 (Chrome 151) installed
+- [x] All 52 Playwright tools registered on the PickleShell MCP server
+- [x] `chromiumSandbox: false` for headless runtime
+- [x] Tunnel restart preserves the Playwright integration
+- [x] `browser_navigate` → `about:blank` → snapshot — verified end-to-end
+
+### Remaining
+
+- [ ] Document browser tool schema in the API reference
+- [ ] Test with real-world sites and form interactions
+- [ ] Test concurrent browser sessions
+- [ ] Evaluate persistent browser profile (`userDataDir`) for session cookies
+- [ ] Add vision-based interaction testing (`browser_move`, `browser_click` by coordinates)

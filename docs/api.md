@@ -208,3 +208,40 @@ configured chat IDs, active work, and concurrency policy.
 | 429 | `rate_limit` |
 | 502 | `agent_error` |
 | 504 | `agent_timeout` |
+
+## Playwright Browser Tools
+
+The same MCP connection also exposes 52 Playwright browser automation tools.
+They are registered automatically at startup when `@playwright/mcp` is
+installed and a compatible Chromium revision is available.
+
+```text
+ChatGPT
+  -> MCP tool: browser_navigate
+  -> MCP tool: browser_click
+  -> MCP tool: browser_fill
+  -> MCP tool: browser_snapshot
+  -> MCP tool: browser_screenshot
+  -> ... 47 more tools
+```
+
+The browser tools use an in-process Chromium instance (headless). The browser
+is launched lazily on the first tool call. All tools are available in the same
+MCP connector — no separate plugin or tunnel is needed.
+
+### Test checklist
+
+After creating a connector with the Playwright tools enabled:
+
+1. `browser_navigate` to a known URL (e.g. `about:blank` or any public site);
+2. `browser_snapshot` to capture the page DOM;
+3. `browser_screenshot` to capture a visual screenshot;
+4. `browser_click` and `browser_fill` to interact with page elements.
+
+### System requirements
+
+- Chromium revision matching the `playwright-core` version
+  (`node_modules/playwright-core/browsers.json`)
+- Writable runtime directories for browser profile and output
+- `chromiumSandbox: false` in launch options when running headless without
+  kernel user namespace sandboxing
