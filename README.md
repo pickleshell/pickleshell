@@ -222,6 +222,14 @@ npm run audit
 - [Security policy](SECURITY.md) — trust model, threat boundaries, and vulnerability reporting
 - [Roadmap](docs/roadmap.md) — v1 production checklist and deferred features
 
+## Contact
+
+Open a GitHub issue to report a bug, suggest an improvement, or ask for help.
+Include the relevant setup details and steps to reproduce the problem.
+
+- [Create an issue](https://github.com/pickleshell/pickleshell/issues/new)
+- [Browse existing issues](https://github.com/pickleshell/pickleshell/issues)
+
 ## Project Status
 
 PickleShell `0.1.0` is the first production-ready release. It supports
