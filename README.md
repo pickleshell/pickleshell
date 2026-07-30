@@ -249,7 +249,7 @@ This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 - Updated ChatGPT Assistant positioning, plugin setup, and async workflow docs.
 - Added project contact guidance and release metadata.
 
-### [v0.1.0](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.0)
+### [v0.1.0](https://github.com/pickleshell/pickleshell/tree/v0.1.0)
 
 - First production-ready release.
 - Added asynchronous `request_id` execution with status polling and full output.
