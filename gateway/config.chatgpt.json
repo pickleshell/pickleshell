@@ -1,0 +1,13 @@
+{
+  "chats": {
+    "root": {
+      "workspace": "/home/chatgpt/workspace"
+    }
+  },
+  "allowed_models": [
+    "opencode/big-pickle",
+    "opencode/ling-3.0-flash-free",
+    "opencode/deepseek-v4-flash-free"
+  ],
+  "default_model": "opencode/big-pickle"
+}
