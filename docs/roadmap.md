@@ -17,6 +17,16 @@ The first production release keeps the protocol small and explicit:
 Do not add settings or summary modes to v1. Full trace is intentional: it is
 valuable for file edits, tests, and diagnostics.
 
+## Basic product scope
+
+The basic PickleShell product milestone: v1 shipped the small Agent protocol; Browser is now implemented after that baseline; Shell and Settings complete the next milestone (Agent + Browser + Shell + Settings).
+
+- **Agent:** retain `send-chat` → `session-status` → `session-output` → `cancel-request`. Treat OpenCode and Codex as replaceable provider adapters behind the same MCP interface; OpenCode exists and Codex is the next natural provider implementation.
+- **Browser:** Playwright is now implemented and validated as the browser execution layer.
+- **Shell:** direct Bash execution for quick, exact system and repository operations without routing every command through a coding model. Proposed minimal async API: `shell-exec`, `shell-status`, `shell-output`, `shell-cancel`; optional later PTY support with `shell-write`. Results should include `stdout`, `stderr`, `exit_code`, `timeout`/`timed_out`, timestamps, `working_directory`, truncation state, and request/process ID. Follow existing idempotency/task semantics.
+- **Settings:** `settings-get` and `settings-update`. Cover agent provider, model, output mode full/summary, Shell and Browser enablement, timeout/output limits, risky-capability permissions, and possible autonomy modes `observe`/`workspace-write`/`operator`. Never return secrets; return only configured state.
+- **Product framing:** a universal local runtime for ChatGPT — agent, terminal, and browser on any connected machine.
+
 ## Next release checklist
 
 ### Production verification
@@ -49,14 +59,13 @@ valuable for file edits, tests, and diagnostics.
 These are intentionally out of scope for the next production cut unless a
 separate design is approved:
 
-- `get-settings` / `update-settings`;
-- summary output modes or a summary model;
 - configurable progress verbosity;
 - request queues;
 - richer progress event normalization.
 
 If settings are revisited, first define scope (global, workspace, session, or
-request), persistence, defaults, validation, and restart behavior.
+request), persistence, defaults, validation, restart behavior, and secret
+redaction.
 
 ## Release gate
 
