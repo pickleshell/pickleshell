@@ -5,7 +5,7 @@
 
 <p align="center"><strong>Give ChatGPT a local machine to work with</strong></p>
 
-[![Release](https://img.shields.io/badge/release-v0.1.0-f5a623)](#project-status)
+[![Release](https://img.shields.io/badge/release-v0.1.1-f5a623)](#release-history)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](#development)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#requirements)
@@ -233,12 +233,28 @@ Include the relevant setup details and steps to reproduce the problem.
 
 ## Project Status
 
-PickleShell `0.1.0` is the first production-ready release. It supports
-asynchronous task execution with polling, structured result output, in-flight
-cancellation, explicit session continuity, file transfer, and operator-controlled
-model and workspace scoping.
+PickleShell `0.1.1` is the latest release. It adds the Playwright browser
+runtime and browser automation documentation, hardens agent isolation and
+service runtime security, and updates the ChatGPT Assistant setup and product
+documentation.
 
 This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
+
+## Release History
+
+### [v0.1.1](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.1)
+
+- Added Playwright MCP browser automation runtime and setup documentation.
+- Hardened agent isolation, authentication, and systemd service runtime.
+- Updated ChatGPT Assistant positioning, plugin setup, and async workflow docs.
+- Added project contact guidance and release metadata.
+
+### [v0.1.0](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.0)
+
+- First production-ready release.
+- Added asynchronous `request_id` execution with status polling and full output.
+- Added session continuity, cancellation, explicit idempotency, file transfer,
+  structured metadata, and operator-controlled workspace/model scoping.
 
 ## Authors
 
