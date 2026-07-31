@@ -104,7 +104,7 @@ flowchart TD
     C --> D["PickleShell MCP server"]
     D --> E["PickleShell Gateway"]
 
-    subgraph SVC["PickleShell local services"]
+    subgraph SVC["PickleShell Workstation"]
         direction TB
         subgraph SVCA["Agent"]
             OC["OpenCode"]:::impl
