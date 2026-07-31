@@ -99,7 +99,7 @@ environment. PickleShell provides the secure, explicit boundary between them:
 
 ```mermaid
 flowchart TD
-    A["ChatGPT"] --> B["OpenAI Secure MCP Tunnel"]
+    A["ChatGPT"] --> B["OpenAI Secure MCP Reverse Tunnel"]
     B --> C["tunnel-client"]
     C --> D["PickleShell MCP server"]
     D --> E["PickleShell Gateway"]
@@ -233,7 +233,7 @@ availability guarantees, and vulnerability reporting.
 - Linux;
 - Node.js 20 or newer;
 - the Agent backend (currently OpenCode) installed and configured;
-- OpenAI Secure MCP Tunnel access;
+- OpenAI Secure MCP Reverse Tunnel access;
 - a dedicated local service account is strongly recommended.
 
 ## Development
