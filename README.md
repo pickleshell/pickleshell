@@ -97,6 +97,8 @@ environment. PickleShell provides the secure, explicit boundary between them:
 
 ## Architecture
 
+> PickleShell Workstation gives ChatGPT a local environment equipped with an agent, a browser, and a terminal.
+
 ```mermaid
 flowchart TD
     A["ChatGPT"] --> B["OpenAI Secure MCP Reverse Tunnel"]
