@@ -18,16 +18,17 @@
   <img src="docs/assets/pickleshell-crt-monitor.png" width="256" alt="PickleShell carrying a CRT monitor">
 </p>
 
-PickleShell connects ChatGPT to an [OpenCode](https://opencode.ai/) agent
-running on your machine. ChatGPT can inspect repositories, edit files, run
-tests, transfer small files, and coordinate long-running tasks. The connection
-uses an outbound-only OpenAI Secure MCP Tunnel, while execution remains inside
-your selected workspace.
+PickleShell connects ChatGPT to a local host running three mandatory core
+services: an **Agent**, a **Browser**, and a **Terminal**. ChatGPT can inspect
+repositories, edit files, run tests, automate a browser, transfer small files,
+and coordinate long-running tasks. The connection uses an outbound-only OpenAI
+Secure MCP Tunnel, while execution remains inside your selected workspace.
 
-ChatGPT delegates work through four MCP tools—`send-chat`, `session-status`,
+The Agent exposes four MCP tools—`send-chat`, `session-status`,
 `session-output`, and `cancel-request`—and receives structured results with
-full traces. Continue local coding sessions, delegate to an operator-approved
-model, and transfer files into a controlled workspace.
+full traces. The Browser exposes Playwright automation tools. Continue local
+coding sessions, delegate to an operator-approved model, and transfer files
+into a controlled workspace.
 
 ## What PickleShell Is For
 
@@ -35,12 +36,13 @@ PickleShell solves a practical problem: ChatGPT can analyze tasks, but it
 normally cannot work directly with a local repository.
 
 Through PickleShell, ChatGPT sends instructions and small files to a local
-OpenCode agent, follows the execution, reads the result, and can continue in
-the same session when it passes the session ID.
+Agent, follows the execution, reads the result, and can continue in the same
+session when it passes the session ID. The same connection reaches the Browser
+service, and will reach the Terminal service once it is implemented.
 
-The agent runs on your machine, inside a selected workspace, through a
+The services run on your machine, inside a selected workspace, through a
 protected outbound-only tunnel. PickleShell removes the human relay between
-ChatGPT and OpenCode, while you remain the owner and observer.
+ChatGPT and your machine, while you remain the owner and observer.
 
 PickleShell is for developers and experienced users. Installation is designed
 to be guided by Codex: ask it to clone the repository, read `AGENTS.md`, and
@@ -62,7 +64,7 @@ route each task to the right destination.
 With this setup, your ChatGPT Assistant can manage colonies on Mars and the
 Moon, as well as coordinate launches from Starbase to them—the big rockets Elon
 launches. The same pattern is useful today for everything from saving a
-technical specification to asking the OpenCode agent on a selected machine to
+technical specification to asking the Agent on a selected machine to
 carry out a complex task directly from ChatGPT.
 
 > [!WARNING]
@@ -82,9 +84,9 @@ carry out a complex task directly from ChatGPT.
 
 ## Why PickleShell?
 
-ChatGPT can reason about a project, while OpenCode can operate inside a local
-development environment. PickleShell provides the secure, explicit boundary
-between them:
+ChatGPT can reason about a project, while PickleShell's Agent service (running
+[OpenCode](https://opencode.ai/) today) can operate inside a local development
+environment. PickleShell provides the secure, explicit boundary between them:
 
 - no public Gateway endpoint;
 - no inbound port forwarding;
@@ -101,19 +103,48 @@ flowchart TD
     B --> C["tunnel-client"]
     C --> D["PickleShell MCP server"]
     D --> E["PickleShell Gateway"]
-    E --> F["OpenCode"]
-    F --> G["Configured workspace"]
+
+    subgraph SVC["PickleShell local services"]
+        direction LR
+        subgraph SVCA["Agent"]
+            OC["OpenCode"]:::impl
+            CX["Codex"]:::planned
+        end
+        subgraph SVCB["Browser"]
+            PW["Playwright"]:::impl
+        end
+        subgraph SVCT["Terminal"]
+            TTY["Interactive PTY"]:::planned
+        end
+    end
+
+    E --> SVC
+    OC --> WS["Configured workspace"]
 
     classDef cloud fill:#e9f3ff,stroke:#1677c8,color:#102a43
     classDef bridge fill:#fff4d6,stroke:#d48806,color:#3d2b00
     classDef local fill:#e8f7ec,stroke:#2f855a,color:#173d2a
+    classDef impl fill:#e8f7ec,stroke:#2f855a,color:#173d2a
+    classDef planned fill:#fffdf5,stroke:#7b8794,color:#102a43,stroke-dasharray: 6 5
     class A,B cloud
     class C,D bridge
-    class E,F,G local
+    class E,SVC,WS local
 ```
+
+Solid boxes are implemented; dashed boxes (Codex and the Terminal) are planned.
 
 The tunnel is initiated from the local machine over outbound HTTPS. The Gateway
 remains reachable only inside the trusted local environment.
+
+### Core services
+
+The three mandatory core services all run locally on your machine:
+
+| Service | Status | Notes |
+| --- | --- | --- |
+| **Agent** | Implemented on OpenCode; Codex planned | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. Codex is planned as a first-class alternative backend behind the same MCP interface. |
+| **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
+| **Terminal** | Planned | Must emulate an interactive terminal used by a human — a live PTY session driven like a real terminal, not one-shot shell command execution. |
 
 ## Async Workflow
 
@@ -201,7 +232,7 @@ availability guarantees, and vulnerability reporting.
 
 - Linux;
 - Node.js 20 or newer;
-- OpenCode installed and configured;
+- the Agent backend (currently OpenCode) installed and configured;
 - OpenAI Secure MCP Tunnel access;
 - a dedicated local service account is strongly recommended.
 

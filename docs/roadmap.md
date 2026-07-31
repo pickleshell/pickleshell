@@ -19,13 +19,36 @@ valuable for file edits, tests, and diagnostics.
 
 ## Basic product scope
 
-The basic PickleShell product milestone: v1 shipped the small Agent protocol; Browser is now implemented after that baseline; Shell and Settings complete the next milestone (Agent + Browser + Shell + Settings).
+PickleShell has three mandatory core services: **Agent**, **Browser**, and
+**Terminal**. The Agent protocol shipped with v1; the Browser is implemented
+after that baseline; Terminal and Settings complete the next milestone
+(Agent + Browser + Terminal + Settings).
 
-- **Agent:** retain `send-chat` → `session-status` → `session-output` → `cancel-request`. Treat OpenCode and Codex as replaceable provider adapters behind the same MCP interface; OpenCode exists and Codex is the next natural provider implementation.
-- **Browser:** Playwright is now implemented and validated as the browser execution layer.
-- **Shell:** direct Bash execution for quick, exact system and repository operations without routing every command through a coding model. Proposed minimal async API: `shell-exec`, `shell-status`, `shell-output`, `shell-cancel`; optional later PTY support with `shell-write`. Results should include `stdout`, `stderr`, `exit_code`, `timeout`/`timed_out`, timestamps, `working_directory`, truncation state, and request/process ID. Follow existing idempotency/task semantics.
-- **Settings:** `settings-get` and `settings-update`. Cover agent provider, model, output mode full/summary, Shell and Browser enablement, timeout/output limits, risky-capability permissions, and possible autonomy modes `observe`/`workspace-write`/`operator`. Never return secrets; return only configured state.
-- **Product framing:** a universal local runtime for ChatGPT — agent, terminal, and browser on any connected machine.
+- **Agent:** retain `send-chat` → `session-status` → `session-output` →
+  `cancel-request`. OpenCode is the current backend; plan first-class Codex
+  parity as an alternative backend behind the same MCP interface. OpenCode and
+  Codex are replaceable provider adapters, and Codex must match OpenCode's
+  schema, session continuity, idempotency, cancellation, and task semantics.
+- **Browser:** Playwright is implemented and validated as the browser execution
+  layer (52 tools registered on the PickleShell MCP server).
+- **Terminal:** planned. Must emulate an interactive terminal used by a human —
+  a live PTY session the operator drives like a real terminal (spawn, keystroke
+  input, streamed output, resize), not one-shot shell command execution.
+  Proposed minimal async API: `terminal-spawn`, `terminal-write`,
+  `terminal-output`, `terminal-resize`, `terminal-close`. Follow existing
+  idempotency/task semantics where they apply.
+- **Settings:** planned. `settings-get` and `settings-update` manage
+  policy-controlled mutable defaults such as the agent backend
+  (OpenCode/Codex), the model allowlist, file-transfer limits (files per
+  request, size per file, total payload), output mode full/summary, Browser and
+  Terminal enablement, timeout/output limits, risky-capability permissions, and
+  possible autonomy modes `observe`/`workspace-write`/`operator`. Attempts to
+  change forbidden or immutable settings are rejected or leave values
+  unchanged. Never return secrets; return only configured state. Before
+  implementation, define scope (global, workspace, session, or request),
+  persistence, defaults, validation, restart behavior, and secret redaction.
+- **Product framing:** a universal local runtime for ChatGPT — Agent, Browser,
+  and Terminal on any connected machine.
 
 ## Next release checklist
 
@@ -62,10 +85,6 @@ separate design is approved:
 - configurable progress verbosity;
 - request queues;
 - richer progress event normalization.
-
-If settings are revisited, first define scope (global, workspace, session, or
-request), persistence, defaults, validation, restart behavior, and secret
-redaction.
 
 ## Release gate
 
