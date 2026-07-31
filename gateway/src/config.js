@@ -31,6 +31,81 @@ const getWorkspace = (chatId) => {
   return chatConfig ? chatConfig.workspace : null;
 };
 
+// --- Runtime configuration (preparatory for Codex) ---
+
+const DEFAULT_RUNTIME = 'opencode';
+
+// Codex is recognized but not yet executable by this gateway build; selecting
+// it must be rejected, never silently downgraded to OpenCode.
+const KNOWN_RUNTIMES = ['opencode', 'codex'];
+const AVAILABLE_RUNTIMES = new Set(['opencode']);
+
+const normalizeRuntime = (value) => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return KNOWN_RUNTIMES.includes(normalized) ? normalized : null;
+};
+
+const getConfiguredDefaultRuntime = () => {
+  const config = loadConfig();
+  return config.default_runtime === undefined ? DEFAULT_RUNTIME : config.default_runtime;
+};
+
+const getDefaultRuntime = () => {
+  return normalizeRuntime(getConfiguredDefaultRuntime()) || DEFAULT_RUNTIME;
+};
+
+const getAllowedRuntimes = () => {
+  const config = loadConfig();
+  if (config.allowed_runtimes === undefined) return [DEFAULT_RUNTIME];
+  if (!Array.isArray(config.allowed_runtimes)) return null;
+  return config.allowed_runtimes
+    .map(normalizeRuntime)
+    .filter((runtime) => runtime !== null);
+};
+
+const isRuntimeAllowed = (runtime) => {
+  const allowed = getAllowedRuntimes();
+  if (allowed === null) return false;
+  return runtime !== null && allowed.includes(runtime);
+};
+
+const isRuntimeAvailable = (runtime) => {
+  return AVAILABLE_RUNTIMES.has(runtime);
+};
+
+const getChatRuntime = (chatId) => {
+  const chatConfig = getChatConfig(chatId);
+  if (!chatConfig) return null;
+  const value = chatConfig.runtime !== undefined ? chatConfig.runtime : chatConfig.agent;
+  if (value === undefined) return null;
+  return normalizeRuntime(value);
+};
+
+// Resolve the runtime the gateway would use to execute for a chat.
+const resolveRuntime = (chatId) => {
+  const chatConfig = getChatConfig(chatId);
+  const perChat = chatConfig
+    ? (chatConfig.runtime !== undefined ? chatConfig.runtime : chatConfig.agent)
+    : undefined;
+  const rawValue = perChat !== undefined ? perChat : getConfiguredDefaultRuntime();
+  const runtime = normalizeRuntime(rawValue);
+
+  if (!runtime) {
+    return { runtime: null, status: 'invalid' };
+  }
+
+  if (!isRuntimeAllowed(runtime)) {
+    return { runtime, status: 'not_allowed' };
+  }
+
+  if (!isRuntimeAvailable(runtime)) {
+    return { runtime, status: 'unavailable' };
+  }
+
+  return { runtime, status: 'ok' };
+};
+
 const getAllowedModels = () => {
   const config = loadConfig();
   return config.allowed_models || [];
@@ -68,5 +143,12 @@ module.exports = {
   getAllowedModels,
   getDefaultModel,
   isModelAllowed,
-  resolveModel
+  resolveModel,
+  normalizeRuntime,
+  getDefaultRuntime,
+  getAllowedRuntimes,
+  isRuntimeAllowed,
+  isRuntimeAvailable,
+  getChatRuntime,
+  resolveRuntime
 };

@@ -5,6 +5,10 @@
       "agent": "opencode"
     }
   },
+  "default_runtime": "opencode",
+  "allowed_runtimes": [
+    "opencode"
+  ],
   "allowed_models": [
     "opencode/big-pickle",
     "opencode/deepseek-v4-flash-free",

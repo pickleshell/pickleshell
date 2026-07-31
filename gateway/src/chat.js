@@ -61,6 +61,36 @@ const chatHandler = async (req, res) => {
       });
     }
 
+    // Reject execution when the configured runtime is invalid, not allowed,
+    // or not yet implemented. Never silently run OpenCode when Codex was
+    // explicitly configured.
+    const runtime = config.resolveRuntime(chat_id);
+    if (runtime.status !== 'ok') {
+      const runtimeError = {
+        invalid: {
+          status: 400,
+          error: 'runtime_invalid',
+          details: `Invalid runtime configured for chat_id: ${chat_id}`,
+        },
+        not_allowed: {
+          status: 403,
+          error: 'runtime_not_allowed',
+          details: `Runtime "${runtime.runtime}" is not allowed for chat_id: ${chat_id}`,
+        },
+        unavailable: {
+          status: 503,
+          error: 'runtime_unavailable',
+          details: `Runtime "${runtime.runtime}" is configured but not yet available in this gateway build`,
+        },
+      }[runtime.status];
+      return res.status(runtimeError.status).json({
+        ok: false,
+        chat_id,
+        error: runtimeError.error,
+        details: runtimeError.details,
+      });
+    }
+
     // Validate model against allowlist
     const resolvedModel = config.resolveModel(model);
     if (model && !resolvedModel) {
