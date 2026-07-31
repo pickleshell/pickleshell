@@ -108,12 +108,12 @@ flowchart TD
 
     subgraph SVC["PickleShell Workstation"]
         direction TB
+        subgraph SVCB["Browser"]
+            PW["Playwright"]:::impl
+        end
         subgraph SVCA["Agent"]
             OC["OpenCode"]:::impl
             CX["Codex"]:::planned
-        end
-        subgraph SVCB["Browser"]
-            PW["Playwright"]:::impl
         end
         subgraph SVCT["Terminal"]
             TTY["Interactive PTY"]:::planned
