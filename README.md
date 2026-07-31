@@ -105,7 +105,7 @@ flowchart TD
     D --> E["PickleShell Gateway"]
 
     subgraph SVC["PickleShell local services"]
-        direction LR
+        direction TB
         subgraph SVCA["Agent"]
             OC["OpenCode"]:::impl
             CX["Codex"]:::planned
