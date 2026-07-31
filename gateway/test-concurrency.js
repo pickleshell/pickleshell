@@ -78,8 +78,11 @@ assert(progressSession.ok, 'progress session acquires');
 concurrency.setTask(progressSession.slotKey, 'Create file');
 
 concurrency.updateProgress(progressSession.slotKey, {
-  type: 'tool_use',
-  part: { tool: 'write', state: { status: 'running', input: { filePath: '/tmp/test.txt' }, title: 'test.txt' } }
+  type: 'tool',
+  tool: 'write',
+  status: 'running',
+  input: { filePath: '/tmp/test.txt' },
+  title: 'test.txt'
 });
 
 let progress = concurrency.getProgress(progressSession.slotKey);
@@ -90,8 +93,12 @@ assert(progress.events[0].status === 'running', 'event status is running');
 assert(progress.events[0].tool === 'write', 'event tool is write');
 
 concurrency.updateProgress(progressSession.slotKey, {
-  type: 'tool_use',
-  part: { tool: 'write', state: { status: 'completed', input: { filePath: '/tmp/test.txt' }, output: 'OK', title: 'test.txt' } }
+  type: 'tool',
+  tool: 'write',
+  status: 'done',
+  input: { filePath: '/tmp/test.txt' },
+  output: 'OK',
+  title: 'test.txt'
 });
 
 progress = concurrency.getProgress(progressSession.slotKey);
@@ -101,7 +108,7 @@ assert(progress.events[0].output === 'OK', 'event has output');
 
 concurrency.updateProgress(progressSession.slotKey, {
   type: 'text',
-  part: { text: 'Created test.txt' }
+  text: 'Created test.txt'
 });
 
 progress = concurrency.getProgress(progressSession.slotKey);
@@ -462,22 +469,38 @@ console.log('\n=== metadata ===');
 const metaTarget = concurrency.acquire('meta-chat', 'sess-meta');
 assert(metaTarget.ok, 'metadata target acquires');
 
-// Simulate tool events
+// Simulate tool events (canonical AgentEvent shape)
 concurrency.updateProgress(metaTarget.slotKey, {
-  type: 'tool_use',
-  part: { tool: 'write', state: { status: 'completed', title: 'Create README', input: { filePath: '/docs/README.md' }, output: 'Written' } },
+  type: 'tool',
+  tool: 'write',
+  status: 'done',
+  title: 'Create README',
+  input: { filePath: '/docs/README.md' },
+  output: 'Written'
 });
 concurrency.updateProgress(metaTarget.slotKey, {
-  type: 'tool_use',
-  part: { tool: 'write', state: { status: 'completed', title: 'Create index', input: { filePath: '/src/index.js' }, output: 'Written' } },
+  type: 'tool',
+  tool: 'write',
+  status: 'done',
+  title: 'Create index',
+  input: { filePath: '/src/index.js' },
+  output: 'Written'
 });
 concurrency.updateProgress(metaTarget.slotKey, {
-  type: 'tool_use',
-  part: { tool: 'bash', state: { status: 'completed', title: 'Run tests', input: { command: 'npm test' }, output: '181 passed, 0 failed, 181 tests' } },
+  type: 'tool',
+  tool: 'bash',
+  status: 'done',
+  title: 'Run tests',
+  input: { command: 'npm test' },
+  output: '181 passed, 0 failed, 181 tests'
 });
 concurrency.updateProgress(metaTarget.slotKey, {
-  type: 'tool_use',
-  part: { tool: 'bash', state: { status: 'completed', title: 'Git commit', input: { command: 'git commit -m "feat: readme"' }, output: '[main abc1234] feat: readme' } },
+  type: 'tool',
+  tool: 'bash',
+  status: 'done',
+  title: 'Git commit',
+  input: { command: 'git commit -m "feat: readme"' },
+  output: '[main abc1234] feat: readme'
 });
 
 // Complete and check metadata

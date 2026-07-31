@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { isRuntimeRegistered } = require('./runtime/registry');
 
 let configData = null;
 
@@ -35,10 +36,12 @@ const getWorkspace = (chatId) => {
 
 const DEFAULT_RUNTIME = 'opencode';
 
-// Codex is recognized but not yet executable by this gateway build; selecting
-// it must be rejected, never silently downgraded to OpenCode.
+// Recognized runtime names (validity). Availability is NOT maintained here:
+// it is derived from the adapters registered in runtime/registry.js, the
+// single source of truth for what this gateway build can actually execute.
+// Codex is recognized but not yet executable by this build; selecting it
+// must be rejected, never silently downgraded to OpenCode.
 const KNOWN_RUNTIMES = ['opencode', 'codex'];
-const AVAILABLE_RUNTIMES = new Set(['opencode']);
 
 const normalizeRuntime = (value) => {
   if (typeof value !== 'string') return null;
@@ -71,7 +74,7 @@ const isRuntimeAllowed = (runtime) => {
 };
 
 const isRuntimeAvailable = (runtime) => {
-  return AVAILABLE_RUNTIMES.has(runtime);
+  return runtime !== null && isRuntimeRegistered(runtime);
 };
 
 const getChatRuntime = (chatId) => {

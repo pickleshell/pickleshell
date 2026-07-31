@@ -4,6 +4,10 @@
 // script, the child environment allowlist, the system instruction, the
 // argv layout, and the JSONL stdout protocol. The process lifecycle itself
 // lives in the runtime-neutral supervisor.
+//
+// The adapter translates the OpenCode JSONL protocol into canonical
+// AgentEvents (see runtime/contract.js). onProgress callbacks receive only
+// canonical events — raw OpenCode JSON never leaks past this adapter.
 
 const path = require('path');
 const { createAgentEvent } = require('../normalize');
@@ -116,11 +120,17 @@ function normalizeEvent(event) {
   }
 
   if (event.type === 'tool_use') {
+    const state = event.part?.state || {};
+    const input = {
+      ...(state.input?.filePath !== undefined ? { filePath: state.input.filePath } : {}),
+      ...(state.input?.command !== undefined ? { command: state.input.command } : {}),
+    };
     return createAgentEvent('tool', {
       tool: event.part?.tool || 'tool',
-      status: event.part?.state?.status || 'running',
-      title: event.part?.state?.title || '',
-      output: event.part?.state?.output || '',
+      status: state.status === 'completed' ? 'done' : 'running',
+      title: state.title || '',
+      input: Object.keys(input).length > 0 ? input : null,
+      output: state.output || '',
     });
   }
 
@@ -130,6 +140,7 @@ function normalizeEvent(event) {
         event.error?.data?.message ||
         event.error?.message ||
         'OpenCode returned an error',
+      error_class: 'agent_error',
     });
   }
 
@@ -170,10 +181,11 @@ function createStreamHandler({ chatId, onProgress }) {
       }
 
       const normalized = normalizeEvent(event);
-      if (normalized) events.push(normalized);
-
-      if (onProgress) {
-        try { onProgress(event); } catch (_) {}
+      if (normalized) {
+        events.push(normalized);
+        if (onProgress) {
+          try { onProgress(normalized); } catch (_) {}
+        }
       }
     },
     getSessionId() {

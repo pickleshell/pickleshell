@@ -11,6 +11,7 @@ fs.writeFileSync(
     '#!/bin/bash',
     'case "$1" in',
     '  *"__ERR__"*) printf \'%s\\n\' \'{"type":"error","error":{"message":"boom"}}\'; exit 1;;',
+    '  *"__EXIT3__"*) printf \'%s\\n\' \'{"type":"text","part":{"text":"partial"}}\'; exit 3;;',
     '  *"__SLEEP__"*) sleep 30;;',
     '  *"__SESSION__"*) printf \'%s\\n\' \'{"sessionID":"ses_abc","type":"text","part":{"text":"hi"}}\';;',
     '  *) printf \'%s\\n\' \'{"type":"text","part":{"text":"ok"}}\';;',
@@ -36,8 +37,8 @@ function assert(condition, message) {
 async function main() {
   const { RUNTIME_OPENCODE } = require('./src/runtime/contract');
   const registry = require('./src/runtime/registry');
-  const { createAgentEvent } = require('./src/runtime/normalize');
-  const { supervise } = require('./src/runtime/supervisor');
+  const { createAgentEvent, buildMetadata } = require('./src/runtime/normalize');
+  const { supervise, TERM_GRACE_MS } = require('./src/runtime/supervisor');
   const adapter = require('./src/runtime/adapters/opencode');
 
   console.log('\n=== contract ===');
@@ -50,6 +51,21 @@ async function main() {
     const bare = createAgentEvent('status');
     assert(bare.type === 'status' && bare.text === undefined && typeof bare.timestamp === 'number', 'createAgentEvent omits absent fields');
   }
+  {
+    const meta = buildMetadata([
+      createAgentEvent('tool', { tool: 'write', status: 'running', input: { filePath: '/a.js' } }),
+      createAgentEvent('tool', { tool: 'write', status: 'done', title: 'A', input: { filePath: '/a.js' } }),
+      createAgentEvent('tool', { tool: 'write', status: 'done', title: 'B', input: { filePath: '/b.js' } }),
+      createAgentEvent('tool', { tool: 'bash', status: 'done', input: { command: 'npm test' }, output: '181 passed, 0 failed, 181 tests' }),
+      createAgentEvent('tool', { tool: 'bash', status: 'done', input: { command: 'git commit -m "feat: x"' }, output: '[main abc1234] feat: x' }),
+      createAgentEvent('error', { details: 'boom', error_class: 'agent_error' }),
+    ], null);
+    assert(meta.files_modified.length === 2 && meta.files_modified[0] === '/a.js', 'buildMetadata tracks files once');
+    assert(meta.tools_used.includes('write') && meta.tools_used.includes('bash'), 'buildMetadata tracks tools');
+    assert(meta.test_result && meta.test_result.passed === 181 && meta.test_result.failed === 0, 'buildMetadata extracts test results');
+    assert(meta.git_commit === 'abc1234', 'buildMetadata extracts git commit');
+    assert(meta.error_class === 'agent_error', 'buildMetadata picks error_class from error events');
+  }
 
   console.log('\n=== registry ===');
   assert(registry.isRuntimeRegistered('opencode') === false, 'registry starts empty');
@@ -58,6 +74,8 @@ async function main() {
     registry.registerRuntime('test-fake', dummy);
     assert(registry.getRuntime('test-fake') === dummy, 'registerRuntime/getRuntime round trip');
     assert(registry.isRuntimeRegistered('test-fake'), 'isRuntimeRegistered true after register');
+    assert(registry.isRuntimeAvailable('test-fake'), 'isRuntimeAvailable true after register');
+    assert(registry.isRuntimeAvailable('missing') === false, 'isRuntimeAvailable false for unknown runtime');
     assert(registry.getRuntime('missing') === null, 'getRuntime unknown returns null');
     assert(registry.availableRuntimes().includes('test-fake'), 'availableRuntimes lists registered adapter');
   }
@@ -80,6 +98,7 @@ async function main() {
     assert(JSON.stringify(lines) === JSON.stringify(['a', 'b', 'c']), 'supervisor streams non-empty lines');
     assert(outcome.cancelled === false && outcome.timedOut === false, 'outcome flags false on clean exit');
     assert(outcome.spawnError === null, 'no spawnError on clean exit');
+    assert(outcome.signal === null, 'no signal on clean exit');
   }
   {
     const outcome = await supervise({
@@ -90,6 +109,7 @@ async function main() {
     }).promise;
     assert(outcome.timedOut === true, 'supervisor times out and SIGKILLs child');
     assert(outcome.cancelled === false, 'timeout is not a cancellation');
+    assert(outcome.code === null, 'killed-by-signal child reports no exit code');
   }
   {
     const exec = supervise({
@@ -104,6 +124,49 @@ async function main() {
     assert(outcome.cancelled === true, 'supervisor resolves cancelled outcome');
   }
   {
+    // Regression: a grandchild holding the stdout pipe open must not be
+    // orphaned. Signals go to the whole process group, so the backgrounded
+    // `sleep` dies with the group and the promise resolves on real close.
+    const marker = path.join(tempDir, 'grandchild.pid');
+    const exec = supervise({
+      command: '/bin/bash',
+      args: ['-c', `sleep 30 & echo $! > '${marker}'; wait`],
+      timeoutMs: 10000,
+      onLine: () => {},
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert(exec.cancel() === true, 'cancel() returns true with open grandchild');
+    const outcome = await exec.promise;
+    assert(outcome.cancelled === true, 'cancel resolves only after the group actually closed');
+    const pid = parseInt(fs.readFileSync(marker, 'utf8').trim(), 10);
+    let alive = true;
+    try { process.kill(pid, 0); } catch (_) { alive = false; }
+    assert(alive === false, 'grandchild process is killed with the process group');
+  }
+  {
+    // Regression: a child that ignores SIGTERM must be SIGKILLed after the
+    // grace period; the promise must NOT resolve from `proc.killed` alone.
+    // The child prints "ready" only after installing its SIGTERM handler so
+    // the signal cannot race node's startup default.
+    let execRef = null;
+    const ready = new Promise((resolve) => {
+      execRef = supervise({
+        command: process.execPath,
+        args: ['-e', 'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000);'],
+        timeoutMs: 10000,
+        onLine: (line) => { if (line === 'ready') resolve(); },
+      });
+    });
+    await ready;
+    const startedAt = Date.now();
+    assert(execRef.cancel() === true, 'cancel() returns true for SIGTERM-ignoring child');
+    const outcome = await execRef.promise;
+    const elapsed = Date.now() - startedAt;
+    assert(outcome.cancelled === true, 'SIGTERM-ignoring child resolves as cancelled');
+    assert(outcome.signal === 'SIGKILL', 'escalation delivers SIGKILL after grace period');
+    assert(elapsed >= TERM_GRACE_MS, 'cancellation waits for the SIGTERM grace period before SIGKILL');
+  }
+  {
     const outcome = await supervise({
       command: '/nonexistent-pickleshell-runtime-bin',
       args: [],
@@ -112,6 +175,7 @@ async function main() {
     }).promise;
     assert(outcome.spawnError !== null, 'supervisor reports spawn error');
     assert(outcome.code === null, 'no exit code on spawn error');
+    assert(outcome.signal === null, 'no signal on spawn error');
   }
 
   console.log('\n=== opencode adapter ===');
@@ -138,9 +202,12 @@ async function main() {
     const ev = adapter.normalizeEvent({ type: 'text', part: { text: 'hi' } });
     assert(ev && ev.type === 'text' && ev.text === 'hi', 'normalizeEvent maps text events');
     const tool = adapter.normalizeEvent({ type: 'tool_use', part: { tool: 'bash', state: { status: 'running', title: 'cmd', output: 'out' } } });
-    assert(tool && tool.type === 'tool' && tool.tool === 'bash' && tool.status === 'running', 'normalizeEvent maps tool_use events');
+    assert(tool && tool.type === 'tool' && tool.tool === 'bash' && tool.status === 'running', 'normalizeEvent maps running tool_use events');
+    assert(tool.input === null, 'tool event without input carries input:null');
+    const done = adapter.normalizeEvent({ type: 'tool_use', part: { tool: 'write', state: { status: 'completed', title: 't', input: { filePath: '/a' } } } });
+    assert(done && done.status === 'done' && done.input && done.input.filePath === '/a', 'completed tool_use maps to done with input extracted');
     const err = adapter.normalizeEvent({ type: 'error', error: { message: 'boom' } });
-    assert(err && err.type === 'error' && err.details === 'boom', 'normalizeEvent maps error events');
+    assert(err && err.type === 'error' && err.details === 'boom' && err.error_class === 'agent_error', 'normalizeEvent maps error events');
     assert(adapter.normalizeEvent({ type: 'status', part: {} }) === null, 'normalizeEvent ignores unmapped events');
     assert(adapter.normalizeEvent(null) === null, 'normalizeEvent ignores non-events');
   }
@@ -154,8 +221,8 @@ async function main() {
     assert(handler.getSessionId() === 'ses_abc', 'stream handler tracks sessionID');
     assert(handler.getError() === 'boom', 'stream handler tracks agent error');
     assert(handler.getReply('fallback') === 'one\n[run]: done', 'stream handler assembles reply');
-    assert(raw.length === 3, 'stream handler forwards raw events to onProgress');
-    assert(raw[0].type === 'text' && raw[1].type === 'tool_use', 'onProgress receives raw OpenCode events');
+    assert(raw.length === 3, 'stream handler forwards events to onProgress');
+    assert(raw[0].type === 'text' && raw[1].type === 'tool' && raw[2].type === 'error', 'onProgress receives canonical AgentEvents, not raw JSONL');
     const events = handler.getEvents();
     assert(events.length === 3 && events[0].type === 'text' && events[1].type === 'tool' && events[2].type === 'error', 'stream handler collects normalized AgentEvents');
     const bare = adapter.createStreamHandler({ chatId: 'x', onProgress: null });
@@ -164,14 +231,21 @@ async function main() {
 
   console.log('\n=== agent facade ===');
   const agent = require('./src/agent');
-  assert(typeof agent.sendMessage === 'function' && typeof agent.buildChildEnv === 'function' && typeof agent.parseJsonOutput === 'function', 'facade keeps legacy exports');
+  assert(typeof agent.sendMessage === 'function' && typeof agent.runAgentRequest === 'function', 'facade exports runAgentRequest');
+  assert(typeof agent.buildChildEnv === 'function' && typeof agent.parseJsonOutput === 'function', 'facade keeps legacy exports');
 
   {
     const result = await agent.sendMessage('pickleshell-main', 'hello', { workspace: tempDir }, 10, null, 'opencode/big-pickle', null, null).promise;
     assert(result.reply === 'ok', 'facade resolves parsed reply');
     assert(result.state === 'completed', 'facade reports completed state');
     assert(result.runtime === 'opencode', 'facade result includes runtime');
+    assert(result.ok === true && result.error === null, 'completed result has ok=true and no error');
     assert(Array.isArray(result.events) && result.events.length >= 1, 'facade result includes normalized events');
+    assert(typeof result.request_id === 'string' && result.request_id.startsWith('req_'), 'facade result includes generated request_id');
+    assert(typeof result.started_at === 'string' && typeof result.completed_at === 'string', 'facade result includes timestamps');
+    assert(typeof result.duration_ms === 'number' && result.duration_ms >= 0, 'facade result includes duration_ms');
+    assert(result.metadata && Array.isArray(result.metadata.tools_used), 'facade result includes metadata');
+    assert(result.session_id === null && result.sessionId === null, 'facade result carries session fields');
   }
   {
     const progress = [];
@@ -179,25 +253,28 @@ async function main() {
     assert(result.reply === 'hi', 'facade resolves session reply');
     assert(result.session_id === 'ses_abc', 'facade returns runtime session_id');
     assert(result.sessionId === 'ses_abc', 'facade keeps legacy sessionId alias');
-    assert(progress.length >= 1 && progress[0].type === 'text', 'facade forwards progress events');
+    assert(progress.length >= 1 && progress[0].type === 'text', 'facade forwards canonical progress events');
   }
   {
-    let rejected = null;
-    try {
-      await agent.sendMessage('pickleshell-main', 'do __ERR__ now', { workspace: tempDir }, 10, null, null, null, null).promise;
-    } catch (e) {
-      rejected = e;
-    }
-    assert(rejected && rejected.message === 'boom', 'facade rejects on agent error event');
+    const result = await agent.sendMessage('pickleshell-main', 'do __ERR__ now', { workspace: tempDir }, 10, null, null, null, null).promise;
+    assert(result.ok === false && result.state === 'error', 'facade never rejects on agent error; state=error');
+    assert(result.error && result.error.message === 'boom', 'facade embeds agent error message');
+    assert(result.error && result.error.class === 'agent_error', 'facade classifies agent error');
+    assert(result.metadata.error_class === 'agent_error', 'facade metadata carries error_class');
+    assert(result.reply === null, 'failed facade result has no reply');
   }
   {
-    let rejected = null;
-    try {
-      await agent.sendMessage('pickleshell-main', '__SLEEP__', { workspace: tempDir }, 0.05, null, null, null, null).promise;
-    } catch (e) {
-      rejected = e;
-    }
-    assert(rejected && rejected.message.includes('timeout'), 'facade rejects on timeout');
+    const result = await agent.sendMessage('pickleshell-main', '__EXIT3__', { workspace: tempDir }, 10, null, null, null, null).promise;
+    assert(result.ok === false && result.state === 'exit_error', 'facade classifies non-zero exit as exit_error');
+    assert(result.error && result.error.class === 'exit_error', 'exit_error error class set');
+    assert(result.error && result.error.exit_code === 3, 'exit_error carries the exit code');
+    assert(result.metadata.error_class === 'exit_error', 'exit_error metadata error_class');
+  }
+  {
+    const result = await agent.sendMessage('pickleshell-main', '__SLEEP__', { workspace: tempDir }, 0.05, null, null, null, null).promise;
+    assert(result.ok === false && result.state === 'timeout', 'facade never rejects on timeout; state=timeout');
+    assert(result.error && result.error.class === 'timeout', 'facade classifies timeout');
+    assert(result.metadata.error_class === 'timeout', 'timeout metadata error_class');
   }
   {
     const execution = agent.sendMessage('pickleshell-main', '__SLEEP__', { workspace: tempDir }, 5, null, null, null, null);
@@ -205,6 +282,33 @@ async function main() {
     const result = await execution.promise;
     assert(result.cancelled === true && result.reply === null, 'facade resolves cancelled result');
     assert(result.state === 'cancelled', 'facade reports cancelled state');
+    assert(result.error && result.error.class === 'cancelled', 'facade classifies cancellation');
+    assert(result.metadata.error_class === 'cancelled', 'cancelled metadata error_class');
+  }
+  {
+    // runAgentRequest never rejects even when the runtime is unknown.
+    const result = await agent.runAgentRequest({
+      runtime: 'codex',
+      chatId: 'pickleshell-main',
+      message: 'hi',
+      workspace: tempDir,
+      timeoutSec: 10,
+    }).promise;
+    assert(result.ok === false && result.state === 'error', 'unavailable runtime resolves as error');
+    assert(result.error && result.error.class === 'unavailable', 'unavailable runtime error class');
+    assert(result.metadata.error_class === 'unavailable', 'unavailable metadata error_class');
+  }
+  {
+    // runAgentRequest accepts an explicit request_id and echoes it back.
+    const result = await agent.runAgentRequest({
+      runtime: 'opencode',
+      request_id: 'req_custom-abc123',
+      chatId: 'pickleshell-main',
+      message: 'hello',
+      workspace: tempDir,
+      timeoutSec: 10,
+    }).promise;
+    assert(result.request_id === 'req_custom-abc123', 'runAgentRequest echoes the provided request_id');
   }
 
   console.log('\n=== default wrapper resolution ===');

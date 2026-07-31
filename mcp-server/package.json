@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "tsx test-file-utils.ts && tsx test-session-busy.ts && tsx test-send-chat-response.ts && tsx test-client-config-schema.ts"

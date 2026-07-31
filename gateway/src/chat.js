@@ -210,21 +210,30 @@ const chatHandler = async (req, res) => {
     // Mark agent as started (sets started_at timestamp)
     concurrency.setStarted(slotKey);
 
-    // Fire agent in background
-    const { promise, cancel } = agent.sendMessage(
-      chat_id, message, chatConfig, timeoutSec, session_id, resolvedModel,
+    // Fire agent in background through the runtime dispatcher. The resolved
+    // runtime and the concurrency request_id are passed through so the
+    // AgentResult carries the same identifiers the client already has.
+    const { promise, cancel } = agent.runAgentRequest({
+      runtime: runtime.runtime,
+      request_id: requestId,
+      chatId: chat_id,
+      message,
+      workspace: chatConfig.workspace,
+      timeoutSec,
+      session_id,
+      model: resolvedModel,
       fileSummary,
-      (event) => concurrency.updateProgress(slotKey, event)
-    );
+      onProgress: (event) => concurrency.updateProgress(slotKey, event),
+    });
 
     // Store cancel function for cancel-request tool
     concurrency.setCancelFn(slotKey, cancel);
 
     promise.then((agentResult) => {
-      if (agentResult.cancelled) {
+      if (agentResult.state === 'cancelled') {
         concurrency.setErrorClass(slotKey, 'cancelled');
         concurrency.completeCancel(slotKey, {
-          session_id: agentResult.sessionId || session_id || null,
+          session_id: agentResult.session_id || session_id || null,
         });
         slotKey = null;
         return;
@@ -233,22 +242,37 @@ const chatHandler = async (req, res) => {
       const finalProgress = concurrency.getProgress(slotKey);
       const trace = finalProgress && finalProgress.events.length > 0
         ? finalProgress.events.map(e => {
-            if (e.type === 'tool') return `${e.status === 'running' ? '...' : '✓'} ${e.tool}: ${e.title}`;
+            if (e.type === 'tool') return `${e.status === 'done' ? '✓' : '...'} ${e.tool}: ${e.title}`;
             if (e.type === 'text') return `→ ${e.text}`;
+            if (e.type === 'error') return `✗ ${e.details}`;
             return null;
           }).filter(Boolean)
         : [];
+
+      if (agentResult.error) {
+        concurrency.setErrorClass(slotKey, agentResult.error.class);
+        concurrency.complete(slotKey, {
+          reply: null,
+          error: agentResult.error.message,
+          session_id: agentResult.session_id || session_id || null,
+        });
+        concurrency.release(slotKey);
+        slotKey = null;
+        return;
+      }
+
       concurrency.complete(slotKey, {
         reply: agentResult.reply,
         trace,
-        session_id: agentResult.sessionId || session_id || null,
+        session_id: agentResult.session_id || session_id || null,
       });
       concurrency.release(slotKey);
       slotKey = null;
     }).catch((error) => {
+      // Defensive: runAgentRequest never rejects by contract, but never leak
+      // a slot if an unexpected rejection slips through.
       console.error('Chat error:', error.message);
-      const errorClass = error.message.includes('timeout') ? 'timeout' : 'agent_error';
-      concurrency.setErrorClass(slotKey, errorClass);
+      concurrency.setErrorClass(slotKey, 'internal_error');
       concurrency.complete(slotKey, { error: error.message });
       concurrency.release(slotKey);
       slotKey = null;

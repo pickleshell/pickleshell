@@ -6,6 +6,10 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pickleshell-config-test-'
 const configPath = path.join(tempDir, 'config.json');
 process.env.CONFIG_PATH = configPath;
 
+// Register runtime adapters (as chat.js does) so availability checks consult
+// the real registry instead of a static list.
+require('./src/agent');
+
 let failed = 0;
 
 function assert(condition, message) {

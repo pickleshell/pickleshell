@@ -280,6 +280,10 @@ function setTask(slotKey, task) {
   }
 }
 
+// Consume canonical AgentEvents (see src/runtime/contract.js). The event
+// stream is runtime-neutral: 'tool' events carry tool/status/title/input/
+// output, 'text' events carry text, 'error' events carry details and
+// error_class. Raw runtime JSONL never reaches this function.
 function updateProgress(slotKey, event) {
   const entry = slots.get(slotKey);
   if (!entry) return;
@@ -288,17 +292,17 @@ function updateProgress(slotKey, event) {
   const meta = entry.metadata;
   const now = Date.now();
 
-  if (event.type === 'tool_use') {
-    const tool = event.part?.tool || 'tool';
-    const status = event.part?.state?.status;
-    const title = event.part?.state?.title || '';
-    const filePath = event.part?.state?.input?.filePath || '';
-    const inputCmd = event.part?.state?.input?.command || '';
-    const output = event.part?.state?.output || '';
+  if (event.type === 'tool') {
+    const tool = event.tool || 'tool';
+    const status = event.status === 'done' ? 'done' : 'running';
+    const title = event.title || '';
+    const filePath = event.input?.filePath || '';
+    const inputCmd = event.input?.command || '';
+    const output = event.output || '';
 
     meta.tools_used.add(tool);
 
-    if (status === 'completed') {
+    if (status === 'done') {
       // Track file modifications
       if ((tool === 'write' || tool === 'edit' || tool === 'file_edit' || tool === 'file_write') && filePath) {
         if (!meta.files_modified.includes(filePath)) {
@@ -355,10 +359,19 @@ function updateProgress(slotKey, event) {
         progress.push(entry);
       }
     }
-  } else if (event.type === 'text' && event.part?.text) {
+  } else if (event.type === 'text' && event.text) {
     progress.push({
       type: 'text',
-      text: event.part.text.substring(0, 300),
+      text: event.text.substring(0, 300),
+      ts: now,
+    });
+  } else if (event.type === 'error') {
+    if (event.error_class) {
+      meta.error_class = event.error_class;
+    }
+    progress.push({
+      type: 'error',
+      details: event.details || 'Agent error',
       ts: now,
     });
   }
