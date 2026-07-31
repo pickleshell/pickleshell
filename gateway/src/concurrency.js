@@ -84,8 +84,17 @@ function reapStale() {
   }
   for (const [key, entry] of slots) {
     if (now - entry.started > staleTimeoutMs) {
-      console.warn(`[CONCURRENCY] Reaping stale slot ${key} (held ${Math.round((now - entry.started) / 1000)}s)`);
-      release(key);
+      if (!entry.cancelling) {
+        console.warn(`[CONCURRENCY] Reaping stale slot ${key} (held ${Math.round((now - entry.started) / 1000)}s)`);
+        entry.cancelling = true;
+        if (entry.cancelFn) {
+          try { entry.cancelFn(); } catch (err) {
+            console.error(`[CONCURRENCY] Failed to cancel stale slot ${key}: ${err.message}`);
+          }
+        } else {
+          console.warn(`[CONCURRENCY] Stale slot ${key} has no cancel function yet`);
+        }
+      }
     }
   }
 }
@@ -159,7 +168,13 @@ function setStarted(slotKey) {
 
 function setCancelFn(slotKey, fn) {
   const entry = slots.get(slotKey);
-  if (entry) entry.cancelFn = fn;
+  if (!entry) return;
+  entry.cancelFn = fn;
+  if (entry.cancelling) {
+    try { fn(); } catch (err) {
+      console.error(`[CONCURRENCY] Failed to cancel slot ${slotKey}: ${err.message}`);
+    }
+  }
 }
 
 function setErrorClass(slotKey, errorClass) {
@@ -209,7 +224,8 @@ function complete(slotKey, output) {
     ...output,
     request_id: entry.requestId,
     chat_id: entry.chatId,
-    metadata: serializeMetadata(entry.metadata),
+    session_id: output.session_id !== undefined ? output.session_id : (entry.sessionId || null),
+    metadata: output.metadata || serializeMetadata(entry.metadata),
     completedAt,
     createdAt: entry.createdAt,
     startedAt: entry.startedAt,
@@ -247,6 +263,8 @@ function completeCancel(slotKey, output) {
     ...output,
     request_id: entry.requestId,
     chat_id: entry.chatId,
+    session_id: output.session_id !== undefined ? output.session_id : (entry.sessionId || null),
+    metadata: output.metadata || serializeMetadata(entry.metadata),
     completedAt,
     createdAt: entry.createdAt,
     startedAt: entry.startedAt,
@@ -480,12 +498,19 @@ function getRequestOutput(requestId) {
       state: 'completed',
       request_id: requestId,
       output: {
+        request_id: completed.request_id,
+        runtime: completed.runtime || null,
+        execution_state: completed.execution_state || null,
         reply: completed.reply,
         trace: completed.trace || [],
         session_id: completed.session_id || null,
+        events: completed.events || [],
         error: completed.error || null,
         cancelled: completed.cancelled || false,
         metadata: completed.metadata || null,
+        started_at: completed.started_at || null,
+        completed_at: completed.completed_at || null,
+        duration_ms: completed.duration_ms ?? completed.execution_ms ?? null,
       },
       next_action: null,
       retry_after_ms: 0,
@@ -572,11 +597,19 @@ function sessionOutput(chatId, sessionId) {
       state: 'completed',
       session_id: sessionId,
       output: {
+        request_id: completed.request_id,
+        runtime: completed.runtime || null,
+        execution_state: completed.execution_state || null,
         reply: completed.reply,
         trace: completed.trace || [],
+        session_id: completed.session_id || null,
+        events: completed.events || [],
         error: completed.error || null,
         cancelled: completed.cancelled || false,
         metadata: completed.metadata || null,
+        started_at: completed.started_at || null,
+        completed_at: completed.completed_at || null,
+        duration_ms: completed.duration_ms ?? completed.execution_ms ?? null,
       },
       next_action: null,
       retry_after_ms: 0,

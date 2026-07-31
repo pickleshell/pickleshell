@@ -463,6 +463,94 @@ assert(idemAfterRelease.type === 'completed', 'released key shows completed');
 
 console.log(`idempotency tests: ${passed} passed`);
 
+// === canonical outcome persistence tests ===
+console.log('\n=== canonical outcome ===');
+
+// complete() persists the full canonical AgentResult: runtime,
+// execution_state, events, structured error, metadata — while the top-level
+// lifecycle state stays 'completed'.
+const canonTarget = concurrency.acquire('canon-chat', 'sess-canon');
+assert(canonTarget.ok, 'canonical target acquires');
+concurrency.setTask(canonTarget.slotKey, 'Canonical task');
+
+const canonEvents = [{ type: 'text', timestamp: Date.now(), text: 'hello' }];
+const canonMetadata = { files_modified: [], tools_used: [], test_result: null, git_commit: null, error_class: null };
+concurrency.complete(canonTarget.slotKey, {
+  reply: 'canon reply',
+  trace: ['✓ done'],
+  session_id: 'sess-canon',
+  runtime: 'opencode',
+  execution_state: 'done',
+  events: canonEvents,
+  error: null,
+  metadata: canonMetadata,
+});
+concurrency.release(canonTarget.slotKey);
+
+const canonStatus = concurrency.getRequestStatus(canonTarget.request_id);
+assert(canonStatus.state === 'completed', 'canonical completed request keeps lifecycle state completed');
+assert(canonStatus.next_action === 'session-output', 'canonical completed request points to session-output');
+
+const canonOutput = concurrency.getRequestOutput(canonTarget.request_id);
+assert(canonOutput.state === 'completed', 'canonical output request state completed');
+assert(canonOutput.output.runtime === 'opencode', 'canonical output persists runtime');
+assert(canonOutput.output.execution_state === 'done', 'canonical output persists execution_state');
+assert(canonOutput.output.reply === 'canon reply', 'canonical output persists reply');
+assert(canonOutput.output.events.length === 1 && canonOutput.output.events[0].text === 'hello', 'canonical output persists events');
+assert(canonOutput.output.error === null, 'canonical output persists structured error');
+assert(canonOutput.output.metadata.error_class === null, 'canonical output persists metadata');
+
+const canonSessOut = concurrency.sessionOutput('canon-chat', 'sess-canon');
+assert(canonSessOut.output.execution_state === 'done', 'sessionOutput also exposes execution_state');
+assert(canonSessOut.output.events.length === 1, 'sessionOutput exposes events');
+assert(canonSessOut.output.runtime === 'opencode', 'sessionOutput exposes runtime');
+
+// Failed outcome: execution_state + structured error persisted, but the
+// top-level lifecycle state remains 'completed'.
+const canonErr = concurrency.acquire('canon-chat', 'sess-canon-err');
+assert(canonErr.ok, 'canonical error target acquires');
+concurrency.complete(canonErr.slotKey, {
+  reply: null,
+  trace: [],
+  session_id: 'sess-canon-err',
+  runtime: 'opencode',
+  execution_state: 'timeout',
+  events: [],
+  error: { class: 'timeout', message: 'Agent response timeout', exit_code: null, signal: null },
+  metadata: { files_modified: [], tools_used: [], test_result: null, git_commit: null, error_class: 'timeout' },
+});
+concurrency.release(canonErr.slotKey);
+
+const canonErrOutput = concurrency.getRequestOutput(canonErr.request_id);
+assert(canonErrOutput.output.execution_state === 'timeout', 'failed outcome persists execution_state');
+assert(canonErrOutput.output.error && canonErrOutput.output.error.class === 'timeout', 'failed outcome persists structured error class');
+assert(canonErrOutput.output.error.message === 'Agent response timeout', 'failed outcome persists structured error message');
+assert(concurrency.getRequestStatus(canonErr.request_id).state === 'completed', 'failed outcome does not change lifecycle state');
+
+// completeCancel persists the canonical cancelled outcome and releases.
+const canonCancel = concurrency.acquire('canon-chat', 'sess-canon-cancel');
+assert(canonCancel.ok, 'canonical cancel target acquires');
+concurrency.completeCancel(canonCancel.slotKey, {
+  session_id: 'sess-canon-cancel',
+  runtime: 'opencode',
+  execution_state: 'cancelled',
+  events: [],
+  error: { class: 'cancelled', message: 'Cancelled', exit_code: null, signal: null },
+  metadata: { files_modified: [], tools_used: [], test_result: null, git_commit: null, error_class: 'cancelled' },
+});
+
+const canonCancelOutput = concurrency.getRequestOutput(canonCancel.request_id);
+assert(canonCancelOutput.output.cancelled === true, 'cancel output has cancelled flag');
+assert(canonCancelOutput.output.execution_state === 'cancelled', 'cancel output persists execution_state');
+assert(canonCancelOutput.output.runtime === 'opencode', 'cancel output persists runtime');
+assert(canonCancelOutput.output.error.class === 'cancelled', 'cancel output persists structured error');
+assert(concurrency.getRequestStatus(canonCancel.request_id).state === 'completed', 'cancelled outcome keeps lifecycle state completed');
+const cancelReuse = concurrency.acquire('canon-chat', 'sess-canon-cancel');
+assert(cancelReuse.ok, 'completeCancel releases the session for reuse');
+concurrency.release(cancelReuse.slotKey);
+
+console.log(`canonical outcome tests: ${passed} passed`);
+
 // === metadata tests ===
 console.log('\n=== metadata ===');
 

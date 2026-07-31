@@ -7,9 +7,10 @@
 // surface for backward compatibility.
 //
 // runAgentRequest() returns { promise, cancel }, like supervise() and the
-// legacy sendMessage(). Its promise NEVER rejects: every failure (spawn,
-// timeout, agent error, non-zero exit, cancellation, unavailable runtime) is
-// represented in the returned AgentResult.
+// legacy sendMessage(). Its promise NEVER rejects: every failure — including
+// synchronous adapter preparation (buildPrompt/buildArgs/buildChildEnv/
+// createStreamHandler/supervisor setup) and parser failures inside onLine —
+// is represented in the returned AgentResult, never thrown synchronously.
 
 const crypto = require('crypto');
 const { RUNTIME_OPENCODE } = require('./runtime/contract');
@@ -26,7 +27,7 @@ function generateRequestId() {
   return `req_${ts}-${rand}`;
 }
 
-function classifyOutcome({ cancelled, timedOut, spawnError, exitCode, exitSignal, agentError }) {
+function classifyOutcome({ cancelled, timedOut, spawnError, onLineError, exitCode, exitSignal, agentError }) {
   if (cancelled) {
     return {
       state: 'cancelled',
@@ -46,6 +47,13 @@ function classifyOutcome({ cancelled, timedOut, spawnError, exitCode, exitSignal
       state: 'error',
       errorClass: 'spawn_error',
       error: { class: 'spawn_error', message: spawnError.message, exit_code: exitCode, signal: exitSignal },
+    };
+  }
+  if (onLineError) {
+    return {
+      state: 'error',
+      errorClass: 'internal_error',
+      error: { class: 'internal_error', message: `Failed to process agent output: ${onLineError.message}`, exit_code: exitCode, signal: exitSignal },
     };
   }
   if (agentError) {
@@ -109,34 +117,58 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
     return { promise, cancel: () => false };
   }
 
-  const prompt = adapter.buildPrompt(message, fileSummary);
-  const args = adapter.buildArgs(prompt, workspace, session_id, model);
+  let handler = null;
+  let procPromise = null;
+  let cancel = () => false;
 
-  console.log(
-    `[${runtimeName.toUpperCase()}] request chat=${chatId}` +
-    ` request_id=${requestId}` +
-    ` session=${session_id ? 'existing' : 'new'}` +
-    ` model=${model || 'default'}` +
-    ` files=${fileSummary?.length || 0}` +
-    ` message_len=${message.length}`
-  );
+  try {
+    const prompt = adapter.buildPrompt(message, fileSummary);
+    const args = adapter.buildArgs(prompt, workspace, session_id, model);
 
-  const handler = adapter.createStreamHandler({ chatId, onProgress });
+    console.log(
+      `[${runtimeName.toUpperCase()}] request chat=${chatId}` +
+      ` request_id=${requestId}` +
+      ` session=${session_id ? 'existing' : 'new'}` +
+      ` model=${model || 'default'}` +
+      ` files=${fileSummary?.length || 0}` +
+      ` message_len=${message.length}`
+    );
 
-  const { promise: procPromise, cancel } = supervise({
-    command: 'bash',
-    args,
-    cwd: workspace,
-    env: adapter.buildChildEnv(),
-    timeoutMs: timeoutSec * 1000,
-    onLine: handler.handleLine,
-  });
+    handler = adapter.createStreamHandler({ chatId, onProgress });
+    const proc = supervise({
+      command: 'bash',
+      args,
+      cwd: workspace,
+      env: adapter.buildChildEnv(),
+      timeoutMs: timeoutSec * 1000,
+      onLine: handler.handleLine,
+    });
+    procPromise = proc.promise;
+    cancel = proc.cancel;
+  } catch (err) {
+    const error = { class: 'internal_error', message: `Adapter preparation failed: ${err.message}`, exit_code: null, signal: null };
+    const promise = Promise.resolve(buildAgentResult({
+      ok: false,
+      runtime: runtimeName,
+      request_id: requestId,
+      session_id: session_id || null,
+      state: 'error',
+      reply: null,
+      events: [],
+      errorClass: 'internal_error',
+      error,
+      startedAt,
+      startedMs,
+    }));
+    return { promise, cancel: () => false };
+  }
 
-  const promise = procPromise.then(({ code, signal, cancelled, timedOut, spawnError }) => {
+  const promise = procPromise.then(({ code, signal, cancelled, timedOut, spawnError, onLineError }) => {
     const classification = classifyOutcome({
       cancelled,
       timedOut,
       spawnError,
+      onLineError,
       exitCode: code,
       exitSignal: signal,
       agentError: handler.getError(),

@@ -5,6 +5,15 @@ const concurrency = require('./concurrency');
 const { timeoutSec } = require('./timeout');
 const crypto = require('crypto');
 
+// Map the internal AgentResult.state onto the public execution-state
+// vocabulary reported under output.execution_state:
+// done | error | timeout | cancelled | exit_error. The top-level polling
+// state (session-status/session-output.state) stays the request-lifecycle
+// state 'completed' regardless — it only means the async request finished
+// and its result is readable, not that the agent succeeded.
+const executionStateOf = (agentResult) =>
+  agentResult.state === 'completed' ? 'done' : agentResult.state;
+
 const chatHandler = async (req, res) => {
   let slotKey = null;
   try {
@@ -230,10 +239,23 @@ const chatHandler = async (req, res) => {
     concurrency.setCancelFn(slotKey, cancel);
 
     promise.then((agentResult) => {
+      // Persist the full canonical AgentResult into the result buffer so
+      // session-output can report the execution outcome (runtime,
+      // execution_state, events, structured error, metadata) while the
+      // top-level state remains the request-lifecycle 'completed'.
       if (agentResult.state === 'cancelled') {
         concurrency.setErrorClass(slotKey, 'cancelled');
         concurrency.completeCancel(slotKey, {
           session_id: agentResult.session_id || session_id || null,
+          runtime: agentResult.runtime,
+          execution_state: executionStateOf(agentResult),
+          reply: agentResult.reply,
+          events: agentResult.events,
+          error: agentResult.error,
+          metadata: agentResult.metadata,
+          started_at: agentResult.started_at,
+          completed_at: agentResult.completed_at,
+          duration_ms: agentResult.duration_ms,
         });
         slotKey = null;
         return;
@@ -249,22 +271,18 @@ const chatHandler = async (req, res) => {
           }).filter(Boolean)
         : [];
 
-      if (agentResult.error) {
-        concurrency.setErrorClass(slotKey, agentResult.error.class);
-        concurrency.complete(slotKey, {
-          reply: null,
-          error: agentResult.error.message,
-          session_id: agentResult.session_id || session_id || null,
-        });
-        concurrency.release(slotKey);
-        slotKey = null;
-        return;
-      }
-
       concurrency.complete(slotKey, {
         reply: agentResult.reply,
         trace,
         session_id: agentResult.session_id || session_id || null,
+        runtime: agentResult.runtime,
+        execution_state: executionStateOf(agentResult),
+        events: agentResult.events,
+        error: agentResult.error,
+        metadata: agentResult.metadata,
+        started_at: agentResult.started_at,
+        completed_at: agentResult.completed_at,
+        duration_ms: agentResult.duration_ms,
       });
       concurrency.release(slotKey);
       slotKey = null;

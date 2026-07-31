@@ -167,6 +167,26 @@ async function main() {
     assert(elapsed >= TERM_GRACE_MS, 'cancellation waits for the SIGTERM grace period before SIGKILL');
   }
   {
+    // Regression: a throw inside onLine must not crash the supervisor or
+    // leave the child running. The process group is SIGKILLed, no further
+    // lines are delivered, and the error is reported via onLineError.
+    const lines = [];
+    const outcome = await supervise({
+      command: '/bin/bash',
+      args: ['-c', 'printf "good\\n"; sleep 30'],
+      timeoutMs: 10000,
+      onLine: (line) => {
+        lines.push(line);
+        if (line === 'good') throw new Error('onLine exploded');
+      },
+    }).promise;
+    assert(outcome.onLineError !== null, 'supervisor reports onLineError');
+    assert(outcome.onLineError.message === 'onLine exploded', 'onLineError carries the thrown message');
+    assert(outcome.cancelled === false && outcome.timedOut === false, 'onLine failure is neither cancel nor timeout');
+    assert(outcome.code === null && outcome.signal === 'SIGKILL', 'onLine failure SIGKILLs the process group');
+    assert(lines.length === 1 && lines[0] === 'good', 'no further onLine deliveries after failure');
+  }
+  {
     const outcome = await supervise({
       command: '/nonexistent-pickleshell-runtime-bin',
       args: [],
@@ -309,6 +329,64 @@ async function main() {
       timeoutSec: 10,
     }).promise;
     assert(result.request_id === 'req_custom-abc123', 'runAgentRequest echoes the provided request_id');
+  }
+  {
+    // Never-reject boundary: synchronous adapter preparation must not throw.
+    // A broken adapter whose buildPrompt throws yields an internal_error
+    // AgentResult instead of a synchronous exception.
+    registry.registerRuntime('prepboom', {
+      name: 'prepboom',
+      buildPrompt() { throw new Error('prep exploded'); },
+      buildArgs() { return []; },
+      buildChildEnv() { return {}; },
+      createStreamHandler() {
+        return { handleLine() {}, getSessionId() { return null; }, getError() { return null; }, getReply(f) { return f; }, getEvents() { return []; } };
+      },
+    });
+    const prepResult = await agent.runAgentRequest({
+      runtime: 'prepboom',
+      chatId: 'pickleshell-main',
+      message: 'hi',
+      workspace: tempDir,
+      timeoutSec: 10,
+    }).promise;
+    assert(prepResult.ok === false && prepResult.state === 'error', 'sync adapter prep failure resolves as error');
+    assert(prepResult.error && prepResult.error.class === 'internal_error', 'sync adapter prep failure classifies as internal_error');
+    assert(prepResult.error.message.includes('prep exploded'), 'sync adapter prep failure embeds the message');
+    assert(prepResult.metadata.error_class === 'internal_error', 'sync adapter prep failure metadata error_class');
+  }
+  {
+    // Never-reject boundary: a parser/normalizer (onLine) failure must kill
+    // the process group and surface as internal_error, not crash the facade.
+    registry.registerRuntime('lineboom', {
+      name: 'lineboom',
+      buildPrompt() { return 'prompt'; },
+      buildArgs() { return ['-c', 'printf "__THROW__\\n"']; },
+      buildChildEnv() { return { PATH: process.env.PATH || '/usr/bin:/bin' }; },
+      createStreamHandler() {
+        return {
+          handleLine(line) {
+            if (line === '__THROW__') throw new Error('parser exploded');
+          },
+          getSessionId() { return null; },
+          getError() { return null; },
+          getReply(f) { return f; },
+          getEvents() { return []; },
+        };
+      },
+    });
+    const lineResult = await agent.runAgentRequest({
+      runtime: 'lineboom',
+      chatId: 'pickleshell-main',
+      message: 'hi',
+      workspace: tempDir,
+      timeoutSec: 10,
+    }).promise;
+    assert(lineResult.ok === false && lineResult.state === 'error', 'onLine failure resolves as error');
+    assert(lineResult.error && lineResult.error.class === 'internal_error', 'onLine failure classifies as internal_error');
+    assert(lineResult.error.message.includes('Failed to process agent output'), 'onLine failure message names the parser');
+    assert(lineResult.error.message.includes('parser exploded'), 'onLine failure embeds the thrown message');
+    assert(lineResult.metadata.error_class === 'internal_error', 'onLine failure metadata error_class');
   }
 
   console.log('\n=== default wrapper resolution ===');

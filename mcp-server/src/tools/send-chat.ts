@@ -42,7 +42,8 @@ export const sendChatSchema = {
     .string()
     .optional()
     .describe(
-      "Optional model override (opencode/big-pickle, anthropic/claude-sonnet-4-20250514, qwen/qwen3-coder)"
+      "Optional model override from the operator-controlled gateway allowlist. " +
+        "Examples: opencode/big-pickle, opencode-go/gpt-5.6-luna, opencode-go/qwen3.7-plus"
     ),
   destination_dir: z
     .string()

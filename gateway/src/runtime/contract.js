@@ -47,6 +47,11 @@ const RUNTIME_OPENCODE = 'opencode';
 //   exit_code?: number|null,
 //   signal?: string|null,
 // }
+//
+// 'internal_error' is reserved for gateway-side failures that are NOT the
+// agent's fault: synchronous adapter preparation (buildPrompt/buildArgs/
+// buildChildEnv/createStreamHandler/supervisor setup) throwing, and parser/
+// normalizer failures inside the adapter's onLine stream handler.
 
 // AgentResult — unified outcome; runAgentRequest() always resolves with one.
 // {
@@ -69,6 +74,25 @@ const RUNTIME_OPENCODE = 'opencode';
 //   completed_at: string|null,   // ISO 8601
 //   duration_ms: number|null,
 // }
+//
+// The dispatcher (chat.js) persists the full AgentResult through
+// concurrency.complete()/completeCancel() and reports the outcome under
+// session-output as output.execution_state, using the PUBLIC vocabulary
+// done|error|timeout|cancelled|exit_error (AgentResult.state 'completed' is
+// exposed as 'done'). The top-level session-status/session-output state is a
+// DIFFERENT automaton — the request lifecycle (new_session|busy|completed).
+// A finished timeout/error/cancelled request therefore still reports
+// state:'completed' with next_action:'session-output'; the failure lives in
+// output.execution_state + output.error, never in the top-level state.
+
+// Isolation rules that adapters and the supervisor MUST honor:
+//   - onProgress (the progress consumer) may throw; the adapter must catch,
+//     log, and continue streaming. A consumer failure must never kill a
+//     healthy agent.
+//   - onLine (the parser/normalizer) throwing means the gateway cannot trust
+//     the stream; the supervisor SIGKILLs the process group, stops further
+//     delivery, and reports onLineError. The facade classifies it as
+//     internal_error.
 
 // Adapter interface (implemented by runtime/adapters/*):
 //   name: string

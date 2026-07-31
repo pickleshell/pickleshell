@@ -184,7 +184,12 @@ function createStreamHandler({ chatId, onProgress }) {
       if (normalized) {
         events.push(normalized);
         if (onProgress) {
-          try { onProgress(normalized); } catch (_) {}
+          // Isolate the progress consumer: a failing onProgress callback is
+          // logged, never rethrown, and never allowed to kill a healthy
+          // agent process.
+          try { onProgress(normalized); } catch (err) {
+            console.error(`[OPENCODE] onProgress consumer failed: ${err.message}`);
+          }
         }
       }
     },

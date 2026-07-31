@@ -9,6 +9,7 @@ process.env.CONFIG_PATH = configPath;
 // Register runtime adapters (as chat.js does) so availability checks consult
 // the real registry instead of a static list.
 require('./src/agent');
+const concurrency = require('./src/concurrency');
 
 let failed = 0;
 
@@ -219,6 +220,10 @@ async function main() {
     assert(res._status === 503, 'codex chat -> 503 runtime_unavailable');
     assert(res._body?.error === 'runtime_unavailable', 'codex chat rejected with runtime_unavailable');
     assert(res._body?.details.includes('codex'), 'codex chat rejection names the runtime');
+    assert(
+      concurrency.status().active_count === 0,
+      'unavailable runtime is rejected before any slot is acquired'
+    );
   }
 
   {

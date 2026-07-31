@@ -22,10 +22,15 @@
 //     cancelled,   // true when cancel() was called before the child exited
 //     timedOut,    // true when the timeout fired (group is SIGKILLed)
 //     spawnError,  // spawn error (e.g. ENOENT) if the child could not start
+//     onLineError, // error thrown by onLine(); the group is SIGKILLed and no
+//                  // further lines are delivered once this is set
 //   }
 //
 // onLine(line) receives every non-empty trimmed stdout line, including a
-// trailing partial line flushed when the child exits.
+// trailing partial line flushed when the child exits. A throw from onLine is
+// isolated: it never propagates out of the supervisor. Instead the process
+// group is SIGKILLed, further output is ignored, and the error is reported
+// via onLineError in the outcome.
 
 const { spawn } = require('child_process');
 
@@ -59,6 +64,17 @@ function supervise({ command, args, cwd, env, timeoutMs, onLine }) {
   let buffer = '';
   let spawnError = null;
   let exitSignal = null;
+  let onLineError = null;
+
+  const callOnLine = (line) => {
+    if (onLineError) return;
+    try {
+      onLine(line);
+    } catch (err) {
+      onLineError = err;
+      killProcessGroup(proc, 'SIGKILL');
+    }
+  };
 
   const promise = new Promise((resolve) => {
     proc = spawn(command, args, {
@@ -77,7 +93,7 @@ function supervise({ command, args, cwd, env, timeoutMs, onLine }) {
       buffer = lines.pop() || '';
       for (const line of lines) {
         const trimmed = line.trim();
-        if (trimmed) onLine(trimmed);
+        if (trimmed) callOnLine(trimmed);
       }
     });
 
@@ -99,8 +115,8 @@ function supervise({ command, args, cwd, env, timeoutMs, onLine }) {
       if (settled) return;
       settled = true;
       exitSignal = signal || null;
-      if (buffer.trim()) onLine(buffer.trim());
-      resolve({ code, signal: exitSignal, stdout, stderr, cancelled, timedOut, spawnError });
+      if (buffer.trim()) callOnLine(buffer.trim());
+      resolve({ code, signal: exitSignal, stdout, stderr, cancelled, timedOut, spawnError, onLineError });
     });
 
     proc.on('error', (err) => {
@@ -109,7 +125,7 @@ function supervise({ command, args, cwd, env, timeoutMs, onLine }) {
       spawnError = err;
       if (settled) return;
       settled = true;
-      resolve({ code: null, signal: null, stdout, stderr, cancelled, timedOut, spawnError });
+      resolve({ code: null, signal: null, stdout, stderr, cancelled, timedOut, spawnError, onLineError });
     });
   });
 
