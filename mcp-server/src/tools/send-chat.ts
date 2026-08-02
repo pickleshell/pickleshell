@@ -38,6 +38,12 @@ export const sendChatSchema = {
     .regex(/^[A-Za-z0-9_-]{1,128}$/, "session_id must be 1-128 chars: letters, numbers, _, -")
     .optional()
     .describe("Optional session ID to continue a previous conversation"),
+  agent: z
+    .enum(["opencode", "codex"])
+    .optional()
+    .describe(
+      "Optional agent/backend for this request. If omitted, use chat runtime, then default_runtime from config."
+    ),
   model: z
     .string()
     .optional()
@@ -79,6 +85,7 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
       "The command executes asynchronously — the response returns immediately with request_id and state 'busy'. " +
       "For a new conversation, session_id may be null until execution completes. " +
       "After completion, the real OpenCode session_id appears in the session-output response. " +
+      "Use the optional agent field to choose opencode or codex for this request; when omitted, runtime is resolved from config. " +
       "Use session-status with request_id to poll progress, " +
       "then use session-output to read the final reply and trace. " +
       "Optionally include small files (base64-encoded, max 20 files, 2 MiB each, 10 MiB total) " +
@@ -90,6 +97,7 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
       chat_id: string;
       message: string;
       session_id?: string;
+      agent?: "opencode" | "codex";
       model?: string;
       destination_dir?: string;
       files?: Array<{
@@ -107,6 +115,7 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
           chat_id: args.chat_id,
           message_len: args.message?.length,
           session_id: args.session_id,
+          agent: args.agent,
           model: args.model,
           destination_dir: args.destination_dir,
           files_count: args.files?.length ?? 0,
@@ -138,6 +147,7 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
             chat_id: args.chat_id,
             message: args.message,
             session_id: args.session_id,
+            agent: args.agent,
             model: args.model,
             destination_dir: args.destination_dir,
             file_paths: fileTransfers,

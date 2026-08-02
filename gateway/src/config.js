@@ -86,12 +86,14 @@ const getChatRuntime = (chatId) => {
 };
 
 // Resolve the runtime the gateway would use to execute for a chat.
-const resolveRuntime = (chatId) => {
+const resolveRuntime = (chatId, requestedRuntime) => {
   const chatConfig = getChatConfig(chatId);
   const perChat = chatConfig
     ? (chatConfig.runtime !== undefined ? chatConfig.runtime : chatConfig.agent)
     : undefined;
-  const rawValue = perChat !== undefined ? perChat : getConfiguredDefaultRuntime();
+  const rawValue = requestedRuntime !== undefined
+    ? requestedRuntime
+    : (perChat !== undefined ? perChat : getConfiguredDefaultRuntime());
   const runtime = normalizeRuntime(rawValue);
 
   if (!runtime) {

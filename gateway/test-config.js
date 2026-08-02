@@ -47,12 +47,12 @@ function mockRes() {
   return res;
 }
 
-async function runChatHandler(configObject, chatId) {
+async function runChatHandler(configObject, chatId, overrides = {}) {
   loadConfig(configObject);
   delete require.cache[require.resolve('./src/chat')];
   const chatHandler = require('./src/chat');
   const res = mockRes();
-  await chatHandler(mockReq({ chat_id: chatId, message: 'run' }), res);
+  await chatHandler(mockReq({ chat_id: chatId, message: 'run', ...overrides }), res);
   return res;
 }
 
@@ -85,6 +85,8 @@ async function main() {
     assert(deepEqual(config.getAllowedRuntimes(), ['opencode']), 'legacy config allowed runtimes defaults to [opencode]');
     const resolved = config.resolveRuntime('test');
     assert(resolved.status === 'ok' && resolved.runtime === 'opencode', 'legacy config resolves to opencode for execution');
+    assert(config.resolveRuntime('test', 'opencode').status === 'ok', 'request agent can explicitly select opencode');
+    assert(config.resolveRuntime('test', 'bogus').status === 'invalid', 'request agent rejects unknown runtime');
   }
 
   // ==============================================
@@ -255,6 +257,18 @@ async function main() {
     );
     assert(res._status === 400, 'invalid runtime chat -> 400 runtime_invalid');
     assert(res._body?.error === 'runtime_invalid', 'invalid chat rejected with runtime_invalid');
+  }
+
+  {
+    const res = await runChatHandler(
+      {
+        chats: { test: { workspace: tempDir, runtime: 'opencode' } },
+      },
+      'test',
+      { agent: 'bogus' }
+    );
+    assert(res._status === 400, 'invalid request agent -> 400');
+    assert(res._body?.error === 'runtime_invalid', 'invalid request agent uses runtime validation');
   }
 
   fs.rmSync(tempDir, { recursive: true, force: true });

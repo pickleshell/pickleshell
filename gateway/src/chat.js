@@ -17,7 +17,7 @@ const executionStateOf = (agentResult) =>
 const chatHandler = async (req, res) => {
   let slotKey = null;
   try {
-    const { chat_id, message, session_id, model, file_paths, destination_dir, idempotency_key } = req.body;
+    const { chat_id, message, agent: requestedAgent, session_id, model, file_paths, destination_dir, idempotency_key } = req.body;
 
     // Validate request
     if (!chat_id || typeof chat_id !== 'string' || chat_id.trim() === '') {
@@ -33,6 +33,14 @@ const chatHandler = async (req, res) => {
         ok: false,
         error: 'invalid_request',
         details: 'message is required and must be a non-empty string'
+      });
+    }
+
+    if (requestedAgent !== undefined && typeof requestedAgent !== 'string') {
+      return res.status(400).json({
+        ok: false,
+        error: 'invalid_request',
+        details: 'agent must be a runtime name such as opencode or codex',
       });
     }
 
@@ -73,7 +81,7 @@ const chatHandler = async (req, res) => {
     // Reject execution when the configured runtime is invalid, not allowed,
     // or not yet implemented. Never silently run OpenCode when Codex was
     // explicitly configured.
-    const runtime = config.resolveRuntime(chat_id);
+    const runtime = config.resolveRuntime(chat_id, requestedAgent);
     if (runtime.status !== 'ok') {
       const runtimeError = {
         invalid: {

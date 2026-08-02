@@ -49,10 +49,10 @@ registry.registerRuntime('codex', {
     if (message.includes('__PREP_THROW__')) {
       throw new Error('prep exploded');
     }
-    return 'prep';
+    return message;
   },
-  buildArgs() {
-    return [fakeWrapper, '__THROW_LINE__', '', ''];
+  buildArgs(prompt) {
+    return [fakeWrapper, prompt.includes('anything') ? '__THROW_LINE__' : 'codex-test-success', '', ''];
   },
   buildChildEnv() {
     return { PATH: process.env.PATH || '/usr/bin:/bin' };
@@ -118,7 +118,7 @@ function waitForCompletion(requestId, timeoutMs = 15000) {
 
 // Reload config + timeout + chat with fresh settings so each scenario starts
 // from a clean module state (timeoutSec is captured at chat load time).
-async function runScenario({ chatId, chats, allowedRuntimes, message, sessionId, agentTimeoutSec, cancelAfterMs, beforeWait }) {
+async function runScenario({ chatId, chats, allowedRuntimes, message, sessionId, agent, agentTimeoutSec, cancelAfterMs, beforeWait }) {
   const config = { chats };
   if (allowedRuntimes !== undefined) config.allowed_runtimes = allowedRuntimes;
   fs.writeFileSync(configPath, JSON.stringify(config));
@@ -134,7 +134,7 @@ async function runScenario({ chatId, chats, allowedRuntimes, message, sessionId,
 
   const chatHandler = require('./src/chat');
   const res = mockRes();
-  await chatHandler(mockReq({ chat_id: chatId, message, session_id: sessionId }), res);
+  await chatHandler(mockReq({ chat_id: chatId, message, agent, session_id: sessionId }), res);
 
   const requestId = res._body.request_id;
   if (cancelAfterMs !== undefined) {
@@ -192,6 +192,22 @@ async function main() {
     assert(output.output.reply === null, 'agent error: no reply');
     assert(output.output.cancelled === false, 'agent error: not a cancellation');
     assert(output.output.metadata.error_class === 'agent_error', 'agent error: metadata error_class');
+  }
+
+  // An explicit request agent overrides the configured OpenCode backend.
+  {
+    console.log('\n=== e2e: explicit agent selection ===');
+    const { output } = await runScenario({
+      chatId: 'e2e-explicit-agent',
+      chats: { 'e2e-explicit-agent': opencodeChat },
+      allowedRuntimes: ['opencode', 'codex'],
+      agent: 'codex',
+      message: 'hello',
+      sessionId: 'e2e-sess-explicit-agent',
+    });
+    assert(output.state === 'completed', 'explicit agent: lifecycle state is completed');
+    assert(output.output.runtime === 'codex', 'explicit agent: request selects Codex over config');
+    assert(output.output.execution_state === 'done', 'explicit agent: canonical outcome is preserved');
   }
 
   // === 3. non-zero exit ===
