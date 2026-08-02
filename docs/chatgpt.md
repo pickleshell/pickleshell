@@ -79,9 +79,15 @@ enabled MCP tools.
 
 ![Connected PickleShell plugin and send-chat action](assets/plugin-connected.png)
 
-## 7. Refresh after schema changes
+## 7. Upgrading: refresh after tool changes
 
-After changing the MCP schema:
+> **After upgrading local PickleShell components:** If the upgrade adds MCP
+> tools or changes tool schemas, open the PickleShell plugin in ChatGPT and use
+> **Refresh**. Otherwise, ChatGPT may keep cached tool definitions and the new
+> tools or schema changes will not take effect. Upgrades that do not change MCP
+> tools or schemas do not require this refresh.
+
+To refresh the plugin:
 
 1. Open the PickleShell plugin from **Plugins**;
 2. Press **Refresh**;
