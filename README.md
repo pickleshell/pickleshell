@@ -85,8 +85,9 @@ carry out a complex task directly from ChatGPT.
 ## Why PickleShell?
 
 ChatGPT can reason about a project, while PickleShell's Agent service (running
-[OpenCode](https://opencode.ai/) today) can operate inside a local development
-environment. PickleShell provides the secure, explicit boundary between them:
+[OpenCode](https://opencode.ai/) by default, with Codex as a supported
+alternative) can operate inside a local development environment. PickleShell
+provides the secure, explicit boundary between them:
 
 - no public Gateway endpoint;
 - no inbound port forwarding;
@@ -113,7 +114,7 @@ flowchart TD
         end
         subgraph SVCA["Agent"]
             OC["OpenCode"]:::impl
-            CX["Codex"]:::planned
+            CX["Codex"]:::impl
         end
         subgraph SVCT["Terminal"]
             TTY["Interactive PTY"]:::planned
@@ -133,7 +134,7 @@ flowchart TD
     class E,SVC,WS local
 ```
 
-Solid boxes are implemented; dashed boxes (Codex and the Terminal) are planned.
+Solid boxes are implemented; the dashed Terminal box is planned.
 
 The tunnel is initiated from the local machine over outbound HTTPS. The Gateway
 remains reachable only inside the trusted local environment.
@@ -144,7 +145,7 @@ The three mandatory core services all run locally on your machine:
 
 | Service | Status | Notes |
 | --- | --- | --- |
-| **Agent** | Implemented on OpenCode; Codex planned | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. Codex is planned as a first-class alternative backend behind the same MCP interface. |
+| **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface and has been verified through PickleShell ACE. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
 | **Terminal** | Planned | Must emulate an interactive terminal used by a human — a live PTY session driven like a real terminal, not one-shot shell command execution. |
 
@@ -169,7 +170,7 @@ send-chat ──▸ { request_id, state: "busy", next_action: "session-status" }
 
 Each response includes `next_action` (which tool to call next) and
 `retry_after_ms` (suggested polling interval). Pass the returned `session_id` in
-subsequent `send-chat` calls to continue the same OpenCode conversation. Omit it
+subsequent `send-chat` calls to continue the same runtime conversation. Omit it
 to start a fresh session that runs independently and in parallel.
 
 **Idempotency:** when a client provides an explicit idempotency key, duplicate
@@ -211,7 +212,7 @@ symbolic links as destinations, and publishes results atomically.
 | Capability | Behaviour |
 | --- | --- |
 | Async execution | Non-blocking tasks with `request_id` tracking and structured polling |
-| Session continuity | Continue an OpenCode conversation across multiple ChatGPT messages using `session_id` |
+| Session continuity | Continue an OpenCode or Codex conversation across multiple ChatGPT messages using `session_id` |
 | Cancellation | Abort in-flight tasks with `cancel-request` |
 | Model selection | Choose only from an operator-controlled model allowlist |
 | File transfer | Transfer up to 20 files per request with size, path, symlink, and overwrite protection |
@@ -234,7 +235,7 @@ availability guarantees, and vulnerability reporting.
 
 - Linux;
 - Node.js 20 or newer;
-- the Agent backend (currently OpenCode) installed and configured;
+- an Agent backend installed and configured (OpenCode by default, or Codex);
 - OpenAI Secure MCP Reverse Tunnel access;
 - a dedicated local service account is strongly recommended.
 
@@ -274,6 +275,11 @@ PickleShell `0.1.1` is the latest release. It adds the Playwright browser
 runtime and browser automation documentation, hardens agent isolation and
 service runtime security, and updates the ChatGPT Assistant setup and product
 documentation.
+
+The unreleased main branch includes the Codex runtime integration, verified
+through PickleShell ACE. Do not create the next release or tag yet: the release
+boundary is completion of the Terminal plus a clean end-to-end test installation
+on a separate machine.
 
 This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 

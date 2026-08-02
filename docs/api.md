@@ -87,14 +87,15 @@ Suggested polling interval in milliseconds:
 
 Submit a command asynchronously. The response returns immediately with
 `request_id` and `state: "busy"`. For a new conversation, `session_id` may be
-null until execution completes. After completion, the real OpenCode `session_id`
-appears in the session-output response.
+null until execution completes. After completion, the real runtime
+`session_id` appears in the session-output response.
 
 ```json
 {
   "chat_id": "pickleshell-main",
   "message": "Review the attached file",
   "session_id": "ses_example",
+  "runtime": "opencode",
   "model": "opencode/big-pickle",
   "destination_dir": "docs/images",
   "files": [
@@ -109,7 +110,12 @@ appears in the session-output response.
 }
 ```
 
-`chat_id` and `message` are required. Other fields are optional.
+`chat_id` and `message` are required. Other fields are optional. `runtime`
+selects `opencode` or `codex` for this request; when omitted, the Gateway uses
+the chat runtime and then `default_runtime`. OpenCode remains the default. The
+deprecated `agent` field is accepted as a compatibility alias. `model` must be
+allowed by the operator and compatible with the selected runtime; Codex model
+IDs are unqualified (for example, `gpt-5.3-codex`) rather than provider-prefixed.
 
 File limits: 20 files per request, 2 MiB per file, 10 MiB total.
 
@@ -146,7 +152,7 @@ Destination resolution: `files[].dest_dir` > `destination_dir` > `.inbox/<reques
 ## MCP tool: `session-status`
 
 Lightweight status check (no output included). Use `request_id` to track a
-specific async execution, or `chat_id` + `session_id` to check an OpenCode
+specific async execution, or `chat_id` + `session_id` to check a runtime
 session.
 
 States: `new_session`, `busy`, `completed`, `ready`, `unknown`.
@@ -156,7 +162,7 @@ Poll with the `retry_after_ms` interval from the response.
 ## MCP tool: `session-output`
 
 Read the full output of a completed task. Provide `request_id` for an async
-task, or `chat_id` + `session_id` for an OpenCode session. Returns the agent's
+task, or `chat_id` + `session_id` for a runtime session. Returns the agent's
 reply, execution trace, errors, and timestamps. Call after session-status
 reports `state: "completed"`.
 
@@ -199,14 +205,15 @@ configured chat IDs, active work, and concurrency policy.
 
 | Status | Error |
 |---|---|
-| 400 | `invalid_request`, `invalid_json`, `file_transfer_error` |
+| 400 | `invalid_request`, `invalid_json`, `file_transfer_error`, `runtime_invalid`, `runtime_model_invalid` |
 | 401 | `unauthorized` |
-| 403 | `forbidden_model` |
+| 403 | `forbidden_model`, `runtime_not_allowed` |
 | 404 | `unknown_chat_id` |
 | 409 | `session_busy` |
 | 413 | `payload_too_large` |
 | 429 | `rate_limit` |
 | 502 | `agent_error` |
+| 503 | `runtime_unavailable` |
 | 504 | `agent_timeout` |
 
 ## Playwright Browser Tools

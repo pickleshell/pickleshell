@@ -23,7 +23,8 @@ Set each workspace in `config.json` and keep the file untracked.
 ### Runtime configuration
 
 The Gateway validates a runtime per chat and a global default before execution.
-OpenCode remains the default until Codex has completed production verification.
+OpenCode remains the supported default. The Codex runtime is implemented and
+has been verified through PickleShell ACE.
 
 - `default_runtime`: the runtime used when a chat does not specify one.
   Defaults to `opencode` when absent.

@@ -25,10 +25,11 @@ after that baseline; Terminal and Settings complete the next milestone
 (Agent + Browser + Terminal + Settings).
 
 - **Agent:** retain `send-chat` → `session-status` → `session-output` →
-  `cancel-request`. OpenCode is the current backend; plan first-class Codex
-  parity as an alternative backend behind the same MCP interface. OpenCode and
-  Codex are replaceable provider adapters, and Codex must match OpenCode's
-  schema, session continuity, idempotency, cancellation, and task semantics.
+  `cancel-request`. OpenCode is the supported default; Codex is implemented as
+  a first-class alternative behind the same MCP interface. Both are replaceable
+  provider adapters with the same schema, session continuity, idempotency,
+  cancellation, and task semantics. The Codex runtime has passed the production
+  MCP/Gateway smoke path through PickleShell ACE.
 - **Browser:** Playwright is implemented and validated as the browser execution
   layer (52 tools registered on the PickleShell MCP server).
 - **Terminal:** planned. Must emulate an interactive terminal used by a human —
@@ -88,9 +89,12 @@ separate design is approved:
 
 ## Release gate
 
-Create the next release only when the production verification checklist passes,
-the retry/idempotency behavior is documented, and restart semantics are honest
-and tested. Keep the full trace as the default output mode.
+Do not create a release or tag for the Codex integration alone. Create the next
+release only after the Terminal is complete and a clean installation on a
+separate machine confirms end-to-end Agent, Browser, and Terminal functionality.
+The production verification checklist must pass, retry/idempotency behavior
+must be documented, and restart semantics must be honest and tested. Keep the
+full trace as the default output mode.
 
 ## v1.1 — Playwright Browser Automation
 
