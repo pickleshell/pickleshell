@@ -35,6 +35,9 @@ process.env.CONFIG_PATH = configPath;
 
 const concurrency = require('./src/concurrency');
 const registry = require('./src/runtime/registry');
+// Load the production registry wiring first; the fake replaces only Codex
+// for this network-free E2E process.
+require('./src/agent');
 
 // Register opencode (chat.js will too, via ./src/agent) and a fake 'codex'
 // adapter used ONLY to exercise gateway failure handling for a registered but

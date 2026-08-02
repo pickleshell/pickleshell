@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { isRuntimeRegistered } = require('./runtime/registry');
+const { isRuntimeAvailable: isRegisteredRuntimeAvailable } = require('./runtime/registry');
 
 let configData = null;
 
@@ -74,7 +74,7 @@ const isRuntimeAllowed = (runtime) => {
 };
 
 const isRuntimeAvailable = (runtime) => {
-  return runtime !== null && isRuntimeRegistered(runtime);
+  return runtime !== null && isRegisteredRuntimeAvailable(runtime);
 };
 
 const getChatRuntime = (chatId) => {

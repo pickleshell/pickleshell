@@ -13,13 +13,15 @@
 // is represented in the returned AgentResult, never thrown synchronously.
 
 const crypto = require('crypto');
-const { RUNTIME_OPENCODE } = require('./runtime/contract');
-const { registerRuntime, getRuntime } = require('./runtime/registry');
+const { RUNTIME_OPENCODE, RUNTIME_CODEX } = require('./runtime/contract');
+const { registerRuntime, getRuntime, isRuntimeAvailable } = require('./runtime/registry');
 const { supervise } = require('./runtime/supervisor');
 const { buildMetadata } = require('./runtime/normalize');
 const opencodeAdapter = require('./runtime/adapters/opencode');
+const codexAdapter = require('./runtime/adapters/codex');
 
 registerRuntime(RUNTIME_OPENCODE, opencodeAdapter);
+registerRuntime(RUNTIME_CODEX, codexAdapter);
 
 function generateRequestId() {
   const ts = Date.now().toString(36);
@@ -99,7 +101,7 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
   const startedAt = new Date(startedMs).toISOString();
 
   const adapter = getRuntime(runtimeName);
-  if (!adapter) {
+  if (!adapter || !isRuntimeAvailable(runtimeName)) {
     const error = { class: 'unavailable', message: `Runtime "${runtimeName}" is not available`, exit_code: null, signal: null };
     const promise = Promise.resolve(buildAgentResult({
       ok: false,
@@ -136,7 +138,7 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
 
     handler = adapter.createStreamHandler({ chatId, onProgress });
     const proc = supervise({
-      command: 'bash',
+      command: adapter.command || 'bash',
       args,
       cwd: workspace,
       env: adapter.buildChildEnv(),

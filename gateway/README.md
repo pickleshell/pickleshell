@@ -1,6 +1,6 @@
 # PickleShell Gateway
 
-Authenticated loopback HTTP Gateway that runs OpenCode for a configured
+Authenticated loopback HTTP Gateway that runs OpenCode or Codex for a configured
 workspace. This process is an internal component; ChatGPT connects through the
 MCP server and Secure MCP Tunnel.
 
@@ -20,11 +20,10 @@ openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n'
 
 Set each workspace in `config.json` and keep the file untracked.
 
-### Runtime configuration (preparatory)
+### Runtime configuration
 
 The Gateway validates a runtime per chat and a global default before execution.
-This is preparatory configuration only: Codex execution is not implemented in
-this build, and `config.json` must not select it.
+OpenCode remains the default until Codex has completed production verification.
 
 - `default_runtime`: the runtime used when a chat does not specify one.
   Defaults to `opencode` when absent.
@@ -35,9 +34,15 @@ this build, and `config.json` must not select it.
   when absent.
 
 Configurations without any of these fields behave exactly as before and resolve
-to `opencode`. Selecting a runtime that is not allowed, invalid, or not yet
-available (such as `codex`) is rejected at request time — the Gateway never
-silently runs OpenCode when another runtime was explicitly configured.
+to `opencode`. Selecting a runtime that is not allowed, invalid, or unavailable
+on the host is rejected at request time — the Gateway never silently runs
+OpenCode when another runtime was explicitly configured.
+
+The Codex adapter requires Codex CLI `0.143.0` or newer and uses
+`codex exec --json`. Set `CODEX_COMMAND` to an explicit executable when Codex is
+not on `PATH`. `CODEX_HOME` is passed explicitly to the child after the
+runtime environment is filtered; arbitrary secret-bearing environment
+variables are not inherited.
 
 `LOCAL_AGENT_API_KEY` remains accepted as a deprecated compatibility alias.
 New deployments should use `PICKLESHELL_API_KEY`.

@@ -10,6 +10,7 @@ process.env.CONFIG_PATH = configPath;
 // the real registry instead of a static list.
 require('./src/agent');
 const concurrency = require('./src/concurrency');
+const registry = require('./src/runtime/registry');
 
 let failed = 0;
 
@@ -201,30 +202,37 @@ async function main() {
     });
 
     assert(config.isRuntimeAvailable('opencode') === true, 'opencode is available');
-    assert(config.isRuntimeAvailable('codex') === false, 'codex is recognized but not yet available');
-    assert(config.resolveRuntime('codexChat').status === 'unavailable', 'allowed but unavailable runtime -> unavailable');
-    assert(config.resolveRuntime('defaultCodex').status === 'unavailable', 'unavailable global default -> unavailable');
+    const codexAvailable = config.isRuntimeAvailable('codex');
+    assert(
+      config.resolveRuntime('codexChat').status === (codexAvailable ? 'ok' : 'unavailable'),
+      `codex runtime resolves ${codexAvailable ? 'ok' : 'unavailable'} based on host availability`
+    );
+    assert(
+      config.resolveRuntime('defaultCodex').status === (codexAvailable ? 'ok' : 'unavailable'),
+      `global codex runtime resolves ${codexAvailable ? 'ok' : 'unavailable'} based on host availability`
+    );
   }
 
   // ==============================================
   // 7. Chat endpoint rejects non-openCode runtimes
   // ==============================================
-  {
-    const res = await runChatHandler(
-      {
-        chats: { codexChat: { workspace: tempDir, runtime: 'codex' } },
-        allowed_runtimes: ['opencode', 'codex'],
-      },
-      'codexChat'
-    );
-    assert(res._status === 503, 'codex chat -> 503 runtime_unavailable');
-    assert(res._body?.error === 'runtime_unavailable', 'codex chat rejected with runtime_unavailable');
-    assert(res._body?.details.includes('codex'), 'codex chat rejection names the runtime');
-    assert(
-      concurrency.status().active_count === 0,
-      'unavailable runtime is rejected before any slot is acquired'
-    );
-  }
+  const codexAdapter = registry.getRuntime('codex');
+  registry.registerRuntime('codex', { name: 'codex-unavailable', isAvailable: () => false });
+  const res = await runChatHandler(
+    {
+      chats: { codexChat: { workspace: tempDir, runtime: 'codex' } },
+      allowed_runtimes: ['opencode', 'codex'],
+    },
+    'codexChat'
+  );
+  assert(res._status === 503, 'codex chat -> 503 runtime_unavailable');
+  assert(res._body?.error === 'runtime_unavailable', 'codex chat rejected with runtime_unavailable');
+  assert(res._body?.details.includes('codex'), 'codex chat rejection names the runtime');
+  assert(
+    concurrency.status().active_count === 0,
+    'unavailable runtime is rejected before any slot is acquired'
+  );
+  registry.registerRuntime('codex', codexAdapter);
 
   {
     const res = await runChatHandler(

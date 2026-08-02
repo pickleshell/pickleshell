@@ -1,8 +1,8 @@
 // In-process registry of runtime adapters.
 //
 // Adapters register themselves here; the gateway resolves an adapter by
-// runtime name. Only 'opencode' is registered by this build. Codex, Terminal,
-// and any public runtime selection are intentionally not part of this change.
+// runtime name. An adapter may expose isAvailable() when its executable is
+// optional on a given host.
 //
 // This registry is the single source of truth for runtime availability:
 // config.js consults isRuntimeAvailable()/availableRuntimes() instead of
@@ -30,11 +30,18 @@ function isRuntimeRegistered(name) {
 }
 
 function isRuntimeAvailable(name) {
-  return adapters.has(name);
+  const adapter = adapters.get(name);
+  if (!adapter) return false;
+  if (typeof adapter.isAvailable !== 'function') return true;
+  try {
+    return adapter.isAvailable() === true;
+  } catch (_) {
+    return false;
+  }
 }
 
 function availableRuntimes() {
-  return Array.from(adapters.keys());
+  return Array.from(adapters.keys()).filter(isRuntimeAvailable);
 }
 
 module.exports = {

@@ -308,7 +308,7 @@ async function main() {
   {
     // runAgentRequest never rejects even when the runtime is unknown.
     const result = await agent.runAgentRequest({
-      runtime: 'codex',
+      runtime: 'missing-runtime',
       chatId: 'pickleshell-main',
       message: 'hi',
       workspace: tempDir,

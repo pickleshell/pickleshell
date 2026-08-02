@@ -7,6 +7,7 @@
 // intentionally not changed by this contract.
 
 const RUNTIME_OPENCODE = 'opencode';
+const RUNTIME_CODEX = 'codex';
 
 // AgentRequest — options accepted by runAgentRequest().
 // {
@@ -96,6 +97,8 @@ const RUNTIME_OPENCODE = 'opencode';
 
 // Adapter interface (implemented by runtime/adapters/*):
 //   name: string
+//   command?: string       // executable passed to supervisor; defaults to bash
+//   isAvailable?: () => boolean
 //   buildPrompt(message, fileSummary) -> string
 //   buildArgs(prompt, workspace, sessionId, model) -> string[]
 //   buildChildEnv(sourceEnv?) -> object
@@ -110,4 +113,5 @@ const RUNTIME_OPENCODE = 'opencode';
 
 module.exports = {
   RUNTIME_OPENCODE,
+  RUNTIME_CODEX,
 };
