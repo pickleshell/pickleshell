@@ -1,0 +1,10 @@
+{
+  "socket": "/run/pickleshell-terminal/service.sock",
+  "auth_token": "replace-with-a-random-0600-secret",
+  "roots": ["/srv/example/workspace"],
+  "executables": ["/bin/bash", "/bin/sh"],
+  "maxTerminals": 8,
+  "ringBytes": 1048576,
+  "ttlMs": 1800000,
+  "graceMs": 250
+}

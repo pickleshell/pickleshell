@@ -1,0 +1,30 @@
+[Unit]
+Description=PickleShell private Terminal PTY runtime
+After=local-fs.target
+
+[Service]
+Type=simple
+User=pickleshell-terminal
+Group=pickleshell-terminal
+ExecStart=/usr/bin/node /opt/pickleshell/terminal/src/server.js
+Environment=PICKLESHELL_TERMINAL_CONFIG=/etc/pickleshell/terminal.json
+RuntimeDirectory=pickleshell-terminal
+RuntimeDirectoryMode=0750
+Restart=on-failure
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX
+PrivateTmp=true
+TasksMax=128
+MemoryMax=1G
+ReadWritePaths=/run/pickleshell-terminal
+ReadOnlyPaths=/opt/pickleshell/terminal /srv/example/workspace
+
+[Install]
+WantedBy=multi-user.target
