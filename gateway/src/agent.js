@@ -94,6 +94,14 @@ function buildAgentResult({ ok, runtime, request_id, session_id, state, reply, e
   };
 }
 
+function validateRuntimeModel(runtimeName, model) {
+  const adapter = getRuntime(runtimeName);
+  if (!adapter || !isRuntimeAvailable(runtimeName) || typeof adapter.validateModel !== 'function') {
+    return null;
+  }
+  return adapter.validateModel(model);
+}
+
 function runAgentRequest({ runtime, request_id, chatId, message, workspace, timeoutSec, session_id, model, fileSummary, onProgress }) {
   const runtimeName = runtime || RUNTIME_OPENCODE;
   const requestId = request_id || generateRequestId();
@@ -124,6 +132,14 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
   let cancel = () => false;
 
   try {
+    if (typeof adapter.validateModel === 'function') {
+      const modelError = adapter.validateModel(model);
+      if (modelError) {
+        const error = new Error(modelError.message);
+        error.code = modelError.class;
+        throw error;
+      }
+    }
     const prompt = adapter.buildPrompt(message, fileSummary);
     const args = adapter.buildArgs(prompt, workspace, session_id, model);
 
@@ -148,7 +164,11 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
     procPromise = proc.promise;
     cancel = proc.cancel;
   } catch (err) {
-    const error = { class: 'internal_error', message: `Adapter preparation failed: ${err.message}`, exit_code: null, signal: null };
+    const errorClass = err.code === 'unsupported_model' ? err.code : 'internal_error';
+    const errorMessage = errorClass === 'internal_error'
+      ? `Adapter preparation failed: ${err.message}`
+      : err.message;
+    const error = { class: errorClass, message: errorMessage, exit_code: null, signal: null };
     const promise = Promise.resolve(buildAgentResult({
       ok: false,
       runtime: runtimeName,
@@ -157,7 +177,7 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
       state: 'error',
       reply: null,
       events: [],
-      errorClass: 'internal_error',
+      errorClass,
       error,
       startedAt,
       startedMs,
@@ -238,6 +258,7 @@ module.exports = {
   parseJsonOutput: opencodeAdapter.parseJsonOutput,
   classifyOutcome,
   generateRequestId,
+  validateRuntimeModel,
   runAgentRequest,
   sendMessage,
 };

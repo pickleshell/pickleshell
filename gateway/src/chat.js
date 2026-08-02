@@ -17,7 +17,17 @@ const executionStateOf = (agentResult) =>
 const chatHandler = async (req, res) => {
   let slotKey = null;
   try {
-    const { chat_id, message, agent: requestedAgent, session_id, model, file_paths, destination_dir, idempotency_key } = req.body;
+    const {
+      chat_id,
+      message,
+      runtime: requestedRuntime,
+      agent: legacyAgent,
+      session_id,
+      model,
+      file_paths,
+      destination_dir,
+      idempotency_key,
+    } = req.body;
 
     // Validate request
     if (!chat_id || typeof chat_id !== 'string' || chat_id.trim() === '') {
@@ -36,11 +46,22 @@ const chatHandler = async (req, res) => {
       });
     }
 
-    if (requestedAgent !== undefined && typeof requestedAgent !== 'string') {
+    if (
+      (requestedRuntime !== undefined && typeof requestedRuntime !== 'string') ||
+      (legacyAgent !== undefined && typeof legacyAgent !== 'string')
+    ) {
       return res.status(400).json({
         ok: false,
         error: 'invalid_request',
-        details: 'agent must be a runtime name such as opencode or codex',
+        details: 'runtime must be a runtime name such as opencode or codex',
+      });
+    }
+
+    if (requestedRuntime !== undefined && legacyAgent !== undefined && requestedRuntime !== legacyAgent) {
+      return res.status(400).json({
+        ok: false,
+        error: 'invalid_request',
+        details: 'runtime and agent must match when both are provided',
       });
     }
 
@@ -81,7 +102,8 @@ const chatHandler = async (req, res) => {
     // Reject execution when the configured runtime is invalid, not allowed,
     // or not yet implemented. Never silently run OpenCode when Codex was
     // explicitly configured.
-    const runtime = config.resolveRuntime(chat_id, requestedAgent);
+    const requestedRuntimeValue = requestedRuntime !== undefined ? requestedRuntime : legacyAgent;
+    const runtime = config.resolveRuntime(chat_id, requestedRuntimeValue);
     if (runtime.status !== 'ok') {
       const runtimeError = {
         invalid: {
@@ -108,13 +130,43 @@ const chatHandler = async (req, res) => {
       });
     }
 
-    // Validate model against allowlist
-    const resolvedModel = config.resolveModel(model);
-    if (model && !resolvedModel) {
+    // Validate model compatibility before acquiring a slot. This prevents a
+    // known runtime/model mismatch from returning busy and creating a request
+    // buffer that can only fail asynchronously later.
+    const hasExplicitModel = model !== undefined && model !== null;
+    const requestedModelError = hasExplicitModel
+      ? agent.validateRuntimeModel(runtime.runtime, model)
+      : null;
+    if (requestedModelError) {
+      return res.status(400).json({
+        ok: false,
+        chat_id,
+        error: 'runtime_model_invalid',
+        details: requestedModelError.message,
+      });
+    }
+
+    // Validate model against the operator allowlist.
+    // Codex owns its default model. Do not inject the gateway's OpenCode
+    // default_model when the request omitted model.
+    const resolvedModel = runtime.runtime === 'codex' && !hasExplicitModel
+      ? null
+      : config.resolveModel(model);
+    if (hasExplicitModel && !resolvedModel) {
       return res.status(403).json({
         ok: false,
         error: 'forbidden_model',
         details: 'Requested model is not allowed'
+      });
+    }
+
+    const effectiveModelError = agent.validateRuntimeModel(runtime.runtime, resolvedModel);
+    if (effectiveModelError) {
+      return res.status(400).json({
+        ok: false,
+        chat_id,
+        error: 'runtime_model_invalid',
+        details: effectiveModelError.message,
       });
     }
 

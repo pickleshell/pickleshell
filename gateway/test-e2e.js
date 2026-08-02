@@ -45,6 +45,11 @@ require('./src/agent');
 // test double, not a Codex implementation.
 registry.registerRuntime('codex', {
   name: 'codex',
+  validateModel(model) {
+    return model && model.includes('/')
+      ? { class: 'unsupported_model', message: 'Codex model must be unqualified' }
+      : null;
+  },
   buildPrompt(message) {
     if (message.includes('__PREP_THROW__')) {
       throw new Error('prep exploded');
@@ -118,9 +123,10 @@ function waitForCompletion(requestId, timeoutMs = 15000) {
 
 // Reload config + timeout + chat with fresh settings so each scenario starts
 // from a clean module state (timeoutSec is captured at chat load time).
-async function runScenario({ chatId, chats, allowedRuntimes, message, sessionId, agent, agentTimeoutSec, cancelAfterMs, beforeWait }) {
+async function runScenario({ chatId, chats, allowedRuntimes, allowedModels, message, sessionId, runtime, model, agentTimeoutSec, cancelAfterMs, beforeWait }) {
   const config = { chats };
   if (allowedRuntimes !== undefined) config.allowed_runtimes = allowedRuntimes;
+  if (allowedModels !== undefined) config.allowed_models = allowedModels;
   fs.writeFileSync(configPath, JSON.stringify(config));
 
   if (agentTimeoutSec !== undefined) {
@@ -134,9 +140,10 @@ async function runScenario({ chatId, chats, allowedRuntimes, message, sessionId,
 
   const chatHandler = require('./src/chat');
   const res = mockRes();
-  await chatHandler(mockReq({ chat_id: chatId, message, agent, session_id: sessionId }), res);
+  await chatHandler(mockReq({ chat_id: chatId, message, runtime, model, session_id: sessionId }), res);
 
   const requestId = res._body.request_id;
+  if (!requestId) return { res, requestId: null, output: null };
   if (cancelAfterMs !== undefined) {
     setTimeout(() => concurrency.cancelRequest(requestId), cancelAfterMs);
   }
@@ -201,13 +208,33 @@ async function main() {
       chatId: 'e2e-explicit-agent',
       chats: { 'e2e-explicit-agent': opencodeChat },
       allowedRuntimes: ['opencode', 'codex'],
-      agent: 'codex',
+      runtime: 'codex',
       message: 'hello',
       sessionId: 'e2e-sess-explicit-agent',
     });
     assert(output.state === 'completed', 'explicit agent: lifecycle state is completed');
     assert(output.output.runtime === 'codex', 'explicit agent: request selects Codex over config');
     assert(output.output.execution_state === 'done', 'explicit agent: canonical outcome is preserved');
+  }
+
+  // A Codex-incompatible provider-qualified model must be rejected before
+  // the async request is acquired or returned as busy.
+  {
+    console.log('\n=== e2e: incompatible Codex model preflight ===');
+    const invalid = await runScenario({
+      chatId: 'e2e-invalid-codex-model',
+      chats: { 'e2e-invalid-codex-model': opencodeChat },
+      allowedRuntimes: ['opencode', 'codex'],
+      allowedModels: ['openai/gpt-5.3-codex'],
+      runtime: 'codex',
+      model: 'openai/gpt-5.3-codex',
+      message: 'must be rejected',
+      sessionId: 'e2e-sess-invalid-codex-model',
+    });
+    assert(invalid.res._status === 400, 'incompatible Codex model returns 400');
+    assert(invalid.res._body?.error === 'runtime_model_invalid', 'incompatible model uses runtime_model_invalid');
+    assert(invalid.res._body?.request_id === undefined, 'incompatible model does not create request_id');
+    assert(concurrency.status().active_count === 0, 'incompatible model does not acquire a slot');
   }
 
   // === 3. non-zero exit ===

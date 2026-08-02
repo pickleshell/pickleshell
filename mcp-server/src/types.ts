@@ -18,6 +18,8 @@ export interface ChatRequest {
   chat_id: string;
   message: string;
   session_id?: string;
+  runtime?: "opencode" | "codex";
+  /** @deprecated Use runtime. */
   agent?: "opencode" | "codex";
   model?: string;
   destination_dir?: string;

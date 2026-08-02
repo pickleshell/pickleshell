@@ -43,7 +43,8 @@ const RUNTIME_CODEX = 'codex';
 // never rejects; failures are represented here.
 // {
 //   class: string,   // 'agent_error'|'spawn_error'|'internal_error'
-//                    // |'unavailable'|'timeout'|'cancelled'|'exit_error'
+//                    // |'unavailable'|'unsupported_model'|'timeout'
+//                    // |'cancelled'|'exit_error'
 //   message: string,
 //   exit_code?: number|null,
 //   signal?: string|null,

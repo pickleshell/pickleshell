@@ -88,13 +88,13 @@ function waitForCompletion(requestId) {
 
 async function main() {
   console.log('\n=== codex adapter argv ===');
-  const initialArgs = adapter.buildArgs('initial prompt', '/workspace', null, 'opencode-go/kimi-k3');
+  const initialArgs = adapter.buildArgs('initial prompt', '/workspace', null, 'gpt-5.3-codex');
   assert(initialArgs[0] === 'exec' && initialArgs.includes('--json'), 'initial args use codex exec --json');
   assert(initialArgs.includes('--cd') && initialArgs[initialArgs.indexOf('--cd') + 1] === '/workspace', 'initial args propagate workspace');
-  assert(initialArgs.includes('--model') && initialArgs[initialArgs.indexOf('--model') + 1] === 'opencode-go/kimi-k3', 'initial args propagate model');
+  assert(initialArgs.includes('--model') && initialArgs[initialArgs.indexOf('--model') + 1] === 'gpt-5.3-codex', 'initial args propagate model');
   assert(!initialArgs.includes('resume'), 'initial args do not resume a session');
 
-  const resumeArgs = adapter.buildArgs('continued prompt', '/workspace', 'thread-old', 'gpt-5.6-luna');
+  const resumeArgs = adapter.buildArgs('continued prompt', '/workspace', 'thread-old', 'gpt-5.3-codex');
   assert(resumeArgs.includes('resume'), 'resume args use codex resume syntax');
   assert(resumeArgs[resumeArgs.indexOf('resume') + 1] === 'thread-old', 'resume args propagate session id');
   assert(resumeArgs[resumeArgs.indexOf('resume') + 2] === 'continued prompt', 'resume args append the prompt');
@@ -122,10 +122,12 @@ async function main() {
   assert(normalized[4].type === 'error' && normalized[4].error_class === 'agent_error', 'provider error normalizes to error');
   const parsed = adapter.parseJsonOutput('{"type":"thread.started","thread_id":"t1"}\n{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}');
   assert(parsed.sessionId === 't1' && parsed.text === 'ok', 'parseJsonOutput extracts session and reply');
+  assert(adapter.validateModel('gpt-5.3-codex') === null, 'plain Codex model id is accepted');
+  assert(adapter.validateModel('openai/gpt-5.3-codex')?.class === 'unsupported_model', 'provider-qualified model is rejected');
 
   console.log('\n=== codex agent lifecycle ===');
   const base = { runtime: 'codex', chatId: 'codex-test', workspace: tempDir, timeoutSec: 10 };
-  let result = await agent.runAgentRequest({ ...base, request_id: 'req_codex_success', message: 'hello', model: 'opencode-go/kimi-k3' }).promise;
+  let result = await agent.runAgentRequest({ ...base, request_id: 'req_codex_success', message: 'hello', model: 'gpt-5.3-codex' }).promise;
   assert(result.ok === true && result.state === 'completed', 'Codex success resolves completed');
   assert(result.runtime === 'codex' && result.session_id === 'codex-thread-1', 'success preserves Codex runtime and session');
   assert(result.reply === 'finished', 'success preserves agent reply');
@@ -135,7 +137,10 @@ async function main() {
   const capturedEnv = fs.readFileSync(envCapturePath).toString('utf8').split('\0');
   assert(capturedEnv[0] === codexHome && capturedEnv[1] === '', 'child receives CODEX_HOME but not API key');
   const capturedArgs = readArgs();
-  assert(capturedArgs.includes('--model') && capturedArgs.includes('opencode-go/kimi-k3'), 'child receives requested model');
+  assert(capturedArgs.includes('--model') && capturedArgs.includes('gpt-5.3-codex'), 'child receives requested model');
+
+  result = await agent.runAgentRequest({ ...base, message: 'hello', model: 'openai/gpt-5.3-codex' }).promise;
+  assert(result.state === 'error' && result.error.class === 'unsupported_model', 'Codex rejects provider-qualified model');
 
   result = await agent.runAgentRequest({ ...base, request_id: 'req_codex_resume', message: '__RESUME__', session_id: 'thread-old' }).promise;
   assert(result.state === 'completed' && result.session_id === 'codex-resumed', 'resume returns continued session');
@@ -176,6 +181,7 @@ async function main() {
   fs.writeFileSync(configPath, JSON.stringify({
     chats: { codex: { workspace: tempDir, runtime: 'codex' } },
     allowed_runtimes: ['opencode', 'codex'],
+    default_model: 'opencode/big-pickle',
   }));
   process.env.CONFIG_PATH = configPath;
   const chatHandler = require('./src/chat');
@@ -190,6 +196,7 @@ async function main() {
   assert(output.output.reply === 'finished', 'Codex HTTP path persists reply');
   assert(Array.isArray(output.output.events) && output.output.events.length > 0, 'Codex HTTP path persists events');
   assert(output.output.error === null && output.output.metadata, 'Codex HTTP path has standard error/metadata shape');
+  assert(!readArgs().includes('--model'), 'Codex without model does not receive OpenCode default_model');
 
   fs.rmSync(tempDir, { recursive: true, force: true });
   console.log(`\nCodex tests: ${passed} passed, ${failed} failed`);

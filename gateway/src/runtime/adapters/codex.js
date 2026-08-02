@@ -88,6 +88,16 @@ function buildArgs(prompt, workspace, sessionId, model) {
   return args;
 }
 
+function validateModel(model) {
+  if (model && model.includes('/')) {
+    return {
+      class: 'unsupported_model',
+      message: 'Codex model must be an unqualified Codex CLI model id, without a provider namespace',
+    };
+  }
+  return null;
+}
+
 function parseLine(line) {
   return JSON.parse(line);
 }
@@ -215,6 +225,7 @@ module.exports = {
   isAvailable,
   buildPrompt,
   buildArgs,
+  validateModel,
   parseLine,
   parseJsonOutput,
   normalizeEvent,
