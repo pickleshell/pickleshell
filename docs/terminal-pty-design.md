@@ -1,7 +1,6 @@
 # Terminal PTY Design
 
-Status: design only. This document does not authorize or include runtime,
-MCP, package, systemd, or deployment changes.
+Status: approved design; v1 implementation is present but not ACE-verified.
 
 ## Purpose and Scope
 

@@ -32,6 +32,30 @@ const getWorkspace = (chatId) => {
   return chatConfig ? chatConfig.workspace : null;
 };
 
+const getTerminalConfig = () => {
+  const config = loadConfig();
+  const terminal = config.terminal || {};
+  return {
+    ...terminal,
+    socket_path: terminal.socket_path || terminal.socket || process.env.PICKLESHELL_TERMINAL_SOCKET,
+    auth_token: terminal.auth_token || process.env.PICKLESHELL_TERMINAL_AUTH,
+  };
+};
+
+const getTerminalPolicy = (chatId) => {
+  const chatConfig = getChatConfig(chatId);
+  if (!chatConfig) return null;
+  const terminal = getTerminalConfig();
+  const chatPolicy = chatConfig.terminal;
+  if (chatPolicy === false || (chatPolicy && chatPolicy.enabled === false)) return null;
+  if (terminal.enabled === false) return null;
+  return {
+    ownerScope: typeof terminal.owner_scope === 'string' && terminal.owner_scope
+      ? terminal.owner_scope
+      : 'local',
+  };
+};
+
 // --- Runtime configuration (preparatory for Codex) ---
 
 const DEFAULT_RUNTIME = 'opencode';
@@ -145,6 +169,8 @@ module.exports = {
   loadConfig,
   getChatConfig,
   getWorkspace,
+  getTerminalConfig,
+  getTerminalPolicy,
   getAllowedModels,
   getDefaultModel,
   isModelAllowed,

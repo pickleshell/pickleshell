@@ -147,7 +147,7 @@ The three mandatory core services all run locally on your machine:
 | --- | --- | --- |
 | **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface and has been verified through PickleShell ACE. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
-| **Terminal** | Planned | Must emulate an interactive terminal used by a human — a live PTY session driven like a real terminal, not one-shot shell command execution. |
+| **Terminal** | Implemented, ACE verification pending | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. Not production verified. |
 
 ## Async Workflow
 

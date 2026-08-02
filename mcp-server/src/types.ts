@@ -90,3 +90,33 @@ export interface GatewayConfig {
   api_key: string;
   timeout_ms: number;
 }
+
+export interface TerminalSpawnRequest {
+  chat_id: string;
+  executable?: string;
+  argv?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  cols?: number;
+  rows?: number;
+  idempotency_key?: string;
+}
+
+export interface TerminalWriteRequest {
+  chat_id: string;
+  terminal_id: string;
+  data: string;
+  idempotency_key?: string;
+}
+
+export interface TerminalOutputRequest {
+  chat_id: string;
+  terminal_id: string;
+  cursor?: number;
+  max_bytes?: number;
+  wait_ms?: number;
+}
+
+export interface TerminalResizeRequest { chat_id: string; terminal_id: string; cols: number; rows: number; }
+export interface TerminalSignalRequest { chat_id: string; terminal_id: string; signal: string; }
+export interface TerminalCloseRequest { chat_id: string; terminal_id: string; reason?: string; }

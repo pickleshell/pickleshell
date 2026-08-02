@@ -32,12 +32,9 @@ after that baseline; Terminal and Settings complete the next milestone
   MCP/Gateway smoke path through PickleShell ACE.
 - **Browser:** Playwright is implemented and validated as the browser execution
   layer (52 tools registered on the PickleShell MCP server).
-- **Terminal:** planned. Must emulate an interactive terminal used by a human —
-  a live PTY session the operator drives like a real terminal (spawn, keystroke
-  input, streamed output, resize), not one-shot shell command execution.
-  Proposed minimal async API: `terminal-spawn`, `terminal-write`,
-  `terminal-output`, `terminal-resize`, `terminal-close`. Follow existing
-  idempotency/task semantics where they apply.
+ - **Terminal:** implemented in the repository, pending ACE verification. It
+   uses a separate unprivileged node-pty runtime and exposes the six-tool MCP
+   contract; it is not production verified.
 - **Settings:** planned. `settings-get` and `settings-update` manage
   policy-controlled mutable defaults such as the agent backend
   (OpenCode/Codex), the model allowlist, file-transfer limits (files per

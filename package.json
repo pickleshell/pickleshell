@@ -5,9 +5,9 @@
   "description": "Secure MCP bridge from ChatGPT to a locally operated OpenCode agent",
   "license": "MIT",
   "scripts": {
-    "build": "npm --prefix mcp-server run build",
-    "test": "npm --prefix gateway test && npm --prefix mcp-server test",
-    "audit": "npm --prefix gateway audit --omit=dev && npm --prefix mcp-server audit --omit=dev"
+    "build": "npm --prefix mcp-server run build && npm --prefix terminal run build",
+    "test": "npm --prefix gateway test && npm --prefix mcp-server test && npm --prefix terminal test",
+    "audit": "npm --prefix gateway audit --omit=dev && npm --prefix mcp-server audit --omit=dev && npm --prefix terminal audit --omit=dev"
   },
   "engines": {
     "node": ">=20"

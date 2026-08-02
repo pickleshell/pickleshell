@@ -6,6 +6,7 @@ export interface GatewayErrorPayload {
   current_task?: string;
   elapsed_s?: number;
   progress?: unknown;
+  details?: string;
 }
 
 export class GatewayError extends Error {
@@ -53,6 +54,30 @@ export class GatewayClient {
       }
 
       return (await response.json()) as ChatResponse;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async terminal<T>(operation: string, request: Record<string, unknown>): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeout_ms);
+    try {
+      const response = await fetch(`${this.config.url}/terminal/${operation}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.api_key}`,
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new GatewayError(response.status, payload);
+      return payload as T;
+    } catch (error) {
+      if (error instanceof GatewayError) throw error;
+      throw new GatewayError(503, { error: "terminal_unavailable", details: "Terminal service is unavailable" });
     } finally {
       clearTimeout(timeout);
     }

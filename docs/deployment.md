@@ -77,6 +77,17 @@ sudo -u pickleshell bash -c \
 
 Tune `MemoryHigh`, `MemoryMax`, and `TasksMax` for the host.
 
+## Terminal Runtime (ACE Test Only)
+
+The Terminal runtime is a separate unprivileged `pickleshell-terminal` service.
+Install `terminal/` with its lockfile, copy `terminal/config.example.json` to
+an operator-managed configuration, and set a random `auth_token` with mode
+0600. Configure only ordinary-profile workspace roots and executable paths.
+Install `terminal/systemd/pickleshell-terminal.service`, then verify the private
+socket is accessible only to the Gateway service group. Do not enable a
+privileged profile or deploy this service to BOS until the complete ACE test
+tunnel and live MCP matrix pass.
+
 ## Configure the MCP runtime
 
 Create `/etc/pickleshell/mcp.env`:

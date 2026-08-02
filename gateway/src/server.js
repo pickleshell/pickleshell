@@ -17,6 +17,76 @@ app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '5mb' }));
 
 const config = require('./config');
 const concurrency = require('./concurrency');
+const { TerminalClient, TerminalUnavailableError } = require('./terminal-client');
+const terminalClient = new TerminalClient({
+  socketPath: config.getTerminalConfig().socket_path,
+  authToken: config.getTerminalConfig().auth_token,
+});
+
+const TERMINAL_OPERATIONS = {
+  spawn: { method: 'POST', path: '/terminal/spawn', status: 201 },
+  write: { method: 'POST', path: '/terminal/write', status: 200 },
+  output: { method: 'POST', path: '/terminal/output', status: 200 },
+  resize: { method: 'POST', path: '/terminal/resize', status: 200 },
+  signal: { method: 'POST', path: '/terminal/signal', status: 200 },
+  close: { method: 'POST', path: '/terminal/close', status: 200 },
+};
+
+function terminalStatus(error) {
+  return {
+    invalid_request: 400, invalid_working_directory: 400, executable_not_allowed: 400,
+    environment_not_allowed: 400, signal_not_allowed: 400, terminal_forbidden: 403,
+    terminal_not_found: 404, idempotency_conflict: 409, terminal_not_writable: 409,
+    terminal_closed: 409, idempotency_unsupported: 409, input_too_large: 413,
+    output_limit: 413, terminal_limit: 429, terminal_spawn_failed: 502,
+    terminal_unavailable: 503, internal_error: 500,
+  }[error] || 500;
+}
+
+const TERMINAL_DETAILS = {
+  invalid_request: 'Terminal request is invalid',
+  invalid_working_directory: 'Working directory is not allowed',
+  executable_not_allowed: 'Executable is not allowed',
+  environment_not_allowed: 'Environment is not allowed',
+  signal_not_allowed: 'Signal is not allowed',
+  terminal_forbidden: 'Terminal access is forbidden',
+  terminal_not_found: 'Terminal was not found',
+  idempotency_conflict: 'Idempotency key conflicts with an earlier request',
+  terminal_not_writable: 'Terminal is not writable',
+  terminal_closed: 'Terminal is closed',
+  idempotency_unsupported: 'Idempotency is not supported for this operation',
+  input_too_large: 'Input is too large',
+  output_limit: 'Output exceeds the configured limit',
+  terminal_limit: 'Terminal limit reached',
+  terminal_spawn_failed: 'Terminal could not be started',
+  terminal_unavailable: 'Terminal service is unavailable',
+  internal_error: 'Terminal request failed',
+};
+
+function terminalHandler(operation) {
+  return async (req, res) => {
+    const body = req.body || {};
+    const chatId = body.chat_id;
+    if (typeof chatId !== 'string' || chatId.length < 1 || chatId.length > 128) {
+      return res.status(400).json({ ok: false, error: 'invalid_request', details: 'chat_id is required' });
+    }
+    const policy = config.getTerminalPolicy(chatId);
+    if (!policy) {
+      return res.status(404).json({ ok: false, error: 'terminal_not_found', details: 'Terminal is not available for this chat' });
+    }
+    try {
+      const result = await terminalClient.request(operation, body, policy.ownerScope);
+      return res.status(TERMINAL_OPERATIONS[operation].status).json(result);
+    } catch (error) {
+      const code = error instanceof TerminalUnavailableError ? 'terminal_unavailable' : (error.code || 'internal_error');
+      return res.status(terminalStatus(code)).json({ ok: false, error: code, details: TERMINAL_DETAILS[code] || TERMINAL_DETAILS.internal_error });
+    }
+  };
+}
+
+for (const [operation, definition] of Object.entries(TERMINAL_OPERATIONS)) {
+  app[definition.method.toLowerCase()](definition.path, auth, terminalHandler(operation));
+}
 
 // Rate limiting
 const limiter = rateLimit({
