@@ -24,6 +24,7 @@ function decodeData(value) {
   if (bytes.length > 65536) throw error('input_too_large');
   return bytes;
 }
+function isValidUtf8(bytes) { return Buffer.from(bytes.toString('utf8'), 'utf8').equals(bytes); }
 function spawnRequest(req, policy) {
   text(req.chat_id, 1, 128, 'chat_id');
   const executable = req.executable === undefined ? policy.defaultExecutable : text(req.executable, 1, 4096, 'executable');
@@ -41,4 +42,4 @@ function spawnRequest(req, policy) {
   return { chat_id: req.chat_id, executable, argv, cwd: req.cwd, env, cols, rows, idempotency_key: req.idempotency_key };
 }
 function validateOutput(req) { validateId(req.terminal_id); integer(req.cursor === undefined ? 0 : req.cursor, 0, 9223372036854775807, 'cursor'); integer(req.max_bytes === undefined ? 16384 : req.max_bytes, 1, 65536, 'max_bytes'); integer(req.wait_ms === undefined ? 0 : req.wait_ms, 0, 30000, 'wait_ms'); }
-module.exports = { SIGNALS, CLOSE_REASONS, error, integer, text, terminalId, validateId, decodeData, spawnRequest, validateOutput };
+module.exports = { SIGNALS, CLOSE_REASONS, error, integer, text, terminalId, validateId, decodeData, isValidUtf8, spawnRequest, validateOutput };

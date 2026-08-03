@@ -17,7 +17,7 @@ app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '5mb' }));
 
 const config = require('./config');
 const concurrency = require('./concurrency');
-const { TerminalClient, TerminalUnavailableError } = require('./terminal-client');
+const { TerminalClient, TerminalUnavailableError, TerminalWriteOutcomeUnknownError } = require('./terminal-client');
 const terminalClient = new TerminalClient({
   socketPath: config.getTerminalConfig().socket_path,
   authToken: config.getTerminalConfig().auth_token,
@@ -39,7 +39,7 @@ function terminalStatus(error) {
     terminal_not_found: 404, idempotency_conflict: 409, terminal_not_writable: 409,
     terminal_closed: 409, idempotency_unsupported: 409, input_too_large: 413,
     output_limit: 413, terminal_limit: 429, terminal_spawn_failed: 502,
-    terminal_unavailable: 503, internal_error: 500,
+    terminal_unavailable: 503, terminal_write_outcome_unknown: 504, internal_error: 500,
   }[error] || 500;
 }
 
@@ -60,6 +60,7 @@ const TERMINAL_DETAILS = {
   terminal_limit: 'Terminal limit reached',
   terminal_spawn_failed: 'Terminal could not be started',
   terminal_unavailable: 'Terminal service is unavailable',
+  terminal_write_outcome_unknown: 'Terminal write may have been accepted; do not retry automatically',
   internal_error: 'Terminal request failed',
 };
 
@@ -78,7 +79,7 @@ function terminalHandler(operation) {
       const result = await terminalClient.request(operation, body, policy.ownerScope);
       return res.status(TERMINAL_OPERATIONS[operation].status).json(result);
     } catch (error) {
-      const code = error instanceof TerminalUnavailableError ? 'terminal_unavailable' : (error.code || 'internal_error');
+      const code = error instanceof TerminalWriteOutcomeUnknownError ? error.code : error instanceof TerminalUnavailableError ? 'terminal_unavailable' : (error.code || 'internal_error');
       return res.status(terminalStatus(code)).json({ ok: false, error: code, details: TERMINAL_DETAILS[code] || TERMINAL_DETAILS.internal_error });
     }
   };

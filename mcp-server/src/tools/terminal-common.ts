@@ -17,6 +17,8 @@ export async function callTerminal(client: GatewayClient, operation: string, arg
         terminal_unavailable: "Terminal service is unavailable",
         terminal_closed: "Terminal is closed",
         terminal_not_writable: "Terminal is not writable",
+        idempotency_unsupported: "Idempotency is not supported for terminal-write",
+        terminal_write_outcome_unknown: "Write outcome is unknown; do not retry automatically",
       };
       return terminalResult({ ok: false, error: code, details: details[code] || "Terminal request failed" }, true);
     }

@@ -127,17 +127,20 @@ configurable between 1 and 32. `terminal-spawn` over the limit returns
 ## Byte and Output Semantics
 
 PTY output is one merged stream, as seen by a human terminal. stdout and
-stderr are not separately recoverable. The service reads raw bytes from the
-PTY master and appends them to a bounded ring buffer (default 1 MiB, maximum
-16 MiB). It never decodes, normalizes, trims, or line-buffers the stream.
+stderr are not separately recoverable. The v0.1.2 node-pty contract is a valid
+UTF-8 terminal stream plus control bytes; arbitrary invalid UTF-8 bytes are not
+preserved. The service appends the node-pty stream to a bounded ring buffer
+(default 1 MiB, maximum 16 MiB) without additional decoding, trimming, or
+line-buffering.
 
 The cursor is a monotonically increasing byte offset, not a character count.
 `cursor` is the exclusive end offset of data already consumed. The first
 cursor is `0`; a returned chunk covers `[cursor, next_cursor)`. Data is encoded
-as standard Base64 in JSON, so arbitrary terminal bytes and control sequences
-are preserved. A UTF-8 character split across two PTY reads is legal. Clients
-must concatenate decoded bytes before UTF-8 decoding; replacement characters
-must not be introduced by the service.
+as standard Base64 in JSON, so valid UTF-8 and supported control sequences are
+preserved. A UTF-8 character split across two PTY reads is legal. Clients must
+concatenate decoded bytes before UTF-8 decoding. Invalid bytes produced by a
+child are subject to node-pty's string decoding and are not a supported raw
+binary channel.
 
 Each retained output record also has a monotonic `sequence` number, starting
 at 1, for diagnostics and ordering. Cursor offsets are authoritative. A
@@ -160,6 +163,8 @@ Long polling is optional per request: `wait_ms` defaults to 0 and is bounded
 to 30,000 ms. A request waits until bytes, a state change, or the timeout. A
 timeout with no event returns an empty chunk, unchanged cursor, and
 `timed_out: true`; it is not an error and does not extend the process lifetime.
+The Gateway uses an operation-specific timeout with a margin beyond `wait_ms`,
+so a normal long-poll result is not converted into a transport timeout.
 
 ## Exact MCP Schemas
 
@@ -222,13 +227,15 @@ Request:
 {
   "chat_id": "string, required",
   "terminal_id": "string, required, term_ identifier",
-  "data": "string, required, Base64 of 1-65536 bytes",
+  "data": "string, required, Base64 of 1-65536 valid UTF-8 bytes",
   "idempotency_key": "string, optional, 1-128 characters"
 }
 ```
 
-The decoded bytes are written exactly as provided. No newline is added. An
-explicit `\n` or control byte must be included by the client when wanted.
+The decoded valid UTF-8 bytes are written to the PTY. C0 control bytes, DEL,
+and ANSI escape bytes are supported; invalid UTF-8 bytes are rejected as
+`invalid_request`. No newline is added. An explicit `\n` or control byte must
+be included by the client when wanted.
 
 Response (`200`):
 
@@ -244,7 +251,10 @@ Response (`200`):
 
 Writes are deliberately not idempotent: retrying can duplicate input. A
 provided write idempotency key is rejected with `idempotency_unsupported`,
-unless a later implementation defines durable byte-operation deduplication.
+unless a later implementation defines durable byte-operation deduplication. If
+the Gateway returns `terminal_write_outcome_unknown` after a transport timeout,
+the write may already have been accepted; callers must not retry it
+automatically.
 Writes to `exited`, `closing`, or `closed` return `terminal_not_writable`.
 
 ### `terminal-output`
@@ -294,6 +304,18 @@ The response always includes state and exit fields, even with no data. For an
 empty timeout, `next_cursor` equals the request cursor. For a failed or
 unknown terminal, no output cursor is fabricated. `terminal-output` is also
 the supported way to learn normal exit and non-zero exit information.
+
+### v0.1.2 byte characterization
+
+Direct node-pty and Terminal-service diagnostics on the supported Linux/Node 20
+runtime established that valid UTF-8 and control bytes `00`, `03`, `1b`, and
+`7f` survive the string callback path. Invalid bytes `80`, `fe`, and `ff` emerge
+as U+FFFD replacement bytes. The implementation therefore does not claim an
+arbitrary binary channel: writes require valid UTF-8, while output is the
+node-pty valid-UTF-8 terminal stream plus supported controls. The unfinished
+external-process characterization harness is intentionally quarantined from
+the default test command after it demonstrated that lifecycle tests need an
+isolated test service and PID/starttime guards.
 
 ### `terminal-resize`
 
@@ -416,6 +438,7 @@ credentials, command output, or arbitrary request text.
 | 429 | `terminal_limit` | Concurrent terminal limit reached |
 | 502 | `terminal_spawn_failed` | PTY or executable spawn failed; safe error only |
 | 503 | `terminal_unavailable` | Gateway cannot reach the Terminal service |
+| 504 | `terminal_write_outcome_unknown` | Write may have been accepted before the transport timed out; do not retry automatically |
 | 500 | `internal_error` | Unexpected service failure; no raw internals returned |
 
 HTTP status is an internal mapping, not a replacement for the stable error
@@ -517,6 +540,14 @@ invalid. This is intentionally simpler and safer than persisting live PTYs.
   signal.
 - Run under the systemd sandbox and verify the service user cannot read
   configured Gateway/tunnel secrets or unrelated paths.
+
+Process-group characterization remains unresolved for phase 2. A safe test
+service must run in an isolated OS session and record PID, PPID, PGID, SID, and
+`/proc` starttime for foreground, background, pipeline, nested-shell, separate
+PGID, `setsid`, and double-fork descendants. It must refuse signals involving
+the test runner, Gateway, OpenCode worker, PID 1, or unrecorded processes.
+Implement cgroup-v2 or an equally explicit launcher boundary only after that
+characterization proves the current killpg behavior is insufficient.
 
 The service gives ChatGPT a persistent PTY rather than a one-shot command API:
 interactive CLI/TUI programs can receive exact stdin bytes without an implicit

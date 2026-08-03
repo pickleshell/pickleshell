@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const pty = require('node-pty');
 const { OutputRing } = require('./ring');
 const { makePolicy, safeCwd, buildEnv } = require('./policy');
-const { error, integer, text, terminalId, validateId, decodeData, spawnRequest, validateOutput, SIGNALS, CLOSE_REASONS } = require('./validation');
+const { error, integer, text, terminalId, validateId, decodeData, isValidUtf8, spawnRequest, validateOutput, SIGNALS, CLOSE_REASONS } = require('./validation');
 
 const now = () => new Date().toISOString();
 const hash = (value) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -42,7 +42,7 @@ class TerminalService {
     } catch (cause) { this.terminals.delete(t.id); throw error('terminal_spawn_failed'); }
     const response = this.metadata(t); if (req.idempotency_key) this.idempotency.set(`${req.chat_id}:${req.idempotency_key}`, { hash: hash(normalized), response }); return response;
   }
-  write(raw) { const t = this.lookup(raw); if (raw.idempotency_key !== undefined) throw error('idempotency_unsupported'); if (t.state !== 'running') throw error('terminal_not_writable'); const bytes = decodeData(raw.data); t.pty.write(bytes.toString('latin1')); this.touch(t); return { ok: true, terminal_id: t.id, state: t.state, bytes_written: bytes.length, last_activity_at: t.lastActivityAt }; }
+  write(raw) { const t = this.lookup(raw); if (raw.idempotency_key !== undefined) throw error('idempotency_unsupported'); if (t.state !== 'running') throw error('terminal_not_writable'); const bytes = decodeData(raw.data); if (!isValidUtf8(bytes)) throw error('invalid_request', 'data must be valid UTF-8 terminal input'); t.pty.write(bytes.toString('utf8')); this.touch(t); return { ok: true, terminal_id: t.id, state: t.state, bytes_written: bytes.length, last_activity_at: t.lastActivityAt }; }
   async output(raw) {
     validateOutput(raw); const t = this.lookup(raw); const cursor = raw.cursor === undefined ? 0 : raw.cursor; const max = raw.max_bytes === undefined ? 16384 : raw.max_bytes; const wait = raw.wait_ms === undefined ? 0 : raw.wait_ms;
     let result = t.ring.read(cursor, max); let timedOut = false;
