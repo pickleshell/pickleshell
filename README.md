@@ -277,9 +277,10 @@ service runtime security, and updates the ChatGPT Assistant setup and product
 documentation.
 
 The unreleased main branch includes the Codex runtime integration, verified
-through PickleShell ACE. Do not create the next release or tag yet: the release
-boundary is completion of the Terminal plus a clean end-to-end test installation
-on a separate machine.
+through PickleShell ACE, and the Terminal implementation with deployment-time
+Linux service identity selection. Do not create the next release or tag yet:
+the release boundary is Terminal completion plus a clean end-to-end test
+installation on a separate machine.
 
 This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 

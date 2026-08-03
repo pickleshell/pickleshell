@@ -1,6 +1,7 @@
 # Terminal PTY Design
 
-Status: approved design; v1 implementation is present but not ACE-verified.
+Status: approved design; v1 implementation and deployment-time service identity
+selection are present but not ACE-verified.
 
 ## Purpose and Scope
 
@@ -422,10 +423,16 @@ code. MCP callers should branch on `error`, not on prose or HTTP wording.
 
 ## Security and Isolation
 
-- Run the Terminal service as a dedicated unprivileged `pickleshell-terminal`
-  user, separate from the tunnel user and preferably separate from the Agent
-  user. It must not have sudo, production credentials, SSH agent sockets,
-  private keys, or unrelated repositories.
+- Run the Terminal service by default as a dedicated unprivileged
+  `pickleshell-terminal` user, separate from the tunnel user and preferably
+  separate from the Agent user. Installation may explicitly select an existing
+  non-root user and group with `terminal/systemd/configure-service-user.sh`.
+  That helper only validates the account and writes a systemd drop-in; it never
+  grants privileges, changes groups, or edits sudoers. If the selected account
+  already has sudo rights, Terminal naturally has those Linux rights. The
+  selected account must not expose production credentials, SSH agent sockets,
+  private keys, or unrelated repositories unless the operator intentionally
+  accepts that risk.
 - Use a separate systemd unit with `NoNewPrivileges=true`, `PrivateDevices=true`,
   `ProtectSystem=strict`, restricted `ProtectHome`, `RestrictSUIDSGID`,
   `RestrictNamespaces`, `ProtectProc`, `ProcSubset=pid`, bounded `TasksMax`,
@@ -510,6 +517,15 @@ invalid. This is intentionally simpler and safer than persisting live PTYs.
   signal.
 - Run under the systemd sandbox and verify the service user cannot read
   configured Gateway/tunnel secrets or unrelated paths.
+
+The service gives ChatGPT a persistent PTY rather than a one-shot command API:
+interactive CLI/TUI programs can receive exact stdin bytes without an implicit
+newline, and ChatGPT can read incremental cursor-based output, resize the PTY,
+send selected signals, run concurrent terminals, and explicitly close them.
+Each terminal has a bounded TTL; closure, TTL expiry, restart, and shutdown clean
+up the complete process group. These capabilities are bounded by the configured
+executable/path/environment/input/output policies, but Linux identity,
+permissions, groups, sudoers, and systemd remain authoritative for access.
 
 ### E2E
 

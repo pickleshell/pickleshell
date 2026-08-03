@@ -67,14 +67,18 @@ and the PickleShell services must both report healthy/ready before continuing.
 ## 5. Create the PickleShell plugin
 
 In ChatGPT, open **Plugins** and press **+** to add a new plugin. Name it
-`PickleShell`, select the configured tunnel, and allow all 56 MCP tools (4 PickleShell + 52 Playwright browser automation):
-`send-chat`, `session-status`, `session-output`, and `cancel-request`.
+`PickleShell`, select the configured tunnel, and allow all 62 MCP tools (4 Agent +
+52 Playwright browser automation + 6 Terminal):
+Agent tools (`send-chat`, `session-status`, `session-output`, and
+`cancel-request`), Browser tools, and Terminal tools (`terminal-spawn`,
+`terminal-write`, `terminal-output`, `terminal-resize`, `terminal-signal`, and
+`terminal-close`).
 
 ![Create the PickleShell plugin in ChatGPT](assets/plugin-create.png)
 
 ## 6. Verify the connected plugin
 
-The connected PickleShell entry should show the selected tunnel and the four
+The connected PickleShell entry should show the selected tunnel and the
 enabled MCP tools.
 
 ![Connected PickleShell plugin and send-chat action](assets/plugin-connected.png)
@@ -82,10 +86,11 @@ enabled MCP tools.
 ## 7. Upgrading: refresh after tool changes
 
 > **After upgrading local PickleShell components:** If the upgrade adds MCP
-> tools or changes tool schemas, open the PickleShell plugin in ChatGPT and use
-> **Refresh**. Otherwise, ChatGPT may keep cached tool definitions and the new
-> tools or schema changes will not take effect. Upgrades that do not change MCP
-> tools or schemas do not require this refresh.
+> tools or changes tool schemas, tool definitions may refresh automatically after
+> some time. If the new tools do not appear, open the PickleShell plugin in
+> ChatGPT and use **Refresh**. Otherwise, ChatGPT may keep cached tool
+> definitions. Upgrades that do not change MCP tools or schemas do not require
+> this refresh.
 
 To refresh the plugin:
 

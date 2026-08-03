@@ -26,12 +26,14 @@ ChatGPT
   -> MCP tool: session-status  -> GET  /status  (lightweight polling)
   -> MCP tool: session-output  -> GET  /output  (full result reading)
   -> MCP tool: cancel-request  -> POST /cancel  (abort in-flight task)
+  -> MCP tools: terminal-*     -> Gateway -> private Terminal PTY service
 
 Gateway health check           -> GET  /health
 ```
 
-Refresh the PickleShell plugin after MCP tools or their schema change. A
-Gateway endpoint change alone does not require a plugin refresh.
+Tool definitions may refresh automatically after an upgrade. If newly added
+MCP tools or schema changes do not appear, use **Refresh** on the PickleShell
+plugin. A Gateway endpoint change alone does not require a plugin refresh.
 
 ## Async workflow
 

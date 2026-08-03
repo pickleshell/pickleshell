@@ -33,8 +33,10 @@ after that baseline; Terminal and Settings complete the next milestone
 - **Browser:** Playwright is implemented and validated as the browser execution
   layer (52 tools registered on the PickleShell MCP server).
  - **Terminal:** implemented in the repository, pending ACE verification. It
-   uses a separate unprivileged node-pty runtime and exposes the six-tool MCP
-   contract; it is not production verified.
+   uses a separate node-pty runtime with a dedicated unprivileged identity by
+   default, supports explicit deployment-time selection of an existing Linux
+   service user, and exposes the six-tool MCP contract; it is not production
+   verified.
 - **Settings:** planned. `settings-get` and `settings-update` manage
   policy-controlled mutable defaults such as the agent backend
   (OpenCode/Codex), the model allowlist, file-transfer limits (files per

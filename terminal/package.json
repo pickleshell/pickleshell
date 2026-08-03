@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/terminal.test.js",
+    "test": "node test/terminal.test.js && node test/service-user.test.js",
     "build": "node --check src/server.js && node --check src/service.js"
   },
   "dependencies": {

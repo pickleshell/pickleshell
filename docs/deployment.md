@@ -77,16 +77,41 @@ sudo -u pickleshell bash -c \
 
 Tune `MemoryHigh`, `MemoryMax`, and `TasksMax` for the host.
 
-## Terminal Runtime (ACE Test Only)
+## Terminal Runtime
 
-The Terminal runtime is a separate unprivileged `pickleshell-terminal` service.
-Install `terminal/` with its lockfile, copy `terminal/config.example.json` to
-an operator-managed configuration, and set a random `auth_token` with mode
-0600. Configure only ordinary-profile workspace roots and executable paths.
-Install `terminal/systemd/pickleshell-terminal.service`, then verify the private
-socket is accessible only to the Gateway service group. Do not enable a
-privileged profile or deploy this service to BOS until the complete ACE test
-tunnel and live MCP matrix pass.
+The Terminal runtime is a separate service. The shipped
+`terminal/systemd/pickleshell-terminal.service` runs by default as the dedicated,
+unprivileged `pickleshell-terminal` user and group. Install `terminal/` with its
+lockfile, copy `terminal/config.example.json` to an operator-managed
+configuration, and set a random `auth_token` with mode 0600. Configure only
+ordinary-profile workspace roots and executable paths.
+
+If deployment must use an existing account, select it explicitly at install
+time. The account and optional group must already exist; the helper validates
+names and refuses `root`, grants no memberships or sudo rights, and does not
+edit sudoers:
+
+```bash
+sudo /opt/pickleshell/terminal/systemd/configure-service-user.sh \
+  --user existing-service-user --group existing-service-group
+sudo systemctl daemon-reload
+sudo systemctl restart pickleshell-terminal.service
+```
+
+Omitting `--group` uses the selected account's primary group. Ensure that the
+selected group has the required access to the private socket and configured
+workspace, and that the Gateway can access the socket. Linux user/group
+permissions, sudoers, and systemd are the source of truth: an explicitly
+selected account that already has sudo rights will naturally have those rights
+in Terminal. The explicit drop-in also disables `NoNewPrivileges` so sudo is not
+silently blocked; it grants no privilege itself. PickleShell's executable, path,
+environment, input, output, PTY, and process-group safeguards remain
+defense-in-depth only. Selecting a privileged account increases the impact of
+commands ChatGPT can run.
+
+Install the unit, then verify the private socket is accessible only to the
+Gateway service group. Do not deploy to ACE or BOS production until the complete
+test tunnel and live MCP matrix pass.
 
 ## Configure the MCP runtime
 
