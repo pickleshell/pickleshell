@@ -31,9 +31,9 @@ ChatGPT
 Gateway health check           -> GET  /health
 ```
 
-Tool definitions may refresh automatically after an upgrade. If newly added
-MCP tools or schema changes do not appear, use **Refresh** on the PickleShell
-plugin. A Gateway endpoint change alone does not require a plugin refresh.
+After an upgrade that adds tools or changes schemas, use **Refresh** if the
+updated tools are not visible. ChatGPT may cache tool definitions. A Gateway
+endpoint change alone does not require a plugin refresh.
 
 ## Async workflow
 

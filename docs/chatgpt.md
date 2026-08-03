@@ -86,11 +86,9 @@ enabled MCP tools.
 ## 7. Upgrading: refresh after tool changes
 
 > **After upgrading local PickleShell components:** If the upgrade adds MCP
-> tools or changes tool schemas, tool definitions may refresh automatically after
-> some time. If the new tools do not appear, open the PickleShell plugin in
-> ChatGPT and use **Refresh**. Otherwise, ChatGPT may keep cached tool
-> definitions. Upgrades that do not change MCP tools or schemas do not require
-> this refresh.
+> tools or changes tool schemas, use **Refresh** if the updated tools are not
+> visible. ChatGPT may cache tool definitions. Upgrades that do not change MCP
+> tools or schemas do not require this refresh.
 
 To refresh the plugin:
 
