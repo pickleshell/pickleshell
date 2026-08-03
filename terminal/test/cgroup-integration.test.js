@@ -15,6 +15,7 @@ if (process.env.PICKLESHELL_CGROUP_INTEGRATION_INNER !== '1') {
   const node = process.execPath;
   const helper = path.join(__dirname, 'cgroup-integration-helper.js');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pickleshell-cgroup-integration-'));
+  let now = Date.now();
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const deadline = (ms) => Date.now() + ms;
   async function until(fn, timeoutMs = 10000) {
@@ -49,7 +50,7 @@ if (process.env.PICKLESHELL_CGROUP_INTEGRATION_INNER !== '1') {
       const stale = manager.create('term_stale');
       await manager.initialize();
       assert.equal(fs.existsSync(stale.path), false, 'startup cleanup removes stale child cgroups');
-      service = new TerminalService({ roots: [root], executables: [node], maxTerminals: 8, ttlMs: 60000, cgroupManager: manager });
+      service = new TerminalService({ roots: [root], executables: [node], maxTerminals: 8, ttlMs: 60000, clock: () => now, reaperIntervalMs: 0, cgroupManager: manager });
       await service.ready;
       for (const [scenario, roles] of [['foreground', ['foreground']], ['background', ['background-parent', 'hold']], ['pipeline', ['pipeline-parent', 'hold']], ['nested', ['nested-parent', 'hold']], ['separate', ['separate-parent', 'hold']], ['double-fork', ['double-fork-parent', 'double-fork-grandchild']]]) {
         const terminal = service.spawn({ owner_scope: 'integration', chat_id: 'integration', executable: node, argv: [helper, scenario], cwd: '.' });
@@ -68,8 +69,25 @@ if (process.env.PICKLESHELL_CGROUP_INTEGRATION_INNER !== '1') {
       assert.equal(new Set(concurrent.map((item) => service.terminals.get(item.terminal_id).cgroup.path)).size, 2);
       await Promise.all(concurrent.map((item) => close(service, item.terminal_id).finally(() => active.delete(item.terminal_id))));
       const ttl = service.spawn({ owner_scope: 'integration', chat_id: 'integration', executable: node, argv: [helper, 'foreground'], cwd: '.' }); active.add(ttl.terminal_id);
-      const ttlResult = await until(async () => { const result = await service.output({ owner_scope: 'integration', chat_id: 'integration', terminal_id: ttl.terminal_id, cursor: 0, wait_ms: 100 }); return result.state === 'closed' ? result : null; }, 70000);
-      assert.equal(ttlResult.close_reason, 'ttl_expired'); active.delete(ttl.terminal_id);
+      const ttlTerminal = service.terminals.get(ttl.terminal_id);
+      const ttlRecords = await outputUntil(service, ttl.terminal_id, ['foreground'], 'ttl');
+      const ttlPath = ttlTerminal.cgroup.path;
+      now += 60001;
+      service.reap();
+      const ttlResult = await ttlTerminal.closePromise;
+      assert.equal(ttlResult.close_reason, 'ttl_expired');
+      assert.equal(fs.existsSync(ttlPath), false, 'TTL removes the exact child cgroup');
+      for (const record of ttlRecords) {
+        await until(() => {
+          try {
+            const stat = fs.readFileSync(`/proc/${record.pid}/stat`, 'utf8');
+            const fields = stat.slice(stat.lastIndexOf(') ') + 2).split(' ');
+            assert.equal(fields[19], record.starttime, 'PID was reused before TTL cleanup verification');
+            return fields[0] === 'Z';
+          } catch (error) { if (error.code === 'ENOENT') return true; throw error; }
+        }, 1000);
+      }
+      active.delete(ttl.terminal_id);
       const shutdown = service.spawn({ owner_scope: 'integration', chat_id: 'integration', executable: node, argv: [helper, 'foreground'], cwd: '.' }); active.add(shutdown.terminal_id);
       const shutdownPath = service.terminals.get(shutdown.terminal_id).cgroup.path;
       await service.stop(); active.delete(shutdown.terminal_id);

@@ -117,6 +117,12 @@ refreshes `last_activity_at`; `terminal-output` long-polling refreshes only
 when it returns data or observes a state change. A reaper closes the process
 group and marks the terminal `closed` with reason `ttl_expired`.
 
+More precisely, spawn, write, resize, signal, and output calls that return data
+or observe a state change renew activity. An empty `terminal-output` timeout
+does not renew activity. No operation is performed during the isolated TTL
+idle test; it advances the injected test clock and invokes the production
+reaper path.
+
 An MCP connection disappearing cannot reliably be inferred from a tool call.
 There is therefore no unsafe immediate kill on disconnect; the TTL is the
 automatic disconnect cleanup mechanism. A future transport-level lease is out
