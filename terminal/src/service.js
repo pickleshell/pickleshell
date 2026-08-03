@@ -47,10 +47,29 @@ class TerminalService {
     const response = this.metadata(t); if (req.idempotency_key) this.idempotency.set(`${req.chat_id}:${req.idempotency_key}`, { hash: hash(normalized), response }); return response;
   }
   write(raw) { const t = this.lookup(raw); if (raw.idempotency_key !== undefined) throw error('idempotency_unsupported'); if (t.state !== 'running') throw error('terminal_not_writable'); const bytes = decodeData(raw.data); if (!isValidUtf8(bytes)) throw error('invalid_request', 'data must be valid UTF-8 terminal input'); t.pty.write(bytes.toString('utf8')); this.touch(t); return { ok: true, terminal_id: t.id, state: t.state, bytes_written: bytes.length, last_activity_at: t.lastActivityAt }; }
-  async output(raw) {
+  async output(raw, { signal } = {}) {
     validateOutput(raw); const t = this.lookup(raw); const cursor = raw.cursor === undefined ? 0 : raw.cursor; const max = raw.max_bytes === undefined ? 16384 : raw.max_bytes; const wait = raw.wait_ms === undefined ? 0 : raw.wait_ms;
     let result = t.ring.read(cursor, max); let timedOut = false;
-    if (!result.data.length && t.state === 'running' && wait) { await new Promise((resolve) => { let timer = setTimeout(resolve, wait); const wake = () => { clearTimeout(timer); timer = null; resolve(); }; t.waiters.push(wake); }); result = t.ring.read(cursor, max); timedOut = !result.data.length && t.state === 'running'; }
+    if (!result.data.length && t.state === 'running' && wait) {
+      await new Promise((resolve) => {
+        let settled = false;
+        const wake = () => finish();
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', finish);
+          const index = t.waiters.indexOf(wake);
+          if (index >= 0) t.waiters.splice(index, 1);
+          resolve();
+        };
+        const timer = setTimeout(finish, wait);
+        t.waiters.push(wake);
+        signal?.addEventListener('abort', finish, { once: true });
+        if (signal?.aborted) finish();
+      });
+      result = t.ring.read(cursor, max); timedOut = !result.data.length && t.state === 'running';
+    }
     if (result.data.length || t.state !== 'running') this.touch(t);
     return { ok: true, terminal_id: t.id, state: t.state, data: result.data.toString('base64'), encoding: 'base64', bytes: result.data.length, cursor, next_cursor: result.nextCursor, oldest_cursor: result.oldestCursor, sequence_start: result.sequenceStart, sequence_end: result.sequenceEnd, truncated: result.truncated, truncated_from: result.truncatedFrom, timed_out: timedOut, exit_code: t.exitCode, exit_signal: t.exitSignal, close_reason: t.closeReason, created_at: t.createdAt, started_at: t.startedAt, exited_at: t.exitedAt, closed_at: t.closedAt, last_activity_at: t.lastActivityAt };
   }

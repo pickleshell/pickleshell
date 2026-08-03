@@ -26,9 +26,9 @@ function start(options = {}) {
   try { if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath); } catch (_) { throw new Error('cannot replace terminal socket'); }
   fs.mkdirSync(path.dirname(socketPath), { recursive: true });
   const server = net.createServer((socket) => {
-    let buffer = ''; let disconnected = false; socket.setEncoding('utf8');
+    let buffer = ''; let disconnected = false; const disconnectController = new AbortController(); socket.setEncoding('utf8');
     socket.on('error', () => { disconnected = true; socket.destroy(); });
-    socket.on('close', () => { disconnected = true; });
+    socket.on('close', () => { disconnected = true; disconnectController.abort(); });
     const send = (response) => {
       if (disconnected || socket.destroyed || socket.writableEnded || !socket.writable) return;
       try { socket.write(`${JSON.stringify(response)}\n`); } catch (_) { disconnected = true; socket.destroy(); }
@@ -45,7 +45,7 @@ function start(options = {}) {
           const operation = req.op.replace(/^terminal-/, '');
           if (!['spawn', 'write', 'output', 'resize', 'signal', 'close'].includes(operation)) throw error('invalid_request');
           await service.ready;
-          const result = operation === 'spawn' ? service.spawn(req) : operation === 'write' ? service.write(req) : operation === 'output' ? await service.output(req) : operation === 'resize' ? service.resize(req) : operation === 'signal' ? service.signal(req) : await service.closeRequest(req);
+          const result = operation === 'spawn' ? service.spawn(req) : operation === 'write' ? service.write(req) : operation === 'output' ? await service.output(req, { signal: disconnectController.signal }) : operation === 'resize' ? service.resize(req) : operation === 'signal' ? service.signal(req) : await service.closeRequest(req);
           response = result.ok === undefined ? { ok: true, ...result } : result;
         } catch (e) { response = { ok: false, error: e.code || 'internal_error', details: ['unauthorized', 'invalid_request', 'invalid_working_directory', 'executable_not_allowed', 'environment_not_allowed', 'signal_not_allowed', 'terminal_not_found', 'idempotency_conflict', 'terminal_not_writable', 'terminal_closed', 'idempotency_unsupported', 'input_too_large', 'output_limit', 'terminal_limit', 'terminal_spawn_failed', 'terminal_unavailable', 'terminal_cgroup_unavailable'].includes(e.code) ? e.message : 'request failed' }; }
         send(response);
