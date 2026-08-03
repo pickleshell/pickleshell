@@ -298,6 +298,19 @@ This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 
 ## Release History
 
+### Unreleased
+
+- Added the native Codex runtime as a first-class alternative to OpenCode,
+  verified through PickleShell ACE.
+- Added a persistent interactive Terminal PTY with six MCP operations, plus
+  isolation, lifecycle, and delegated cgroup safeguards for ordinary and
+  ChatGPT profiles.
+- Added automated Terminal reconnect E2E coverage and a consistent bounded
+  `terminal-close` reason contract.
+- Verified Terminal production E2E on BOS ordinary, BOSsudo/ChatGPT profiles,
+  and ACE.
+- Added the project Philosophy statement.
+
 ### [v0.1.1](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.1)
 
 - Added Playwright MCP browser automation runtime and setup documentation.
