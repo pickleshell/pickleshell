@@ -22,7 +22,7 @@ function start(options = {}) {
   const cfg = config(); const token = process.env.PICKLESHELL_TERMINAL_AUTH || cfg.auth_token;
   if (!token) throw new Error('PICKLESHELL_TERMINAL_AUTH or config auth_token is required');
   const socketPath = process.env.PICKLESHELL_TERMINAL_SOCKET || cfg.socket || '/run/pickleshell-terminal/service.sock';
-  const service = new TerminalService({ ...cfg, ...(options.cgroupManager ? { cgroupManager: options.cgroupManager } : {}) });
+  const service = options.service || new TerminalService({ ...cfg, ...(options.cgroupManager ? { cgroupManager: options.cgroupManager } : {}) });
   try { if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath); } catch (_) { throw new Error('cannot replace terminal socket'); }
   fs.mkdirSync(path.dirname(socketPath), { recursive: true });
   const server = net.createServer((socket) => {
@@ -38,7 +38,7 @@ function start(options = {}) {
           const operation = req.op.replace(/^terminal-/, '');
           if (!['spawn', 'write', 'output', 'resize', 'signal', 'close'].includes(operation)) throw error('invalid_request');
           await service.ready;
-          const result = operation === 'spawn' ? service.spawn(req) : operation === 'write' ? service.write(req) : operation === 'output' ? await service.output(req) : operation === 'resize' ? service.resize(req) : operation === 'signal' ? service.signal(req) : service.closeRequest(req);
+          const result = operation === 'spawn' ? service.spawn(req) : operation === 'write' ? service.write(req) : operation === 'output' ? await service.output(req) : operation === 'resize' ? service.resize(req) : operation === 'signal' ? service.signal(req) : await service.closeRequest(req);
           response = result.ok === undefined ? { ok: true, ...result } : result;
         } catch (e) { response = { ok: false, error: e.code || 'internal_error', details: ['unauthorized', 'invalid_request', 'invalid_working_directory', 'executable_not_allowed', 'environment_not_allowed', 'signal_not_allowed', 'terminal_not_found', 'idempotency_conflict', 'terminal_not_writable', 'terminal_closed', 'idempotency_unsupported', 'input_too_large', 'output_limit', 'terminal_limit', 'terminal_spawn_failed', 'terminal_unavailable', 'terminal_cgroup_unavailable'].includes(e.code) ? e.message : 'request failed' }; }
         socket.write(`${JSON.stringify(response)}\n`);
