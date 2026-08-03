@@ -41,7 +41,30 @@ jobs:
       - name: Native PTY smoke test
         run: npm --prefix terminal run test:native-smoke
       - name: Full tests
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          log_file="$(mktemp)"
+          trap 'rm -f "$log_file"' EXIT
+          set +e
+          npm test 2>&1 | tee "$log_file"
+          test_status=${PIPESTATUS[0]}
+          set -e
+          if (( test_status != 0 )); then
+            tail_text="$(tail -c 12000 "$log_file")"
+            escaped="${tail_text//'%'/'%25'}"
+            escaped="${escaped//$'\r'/'%0D'}"
+            escaped="${escaped//$'\n'/'%0A'}"
+            printf '::error title=Full tests failed::%s\n' "$escaped"
+            if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+              {
+                printf '### Full tests failure tail\n\n```text\n'
+                tail -c 12000 "$log_file"
+                printf '\n```\n'
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          exit "$test_status"
       - name: Dependency audit
         run: npm run audit
       - name: Diff check
