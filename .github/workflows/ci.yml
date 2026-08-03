@@ -47,4 +47,5 @@ jobs:
       - name: Diff check
         run: git diff --check
       - name: Cgroup integration gate
-        run: echo 'SKIP: privileged cgroup integration requires a separately delegated systemd contour; standard GitHub runners do not run it'
+        run: |
+          echo 'SKIP: privileged cgroup integration requires a separately delegated systemd contour; standard GitHub runners do not run it'
