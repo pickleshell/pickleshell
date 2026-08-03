@@ -1,7 +1,8 @@
 # Terminal PTY Design
 
-Status: approved design; v1 implementation and deployment-time service identity
-selection are present but not ACE-verified.
+Status: approved design; v1 implementation, deployment-time service identity
+selection, and six-operation ACE Terminal E2E are present. Broader deployment
+and clean external release-installation gates remain separate.
 
 ## Purpose and Scope
 
@@ -589,8 +590,9 @@ permissions, groups, sudoers, and systemd remain authoritative for access.
   credentials or raw command output.
 - Verify two terminals are independent, the ownership boundary rejects a
   different `chat_id`, and a service restart requires a fresh spawn.
-- Repeat the same scenarios through an ACE test tunnel before any BOS
-  production deployment.
+- The six-operation Terminal E2E has passed through the ACE test tunnel and on
+  BOS ordinary and BOSsudo/ChatGPT profiles; broader deployment and release
+  gates remain separate.
 
 ## Deployment Sequence
 
@@ -624,13 +626,13 @@ systemd `255`, `/dev/ptmx`, and `/usr/bin/script`, `/usr/bin/setsid`, and
 tasks and a 1 GiB memory maximum. Both units report the documented systemd
 hardening properties.
 
-ACE is not independently verified. The configured SSH host alias resolves to
-`ace`, but the read-only connection probe was blocked by SSH host-key
-verification before remote facts could be collected. No SSH configuration or
-access was changed. ACE verification is therefore a required pre-deployment
-checklist item, not a blocker for this contract: confirm Node ABI, PTY backend
-availability, service users, systemd restrictions, allowed roots, and the
-full test tunnel before deployment.
+ACE host facts were not independently inspected: the configured SSH host alias
+resolves to `ace`, but the read-only connection probe was blocked by SSH
+host-key verification before remote facts could be collected. No SSH
+configuration or access was changed. The six-operation Terminal E2E nevertheless
+passed against the existing ACE deployment; confirm Node ABI, PTY backend
+availability, service users, systemd restrictions, allowed roots, and the full
+test tunnel separately before treating the broader deployment gate as complete.
 
 Genuinely blocking questions for implementation are limited to operator
 configuration choices: the final allowed workspace roots/executable allowlist,

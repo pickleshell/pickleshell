@@ -36,8 +36,8 @@ implemented, while Settings remains the next planned milestone.
     node-pty runtime with a dedicated unprivileged identity by default, supports
     explicit deployment-time selection of an existing Linux service user,
     delegated cgroup-v2 lifecycle cleanup, and exposes the six-tool MCP contract.
-    ACE verification and the clean external release-installation gate remain
-    open.
+    Six-operation Terminal E2E is also verified on ACE. The clean external
+    release-installation gate remains open.
 - **Settings:** planned. `settings-get` and `settings-update` manage
   policy-controlled mutable defaults such as the agent backend
   (OpenCode/Codex), the model allowlist, file-transfer limits (files per
@@ -72,6 +72,8 @@ implemented, while Settings remains the next planned milestone.
       output and writes continue after reconnect.
 - [x] Complete BOS ordinary and BOSsudo/ChatGPT production E2E across all six
       Terminal operations.
+- [x] Complete ACE Terminal E2E across all six MCP operations. This verifies the
+      deployed ACE contract; it does not validate the later close.reason change.
 - [ ] Pass Linux Node 20/22/24 CI with a forced node-pty source rebuild and native PTY smoke test.
 - [ ] Pass the separately delegated systemd cgroup integration gate; standard CI explicitly skips it.
 - [ ] Run the complete production smoke test before creating a release tag.

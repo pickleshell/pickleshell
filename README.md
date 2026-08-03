@@ -144,7 +144,8 @@ flowchart TD
 
 All three core service boxes are implemented. Terminal production E2E has been
 verified on BOS ordinary and BOSsudo/ChatGPT profiles across all six operations;
-ACE verification and the clean external release-installation gate remain open.
+the same six-operation Terminal E2E has also passed on ACE. The clean external
+release-installation gate remains open.
 
 The tunnel is initiated from the local machine over outbound HTTPS. The Gateway
 remains reachable only inside the trusted local environment.
@@ -157,7 +158,7 @@ The three mandatory core services all run locally on your machine:
 | --- | --- | --- |
 | **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface and has been verified through PickleShell ACE. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
-| **Terminal** | Implemented, BOS production E2E verified | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. Verified on BOS ordinary and BOSsudo/ChatGPT profiles; ACE verification remains open. |
+| **Terminal** | Implemented, BOS and ACE E2E verified | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. Verified on BOS ordinary, BOSsudo/ChatGPT profiles, and ACE; the clean external release-installation gate remains open. |
 
 ## Async Workflow
 
@@ -289,8 +290,8 @@ documentation.
 The unreleased main branch includes the Codex runtime integration, verified
 through PickleShell ACE, and the Terminal implementation with deployment-time
 Linux service identity selection. Terminal has passed production E2E on BOS
-ordinary and BOSsudo/ChatGPT profiles, but ACE verification and a clean
-end-to-end installation on a separate machine remain release gates. Do not
+ordinary and BOSsudo/ChatGPT profiles and six-operation E2E on ACE, but a clean
+end-to-end installation on a separate machine remains a release gate. Do not
 create the next release or tag yet.
 
 This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
