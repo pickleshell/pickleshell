@@ -32,7 +32,7 @@ into a controlled workspace.
 
 ## Philosophy
 
-> "I built PickleShell around a simple core belief: any task can be solved in a single prompt."
+> "Any task can be solved in a single prompt."
 > — **Author**
 
 PickleShell provides autonomous agents with a secure, deterministic, and
