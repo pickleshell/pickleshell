@@ -31,6 +31,11 @@ ChatGPT
 Gateway health check           -> GET  /health
 ```
 
+Terminal spawn requires the Terminal systemd unit's delegated cgroup-v2
+subtree. If delegation or `cgroup.kill` is unavailable, the stable
+`terminal_cgroup_unavailable` error is returned; the service never silently
+falls back to process-group cleanup.
+
 After an upgrade that adds tools or changes schemas, use **Refresh** if the
 updated tools are not visible. ChatGPT may cache tool definitions. A Gateway
 endpoint change alone does not require a plugin refresh.

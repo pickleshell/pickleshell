@@ -11,6 +11,8 @@ Environment=PICKLESHELL_TERMINAL_CONFIG=/etc/pickleshell/terminal.json
 RuntimeDirectory=pickleshell-terminal
 RuntimeDirectoryMode=0750
 Restart=on-failure
+Delegate=yes
+ProtectControlGroups=false
 NoNewPrivileges=true
 PrivateDevices=true
 ProtectSystem=strict

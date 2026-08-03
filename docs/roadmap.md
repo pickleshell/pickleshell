@@ -35,8 +35,9 @@ after that baseline; Terminal and Settings complete the next milestone
  - **Terminal:** implemented in the repository, pending ACE verification. It
    uses a separate node-pty runtime with a dedicated unprivileged identity by
    default, supports explicit deployment-time selection of an existing Linux
-   service user, and exposes the six-tool MCP contract; it is not production
-   verified.
+   service user, delegated cgroup-v2 lifecycle cleanup, and exposes the six-tool
+   MCP contract; it is not production verified. The opt-in lifecycle contour
+   still requires ACE verification before deployment.
 - **Settings:** planned. `settings-get` and `settings-update` manage
   policy-controlled mutable defaults such as the agent backend
   (OpenCode/Codex), the model allowlist, file-transfer limits (files per

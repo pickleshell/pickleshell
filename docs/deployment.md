@@ -86,6 +86,32 @@ lockfile, copy `terminal/config.example.json` to an operator-managed
 configuration, and set a random `auth_token` with mode 0600. Configure only
 ordinary-profile workspace roots and executable paths.
 
+Build the non-setuid cgroup launcher as part of the Terminal installation:
+
+```bash
+sudo -u pickleshell-terminal npm --prefix /opt/pickleshell/terminal ci
+sudo -u pickleshell-terminal npm --prefix /opt/pickleshell/terminal run build
+```
+
+The unit uses `Delegate=yes` and `ProtectControlGroups=false`. No controller
+delegation is required for `cgroup.kill`; do not add unrelated controllers.
+Verify the unit and delegated parent without killing any cgroup:
+
+```bash
+systemctl show pickleshell-terminal.service -p Delegate -p ControlGroup
+CGROUP="/sys/fs/cgroup$(systemctl show pickleshell-terminal.service -p ControlGroup --value)"
+test -e "$CGROUP/cgroup.kill"
+test -e "$CGROUP/cgroup.events"
+grep '^populated ' "$CGROUP/cgroup.events"
+find "$CGROUP" -maxdepth 1 -type d -name 'terminal-term_*' -print
+```
+
+After an ordinary `terminal-close`, verify the corresponding child directory
+is gone and `populated 0` was observed before removal. The launcher joins only
+the exact validated child cgroup before `execve`; it never targets the service
+parent. A configured sudo-capable or root identity can deliberately escape
+cgroup containment, so cgroups provide lifecycle cleanup, not authorization.
+
 If deployment must use an existing account, select it explicitly at install
 time. The account and optional group must already exist; the helper validates
 names and refuses `root`, grants no memberships or sudo rights, and does not
@@ -112,6 +138,19 @@ commands ChatGPT can run.
 Install the unit, then verify the private socket is accessible only to the
 Gateway service group. Do not deploy to ACE or BOS production until the complete
 test tunnel and live MCP matrix pass.
+
+The privileged lifecycle integration is opt-in only and must run in a temporary
+isolated systemd service, never inside the Gateway/OpenCode worker group:
+
+```bash
+PICKLESHELL_RUN_CGROUP_INTEGRATION=1 \
+  npm --prefix /opt/pickleshell/terminal run test:cgroup-integration
+```
+
+It skips with status 77 unless root and `systemd-run` are available. The runner
+covers stale startup cleanup, close, TTL, shutdown, concurrent terminals,
+process trees, separate PGIDs, `setsid`, and double-fork manifests using
+cgroup-authoritative cleanup.
 
 ## Configure the MCP runtime
 

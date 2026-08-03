@@ -11,3 +11,4 @@ config.json
 *.xcf
 .DS_Store
 /runtime/
+/terminal/bin/

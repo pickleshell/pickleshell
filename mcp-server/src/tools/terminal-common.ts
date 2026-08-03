@@ -15,6 +15,7 @@ export async function callTerminal(client: GatewayClient, operation: string, arg
         invalid_request: "Terminal request is invalid",
         terminal_not_found: "Terminal was not found",
         terminal_unavailable: "Terminal service is unavailable",
+        terminal_cgroup_unavailable: "Terminal cgroup lifecycle is unavailable",
         terminal_closed: "Terminal is closed",
         terminal_not_writable: "Terminal is not writable",
         idempotency_unsupported: "Idempotency is not supported for terminal-write",

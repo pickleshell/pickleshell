@@ -36,8 +36,9 @@ Terminal service over a private Unix-domain socket. The socket is preferable to
 another TCP listener: it is local, not routable, and can be permissioned to the
 Terminal service user.
 
-The Terminal service owns PTYs, process groups, output buffers, TTL reaping,
-and terminal state. The Gateway remains the policy and authentication boundary.
+The Terminal service owns PTYs, delegated per-terminal cgroups, process groups,
+output buffers, TTL reaping, and terminal state. The Gateway remains the policy
+and authentication boundary.
 No PTY child is managed by the Agent supervisor. Agent requests are
 line-oriented, finite, and request-scoped; terminals are byte-oriented,
 long-lived, and interactive.
@@ -105,9 +106,10 @@ released. `failed` means spawn or PTY setup failed and has no process.
 
 `terminal-close` is explicit and idempotent. If the child has already exited,
 it records the exit and releases resources, returning `already_closed` only on
-subsequent calls. Close sends SIGHUP to the process group, waits a configured
-short grace period, sends SIGTERM, then SIGKILL if required. The response is
-not successful until the child and its process group have been reaped.
+subsequent calls. Close kills the terminal's exact delegated cgroup, waits for
+`cgroup.events` to report `populated 0`, and removes the child cgroup. The
+response is not successful until cleanup completes. Process-group signaling is
+retained for the controlled `terminal-signal` operation, not lifecycle cleanup.
 
 The service also reaps abandoned terminals after an operator-configured TTL
 (default 30 minutes, bounds 60 seconds to 24 hours). Any successful operation
@@ -438,6 +440,7 @@ credentials, command output, or arbitrary request text.
 | 429 | `terminal_limit` | Concurrent terminal limit reached |
 | 502 | `terminal_spawn_failed` | PTY or executable spawn failed; safe error only |
 | 503 | `terminal_unavailable` | Gateway cannot reach the Terminal service |
+| 503 | `terminal_cgroup_unavailable` | Delegated cgroup-v2 lifecycle is unavailable; spawn fails closed |
 | 504 | `terminal_write_outcome_unknown` | Write may have been accepted before the transport timed out; do not retry automatically |
 | 500 | `internal_error` | Unexpected service failure; no raw internals returned |
 
@@ -456,12 +459,13 @@ code. MCP callers should branch on `error`, not on prose or HTTP wording.
   selected account must not expose production credentials, SSH agent sockets,
   private keys, or unrelated repositories unless the operator intentionally
   accepts that risk.
-- Use a separate systemd unit with `NoNewPrivileges=true`, `PrivateDevices=true`,
+- Use a separate systemd unit with `Delegate=yes`,
+   `ProtectControlGroups=false`, `NoNewPrivileges=true`, `PrivateDevices=true`,
   `ProtectSystem=strict`, restricted `ProtectHome`, `RestrictSUIDSGID`,
   `RestrictNamespaces`, `ProtectProc`, `ProcSubset=pid`, bounded `TasksMax`,
-  bounded memory, a private runtime directory, and only the required
-  `AF_UNIX`/local address families. The exact unit is an implementation and
-  deployment change, not part of this design-only task.
+   bounded memory, a private runtime directory, and only the required
+   `AF_UNIX`/local address families. No cgroup controller delegation is needed
+   for `cgroup.kill`.
 - Keep the Terminal HTTP-facing Gateway on loopback. Authenticate each
   Gateway request with the existing bearer-token mechanism; authenticate the
   Gateway-to-service socket by filesystem ownership and a short internal
@@ -482,10 +486,17 @@ code. MCP callers should branch on `error`, not on prose or HTTP wording.
   service tokens, `.env` values, and arbitrary inherited variables. Set
   `TERM` to a configured terminal type such as `xterm-256color` rather than
   accepting it from the request.
+- Create one validated `terminal-<terminal_id>` child cgroup per terminal.
+   The non-setuid launcher joins that child before `execve`; close, TTL, restart,
+   and shutdown use only that child's `cgroup.kill` and populated state. If
+   delegation or `cgroup.kill` is unavailable, spawn fails with
+   `terminal_cgroup_unavailable` rather than falling back to killpg.
 - Bound executable length, argv count and item size, environment count and
-  value size, input writes, output retention, terminal count, and TTL. The
-  PTY process group is always terminated during close, TTL expiry, restart,
-  and service shutdown.
+   value size, input writes, output retention, terminal count, and TTL. The
+   PTY process group is used for controlled signals; cgroup cleanup is
+   authoritative during close, TTL expiry, restart, and service shutdown.
+   Cgroups are ordinary lifecycle containment, not a security boundary against
+   a configured sudo-capable or root identity; Linux permissions remain primary.
 - Never log input bytes, output bytes, environment values, cwd, full argv, or
   production paths. Logs may include terminal ID, chat ID only if policy
   permits, state transition, byte counts, safe exit code, and error code.
@@ -493,8 +504,9 @@ code. MCP callers should branch on `error`, not on prose or HTTP wording.
 ## Storage, Restart, and Concurrency
 
 The service stores a bounded in-memory record per terminal: owner binding,
-validated cwd/profile metadata, PTY handle, process-group identity, state,
-timestamps, dimensions, exit information, cursor bounds, and the output ring.
+validated cwd/profile metadata, PTY handle, process-group identity, exact child
+  cgroup name/path, state, timestamps, dimensions, exit information, cursor
+bounds, and the output ring.
 It stores no terminal transcript on disk. Buffer eviction is observable only
 through the truncation fields in `terminal-output`.
 
@@ -503,11 +515,13 @@ terminal. Independent terminals run concurrently up to the configured global
 limit. Output reads do not consume bytes and therefore do not need a reader
 lock beyond a consistent snapshot.
 
-On service stop, stop accepting new requests, close all process groups, wait
-for child reaping, then exit. On unexpected restart, systemd restarts the
-service but no session recovery is attempted. The Gateway maps a missing
-socket to `terminal_unavailable`; after the service is back, old IDs remain
-invalid. This is intentionally simpler and safer than persisting live PTYs.
+On service stop, stop accepting new requests, kill each exact child cgroup,
+wait for `populated 0`, remove the child cgroups, then exit. On unexpected
+restart, startup removes stale per-terminal child cgroups before accepting
+spawns; systemd restarts the service but no session recovery is attempted. The
+Gateway maps a missing socket to `terminal_unavailable`; after the service is
+back, old IDs remain invalid. This is intentionally simpler and safer than
+persisting live PTYs.
 
 ## Tests
 
@@ -541,13 +555,12 @@ invalid. This is intentionally simpler and safer than persisting live PTYs.
 - Run under the systemd sandbox and verify the service user cannot read
   configured Gateway/tunnel secrets or unrelated paths.
 
-Process-group characterization remains unresolved for phase 2. A safe test
-service must run in an isolated OS session and record PID, PPID, PGID, SID, and
-`/proc` starttime for foreground, background, pipeline, nested-shell, separate
-PGID, `setsid`, and double-fork descendants. It must refuse signals involving
-the test runner, Gateway, OpenCode worker, PID 1, or unrecorded processes.
-Implement cgroup-v2 or an equally explicit launcher boundary only after that
-characterization proves the current killpg behavior is insufficient.
+The privileged integration command is opt-in only:
+`PICKLESHELL_RUN_CGROUP_INTEGRATION=1 npm run test:cgroup-integration`. It must
+run in a temporary delegated systemd service, never inside the Gateway worker
+group. It records PID, PPID, PGID, SID, and `/proc` starttime manifests for
+foreground, background, pipeline, nested-shell, separate PGID, `setsid`, and
+double-fork descendants, and cgroup cleanup never targets a PID directly.
 
 The service gives ChatGPT a persistent PTY rather than a one-shot command API:
 interactive CLI/TUI programs can receive exact stdin bytes without an implicit

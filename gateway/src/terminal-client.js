@@ -27,7 +27,7 @@ const SERVICE_ERRORS = new Set([
   'environment_not_allowed', 'signal_not_allowed', 'terminal_forbidden',
   'terminal_not_found', 'idempotency_conflict', 'terminal_not_writable',
   'terminal_closed', 'idempotency_unsupported', 'input_too_large',
-  'output_limit', 'terminal_limit', 'terminal_spawn_failed', 'terminal_write_outcome_unknown', 'internal_error',
+  'output_limit', 'terminal_limit', 'terminal_spawn_failed', 'terminal_cgroup_unavailable', 'terminal_write_outcome_unknown', 'internal_error',
 ]);
 
 class TerminalClient {
