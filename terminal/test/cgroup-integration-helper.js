@@ -15,7 +15,7 @@ function child(args, options = {}) { const result = spawn(process.execPath, [__f
 
 if (mode === 'foreground') hold('foreground');
 else if (mode === 'background') { report('background-parent'); child(['hold']); process.stdin.resume(); }
-else if (mode === 'pipeline') { report('pipeline-parent'); spawn('/bin/sh', ['-c', `${JSON.stringify(process.execPath)} ${JSON.stringify(__filename)} hold | ${JSON.stringify(process.execPath)} ${JSON.stringify(__filename)} hold`], { stdio: 'inherit' }); process.stdin.resume(); }
+else if (mode === 'pipeline') { report('pipeline-parent'); /* The first hold's stdout is intentionally consumed by the second hold's stdin. */ spawn('/bin/sh', ['-c', `${JSON.stringify(process.execPath)} ${JSON.stringify(__filename)} hold | ${JSON.stringify(process.execPath)} ${JSON.stringify(__filename)} hold`], { stdio: 'inherit' }); process.stdin.resume(); }
 else if (mode === 'nested') { report('nested-parent'); spawn('/bin/sh', ['-c', `/bin/sh -c ${JSON.stringify(`${JSON.stringify(process.execPath)} ${JSON.stringify(__filename)} hold`)}`], { stdio: 'inherit' }); process.stdin.resume(); }
 else if (mode === 'separate') { report('separate-parent'); child(['hold'], { detached: true }); process.stdin.resume(); }
 else if (mode === 'setsid') { report('setsid-parent'); const result = spawn('/usr/bin/setsid', [process.execPath, __filename, 'hold'], { stdio: 'inherit' }); result.unref(); process.stdin.resume(); }
