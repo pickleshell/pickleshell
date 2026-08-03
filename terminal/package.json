@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/terminal.test.js && node test/service-user.test.js && node test/cgroup.test.js && node test/manifest.test.js && node test/ttl.test.js && node test/native-pty-smoke.test.js && node test/server-close.test.js && node test/server-disconnect.test.js && node test/long-poll.test.js && bash test/run-cgroup-integration.test.sh",
+    "test": "node test/terminal.test.js && node test/service-user.test.js && node test/cgroup.test.js && node test/manifest.test.js && node test/ttl.test.js && node test/native-pty-smoke.test.js && node test/server-close.test.js && node test/server-disconnect.test.js && node test/long-poll.test.js && node test/reconnect-e2e.test.js && bash test/run-cgroup-integration.test.sh",
     "test:native-smoke": "node test/native-pty-smoke.test.js",
     "test:cgroup-integration": "bash test/run-cgroup-integration.sh",
     "build": "mkdir -p bin && cc -O2 -Wall -Wextra -Werror launcher/cgroup-launcher.c -o bin/cgroup-launcher && node --check src/cgroup.js && node --check src/server.js && node --check src/service.js"

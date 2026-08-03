@@ -18,6 +18,8 @@ assert.equal(z.object(terminalOutputSchema).safeParse({ chat_id: "chat", termina
 assert.equal(z.object(terminalResizeSchema).safeParse({ chat_id: "chat", terminal_id: "term_x", cols: 80, rows: 24 }).success, true);
 assert.equal(z.object(terminalSignalSchema).safeParse({ chat_id: "chat", terminal_id: "term_x", signal: "SIGKILL" }).success, false);
 assert.equal(z.object(terminalCloseSchema).safeParse({ chat_id: "chat", terminal_id: "term_x" }).success, true);
+assert.equal(z.object(terminalCloseSchema).safeParse({ chat_id: "chat", terminal_id: "term_x", reason: "e2e_complete" }).success, true);
+assert.equal(z.object(terminalCloseSchema).safeParse({ chat_id: "chat", terminal_id: "term_x", reason: "bad reason" }).success, false);
 
 const errorClient = { terminal: async () => { throw new GatewayError(409, { error: "idempotency_unsupported" }); } };
 const errorResult = await callTerminal(errorClient as any, "write", {});

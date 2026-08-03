@@ -178,6 +178,20 @@ reports `state: "completed"`.
 Cancel an in-flight task by `request_id`. Returns: `cancelled`,
 `already_completed`, or `not_found`.
 
+## Terminal lifetime and close reasons
+
+`terminal-close` accepts an optional operator/user-provided reason token. The
+token defaults to `client_requested` and must be 1-64 ASCII characters matching
+`[A-Za-z0-9][A-Za-z0-9._:-]*`. For example, `e2e_complete` is valid; whitespace,
+control characters, and arbitrary text are rejected. The value is stored in the
+terminal response as `close_reason`.
+
+Gateway, tunnel, or MCP client reconnects do not destroy a PTY. The Terminal
+service owns the PTY and its in-memory session, so a client can reconnect and
+continue using the same `terminal_id` and output `cursor`. Restarting the
+Terminal service is different: it terminates PTY process groups, discards
+in-memory sessions and buffered output, and makes old terminal IDs invalid.
+
 ## Internal HTTP Gateway
 
 The MCP server sends authenticated requests to the Gateway endpoints. This

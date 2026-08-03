@@ -30,6 +30,15 @@ full traces. The Browser exposes Playwright automation tools. Continue local
 coding sessions, delegate to an operator-approved model, and transfer files
 into a controlled workspace.
 
+## Philosophy
+
+> "I built PickleShell around a simple core belief: any task can be solved in a single prompt."
+> — **Author**
+
+PickleShell provides autonomous agents with a secure, deterministic, and
+low-latency environment to achieve complete task completion without constant
+manual intervention.
+
 ## What PickleShell Is For
 
 PickleShell solves a practical problem: ChatGPT can analyze tasks, but it
@@ -38,7 +47,7 @@ normally cannot work directly with a local repository.
 Through PickleShell, ChatGPT sends instructions and small files to a local
 Agent, follows the execution, reads the result, and can continue in the same
 session when it passes the session ID. The same connection reaches the Browser
-service, and will reach the Terminal service once it is implemented.
+service and the Terminal service.
 
 The services run on your machine, inside a selected workspace, through a
 protected outbound-only tunnel. PickleShell removes the human relay between
@@ -117,7 +126,7 @@ flowchart TD
             CX["Codex"]:::impl
         end
         subgraph SVCT["Terminal"]
-            TTY["Interactive PTY"]:::planned
+            TTY["Interactive PTY"]:::impl
         end
     end
 
@@ -128,13 +137,14 @@ flowchart TD
     classDef bridge fill:#fff4d6,stroke:#d48806,color:#3d2b00
     classDef local fill:#e8f7ec,stroke:#2f855a,color:#173d2a
     classDef impl fill:#e8f7ec,stroke:#2f855a,color:#173d2a
-    classDef planned fill:#fffdf5,stroke:#7b8794,color:#102a43,stroke-dasharray: 6 5
     class A,B cloud
     class C,D bridge
     class E,SVC,WS local
 ```
 
-Solid boxes are implemented; the dashed Terminal box is planned.
+All three core service boxes are implemented. Terminal production E2E has been
+verified on BOS ordinary and BOSsudo/ChatGPT profiles across all six operations;
+ACE verification and the clean external release-installation gate remain open.
 
 The tunnel is initiated from the local machine over outbound HTTPS. The Gateway
 remains reachable only inside the trusted local environment.
@@ -147,7 +157,7 @@ The three mandatory core services all run locally on your machine:
 | --- | --- | --- |
 | **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface and has been verified through PickleShell ACE. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
-| **Terminal** | Implemented, ACE verification pending | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. Not production verified. |
+| **Terminal** | Implemented, BOS production E2E verified | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. Verified on BOS ordinary and BOSsudo/ChatGPT profiles; ACE verification remains open. |
 
 ## Async Workflow
 
@@ -278,9 +288,10 @@ documentation.
 
 The unreleased main branch includes the Codex runtime integration, verified
 through PickleShell ACE, and the Terminal implementation with deployment-time
-Linux service identity selection. Do not create the next release or tag yet:
-the release boundary is Terminal completion plus a clean end-to-end test
-installation on a separate machine.
+Linux service identity selection. Terminal has passed production E2E on BOS
+ordinary and BOSsudo/ChatGPT profiles, but ACE verification and a clean
+end-to-end installation on a separate machine remain release gates. Do not
+create the next release or tag yet.
 
 This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 

@@ -396,7 +396,7 @@ Request:
 {
   "chat_id": "string, required",
   "terminal_id": "string, required",
-  "reason": "string, optional, 1-64 characters"
+  "reason": "string, optional, 1-64 ASCII characters matching [A-Za-z0-9][A-Za-z0-9._:-]*"
 }
 ```
 
@@ -415,9 +415,12 @@ Response (`200`):
 }
 ```
 
-The service ignores client text that attempts to select a privileged reason.
-Allowed reasons are `client_requested`, `ttl_expired`, `service_shutdown`,
-and `process_exited`; unknown reasons are `invalid_request`. A repeated close
+The reason is operator/user-provided metadata, not a privileged action selector.
+It is bounded to 64 ASCII characters, must start with a letter or digit, and
+may contain only letters, digits, `.`, `_`, `:`, or `-`. This permits values such
+as `e2e_complete` while excluding whitespace, control characters, and arbitrary
+text. The service-generated reasons `client_requested`, `ttl_expired`,
+`service_shutdown`, and `process_exited` use the same contract. A repeated close
 returns `200` with `ok: true`, `state: "closed"`, and `already_closed: true`.
 
 ## Errors and Transport Mapping

@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 
 const SIGNALS = new Set(['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGTSTP', 'SIGCONT']);
-const CLOSE_REASONS = new Set(['client_requested', 'ttl_expired', 'service_shutdown', 'process_exited']);
+const CLOSE_REASON_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
 function integer(value, min, max, name) {
   if (!Number.isSafeInteger(value) || value < min || value > max) throw error('invalid_request', `${name} is out of range`);
@@ -14,6 +14,11 @@ function text(value, min, max, name) {
   return value;
 }
 function error(code, details = code) { const e = new Error(details); e.code = code; return e; }
+function closeReason(value) {
+  text(value, 1, 64, 'reason');
+  if (!CLOSE_REASON_PATTERN.test(value)) throw error('invalid_request', 'reason is invalid');
+  return value;
+}
 function terminalId() { return `term_${crypto.randomBytes(24).toString('base64url')}`; }
 function validateId(value) { text(value, 6, 80, 'terminal_id'); if (!/^term_[A-Za-z0-9_-]+$/.test(value)) throw error('invalid_request'); return value; }
 function decodeData(value) {
@@ -42,4 +47,4 @@ function spawnRequest(req, policy) {
   return { chat_id: req.chat_id, executable, argv, cwd: req.cwd, env, cols, rows, idempotency_key: req.idempotency_key };
 }
 function validateOutput(req) { validateId(req.terminal_id); integer(req.cursor === undefined ? 0 : req.cursor, 0, 9223372036854775807, 'cursor'); integer(req.max_bytes === undefined ? 16384 : req.max_bytes, 1, 65536, 'max_bytes'); integer(req.wait_ms === undefined ? 0 : req.wait_ms, 0, 30000, 'wait_ms'); }
-module.exports = { SIGNALS, CLOSE_REASONS, error, integer, text, terminalId, validateId, decodeData, isValidUtf8, spawnRequest, validateOutput };
+module.exports = { SIGNALS, error, integer, text, closeReason, terminalId, validateId, decodeData, isValidUtf8, spawnRequest, validateOutput };

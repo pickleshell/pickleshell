@@ -5,7 +5,7 @@ import { callTerminal } from "./terminal-common.js";
 export const terminalCloseSchema = {
   chat_id: z.string().min(1).max(128).describe("Workspace chat ID"),
   terminal_id: z.string().max(80).regex(/^term_[A-Za-z0-9_-]+$/).describe("Terminal identifier"),
-  reason: z.string().min(1).max(64).optional().describe("Close reason"),
+  reason: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).optional().describe("Close reason token (1-64 ASCII letters, digits, or ._:-)"),
 };
 
 export function registerTerminalClose(mcp: any, client: GatewayClient) {

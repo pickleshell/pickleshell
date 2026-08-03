@@ -20,9 +20,8 @@ valuable for file edits, tests, and diagnostics.
 ## Basic product scope
 
 PickleShell has three mandatory core services: **Agent**, **Browser**, and
-**Terminal**. The Agent protocol shipped with v1; the Browser is implemented
-after that baseline; Terminal and Settings complete the next milestone
-(Agent + Browser + Terminal + Settings).
+**Terminal**. The Agent protocol shipped with v1; the Browser and Terminal are
+implemented, while Settings remains the next planned milestone.
 
 - **Agent:** retain `send-chat` → `session-status` → `session-output` →
   `cancel-request`. OpenCode is the supported default; Codex is implemented as
@@ -32,12 +31,13 @@ after that baseline; Terminal and Settings complete the next milestone
   MCP/Gateway smoke path through PickleShell ACE.
 - **Browser:** Playwright is implemented and validated as the browser execution
   layer (52 tools registered on the PickleShell MCP server).
- - **Terminal:** implemented in the repository, pending ACE verification. It
-   uses a separate node-pty runtime with a dedicated unprivileged identity by
-   default, supports explicit deployment-time selection of an existing Linux
-   service user, delegated cgroup-v2 lifecycle cleanup, and exposes the six-tool
-   MCP contract; it is not production verified. The opt-in lifecycle contour
-   still requires ACE verification before deployment.
+- **Terminal:** implemented and production E2E verified on BOS ordinary and
+    BOSsudo/ChatGPT profiles across all six operations. It uses a separate
+    node-pty runtime with a dedicated unprivileged identity by default, supports
+    explicit deployment-time selection of an existing Linux service user,
+    delegated cgroup-v2 lifecycle cleanup, and exposes the six-tool MCP contract.
+    ACE verification and the clean external release-installation gate remain
+    open.
 - **Settings:** planned. `settings-get` and `settings-update` manage
   policy-controlled mutable defaults such as the agent backend
   (OpenCode/Codex), the model allowlist, file-transfer limits (files per
@@ -64,7 +64,14 @@ after that baseline; Terminal and Settings complete the next milestone
 - [ ] Verify agent error is exposed as a safe structured error.
 - [ ] Verify timeout state and result retention.
 - [ ] Verify Gateway restart behavior and document whether in-flight requests are lost.
-- [ ] Verify tunnel restart and MCP schema refresh behavior.
+- [ ] Verify tunnel restart and MCP schema refresh behavior separately; the
+      automated reconnect test covers only a local Gateway/proxy transport
+      reconnect, not a generic tunnel restart.
+- [x] Verify Terminal reconnect through a restartable local Gateway/proxy
+      transport: the Terminal service retains the PTY, terminal ID, and cursor;
+      output and writes continue after reconnect.
+- [x] Complete BOS ordinary and BOSsudo/ChatGPT production E2E across all six
+      Terminal operations.
 - [ ] Pass Linux Node 20/22/24 CI with a forced node-pty source rebuild and native PTY smoke test.
 - [ ] Pass the separately delegated systemd cgroup integration gate; standard CI explicitly skips it.
 - [ ] Run the complete production smoke test before creating a release tag.
@@ -89,11 +96,21 @@ separate design is approved:
 - request queues;
 - richer progress event normalization.
 
+### Possible Terminal improvements
+
+These are future options, not current contract changes:
+
+- optional `terminal-output` plain mode; raw/lossless Base64 remains the default;
+- possible screen-rendered mode through a headless VT emulator, only if real TUI use cases justify it;
+- optional noninteractive environment profile for `PAGER`, `GIT_PAGER`, and `NO_COLOR`; never force `CI=true`;
+- do not add automatic `SIGINT` -> `SIGTERM` -> `SIGKILL` escalation or an arbitrary maximum execution timeout;
+- preserve explicit model control over signals and the existing security boundaries.
+
 ## Release gate
 
 Do not create a release or tag for the Codex integration alone. Create the next
-release only after the Terminal is complete and a clean installation on a
-separate machine confirms end-to-end Agent, Browser, and Terminal functionality.
+release only after a clean installation on a separate machine confirms
+end-to-end Agent, Browser, and Terminal functionality.
 The production verification checklist must pass, retry/idempotency behavior
 must be documented, and restart semantics must be honest and tested. Keep the
 full trace as the default output mode.

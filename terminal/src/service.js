@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const pty = require('node-pty');
 const { OutputRing } = require('./ring');
 const { makePolicy, safeCwd, buildEnv } = require('./policy');
-const { error, integer, text, terminalId, validateId, decodeData, isValidUtf8, spawnRequest, validateOutput, SIGNALS, CLOSE_REASONS } = require('./validation');
+const { error, integer, text, closeReason, terminalId, validateId, decodeData, isValidUtf8, spawnRequest, validateOutput, SIGNALS } = require('./validation');
 const { CgroupManager } = require('./cgroup');
 
 const now = () => new Date().toISOString();
@@ -76,7 +76,7 @@ class TerminalService {
   resize(raw) { const t = this.lookup(raw); const cols = integer(raw.cols, 1, 500, 'cols'); const rows = integer(raw.rows, 1, 200, 'rows'); if (t.state === 'closed') throw error('terminal_closed'); if (t.state === 'running') t.pty.resize(cols, rows); t.cols = cols; t.rows = rows; this.touch(t); return { ok: true, terminal_id: t.id, state: t.state, cols, rows, last_activity_at: t.lastActivityAt }; }
   signal(raw) { const t = this.lookup(raw); if (!SIGNALS.has(raw.signal)) throw error('signal_not_allowed'); if (t.state !== 'running') throw error('terminal_closed'); try { process.kill(-t.pid, raw.signal); } catch (e) { if (e.code !== 'ESRCH') throw error('internal_error'); } this.touch(t); return { ok: true, terminal_id: t.id, state: t.state, signal: raw.signal, last_activity_at: t.lastActivityAt }; }
   close(t, reason = 'client_requested') {
-    if (!CLOSE_REASONS.has(reason)) throw error('invalid_request');
+    closeReason(reason);
     if (t.state === 'closed') return Promise.resolve({ ok: true, terminal_id: t.id, state: 'closed', already_closed: true, close_reason: t.closeReason, exit_code: t.exitCode, exit_signal: t.exitSignal, exited_at: t.exitedAt, closed_at: t.closedAt });
     if (t.closePromise) return t.closePromise;
     t.closeReason = reason; t.state = t.state === 'exited' ? 'closing' : 'closing'; this.notify(t);
@@ -86,7 +86,7 @@ class TerminalService {
     });
     return t.closePromise;
   }
-  async closeRequest(raw) { const t = this.lookup(raw); return this.close(t, raw.reason || 'client_requested'); }
+  async closeRequest(raw) { const t = this.lookup(raw); return this.close(t, raw.reason === undefined ? 'client_requested' : raw.reason); }
   reap(referenceMs = this.clock()) { const cutoff = referenceMs - this.policy.ttlMs; for (const t of this.terminals.values()) if (Date.parse(t.lastActivityAt) < cutoff && t.state !== 'closed') this.close(t, 'ttl_expired').catch(() => {}); }
 }
 module.exports = { TerminalService };
