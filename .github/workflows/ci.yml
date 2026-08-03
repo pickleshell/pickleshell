@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: pickleshell-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            gateway/package-lock.json
+            mcp-server/package-lock.json
+            terminal/package-lock.json
+      - name: Install dependencies
+        run: |
+          npm --prefix gateway ci
+          npm --prefix mcp-server ci
+          npm --prefix terminal ci
+      - name: Rebuild node-pty from source
+        run: npm_config_build_from_source=true npm --prefix terminal rebuild node-pty
+      - name: Build monorepo and native launcher
+        run: npm run build
+      - name: Native PTY smoke test
+        run: npm --prefix terminal run test:native-smoke
+      - name: Full tests
+        run: npm test
+      - name: Dependency audit
+        run: npm run audit
+      - name: Diff check
+        run: git diff --check
+      - name: Cgroup integration gate
+        run: echo 'SKIP: privileged cgroup integration requires a separately delegated systemd contour; standard GitHub runners do not run it'

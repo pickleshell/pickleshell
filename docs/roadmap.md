@@ -65,6 +65,8 @@ after that baseline; Terminal and Settings complete the next milestone
 - [ ] Verify timeout state and result retention.
 - [ ] Verify Gateway restart behavior and document whether in-flight requests are lost.
 - [ ] Verify tunnel restart and MCP schema refresh behavior.
+- [ ] Pass Linux Node 20/22/24 CI with a forced node-pty source rebuild and native PTY smoke test.
+- [ ] Pass the separately delegated systemd cgroup integration gate; standard CI explicitly skips it.
 - [ ] Run the complete production smoke test before creating a release tag.
 
 ### Correctness and reliability
