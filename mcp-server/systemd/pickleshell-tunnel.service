@@ -9,6 +9,9 @@ User=pickleshell-tunnel
 Group=pickleshell-tunnel
 WorkingDirectory=/opt/pickleshell/mcp-server
 Environment=PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/var/lib/pickleshell/mcp-home
+Environment=XDG_CACHE_HOME=/var/cache/pickleshell/mcp
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/cache/pickleshell/ms-playwright
 EnvironmentFile=/etc/pickleshell/mcp.env
 ExecStart=/usr/local/bin/tunnel-client run --profile-file /etc/pickleshell/tunnel-client/pickleshell.yaml
 Restart=always
@@ -31,6 +34,8 @@ RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true
 SystemCallArchitectures=native
+ReadWritePaths=/var/lib/pickleshell/mcp-home
+ReadWritePaths=/var/cache/pickleshell/mcp
 ReadOnlyPaths=/opt/pickleshell
 ReadOnlyPaths=/etc/pickleshell/tunnel-client/pickleshell.yaml
 ReadOnlyPaths=/etc/pickleshell/control-plane.key

@@ -10,6 +10,14 @@ Group=pickleshell
 WorkingDirectory=/opt/pickleshell/gateway
 Environment=NODE_ENV=production
 Environment=PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/var/lib/pickleshell/agent-home
+Environment=XDG_CONFIG_HOME=/var/lib/pickleshell/config
+Environment=XDG_DATA_HOME=/var/lib/pickleshell/data
+Environment=XDG_STATE_HOME=/var/lib/pickleshell/state
+Environment=XDG_CACHE_HOME=/var/cache/pickleshell/opencode
+Environment=CODEX_HOME=/var/lib/pickleshell/agent-home/.codex
+Environment=OPENCODE_CONFIG_DIR=/var/lib/pickleshell/config/opencode
+Environment=NPM_CONFIG_CACHE=/var/cache/pickleshell/npm
 EnvironmentFile=/etc/pickleshell/gateway.env
 ExecStart=/opt/pickleshell/runtime/node-v20.20.2/bin/node src/server.js
 Restart=on-failure

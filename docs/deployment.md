@@ -10,6 +10,12 @@
 
 The default deployment uses one host and no inbound public port.
 
+Use the deployment owner for repository operations. Avoid recursive ACL changes;
+if ownership drifts, repair the specific files or directories instead. For any
+remote maintenance, verify the SSH identity, host key policy, target account,
+and authorized sudo route before changing services. Never print credential
+contents, private keys, tunnel profiles, or secret-bearing environment files.
+
 ## Install files
 
 Examples below use:
@@ -26,9 +32,12 @@ sudo install -d -o pickleshell -g pickleshell /srv/pickleshell/workspace
 sudo git clone https://github.com/pickleshell/pickleshell.git /opt/pickleshell
 sudo chown -R pickleshell:pickleshell /opt/pickleshell
 
-sudo -u pickleshell npm --prefix /opt/pickleshell/gateway ci --omit=dev
-sudo -u pickleshell npm --prefix /opt/pickleshell/mcp-server ci
-sudo -u pickleshell npm --prefix /opt/pickleshell/mcp-server run build
+sudo -u pickleshell env PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:$PATH \
+  npm --prefix /opt/pickleshell/gateway ci --omit=dev
+sudo -u pickleshell env PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:$PATH \
+  npm --prefix /opt/pickleshell/mcp-server ci
+sudo -u pickleshell env PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:$PATH \
+  npm --prefix /opt/pickleshell/mcp-server run build
 ```
 
 Install OpenCode for the `pickleshell` user and verify:
@@ -64,6 +73,15 @@ RATE_LIMIT_MAX=100
 Edit `config.json` with real workspace paths and the smallest required model
 allowlist.
 
+OpenCode and Codex resolve credentials from the Gateway service environment,
+not from an interactive shell. Keep the unit-level `HOME`, `XDG_CONFIG_HOME`,
+`XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `OPENCODE_CONFIG_DIR`, and
+`CODEX_HOME` values explicit. Verify OpenCode with a non-mutating exact `PONG`
+through the Gateway. Verify Codex with `codex doctor` and an exact `PONG` as the
+OS user that will run DevOps tasks; auth/config files must be owned by that user
+and mode `0600`. If a model requires a newer CLI, upgrade the CLI before
+retrying the smoke test.
+
 Install the unit:
 
 ```bash
@@ -86,6 +104,11 @@ unprivileged `pickleshell-terminal` user and group. Install `terminal/` with its
 lockfile, copy `terminal/config.example.json` to an operator-managed
 configuration, and set a random `auth_token` with mode 0600. Configure only
 ordinary-profile workspace roots and executable paths.
+
+Keep ordinary Terminal isolation separate from any privileged DevOps account. Do
+not disable `NoNewPrivileges` or give the ordinary Terminal service sudo just to
+perform host administration; use a separate, explicitly authorized DevOps route
+for that work.
 
 Build the non-setuid cgroup launcher as part of the Terminal installation:
 
@@ -172,6 +195,26 @@ sudo chmod 600 /etc/pickleshell/mcp.env
 Store the restricted tunnel control-plane key in
 `/etc/pickleshell/control-plane.key`, owned by `pickleshell` with mode `0600`.
 
+Install the Chromium revision that matches the deployed MCP package. Run the
+install with the same `PLAYWRIGHT_BROWSERS_PATH` used by the tunnel service,
+and repeat it after Playwright package upgrades:
+
+```bash
+sudo install -d -m 700 -o pickleshell-tunnel -g pickleshell-tunnel \
+  /var/lib/pickleshell/mcp-home \
+  /var/cache/pickleshell/mcp \
+  /var/cache/pickleshell/ms-playwright
+sudo -u pickleshell-tunnel -H env \
+  HOME=/var/lib/pickleshell/mcp-home \
+  XDG_CACHE_HOME=/var/cache/pickleshell/mcp \
+  PLAYWRIGHT_BROWSERS_PATH=/var/cache/pickleshell/ms-playwright \
+  PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:$PATH \
+  npm --prefix /opt/pickleshell/mcp-server exec -- playwright install chromium
+```
+
+The tunnel unit must expose the same stable `HOME`, `XDG_CACHE_HOME`, and
+`PLAYWRIGHT_BROWSERS_PATH` values, with writable paths for MCP runtime state.
+
 Create the tunnel profile using the tunnel ID from the OpenAI Platform:
 
 ```bash
@@ -201,6 +244,61 @@ curl -fsS http://127.0.0.1:18093/readyz
 ```
 
 Expected responses are `live` and `ready`.
+
+After any unit or drop-in change, back up the affected files, run
+`systemctl daemon-reload`, restart only the changed service, and verify:
+
+```bash
+systemctl is-active pickleshell-gateway.service pickleshell-terminal.service pickleshell-tunnel.service
+systemctl show pickleshell-gateway.service pickleshell-terminal.service pickleshell-tunnel.service -p NRestarts
+curl -fsS http://127.0.0.1:18093/healthz
+curl -fsS http://127.0.0.1:18093/readyz
+```
+
+Also run end-to-end checks through the deployed path or exact service-user
+equivalent: Agent exact `PONG`, Browser navigate/snapshot, and Terminal
+spawn/write/output/close. If the ChatGPT plugin still shows stale tools after a
+tunnel restart or schema upgrade, refresh the plugin registration in ChatGPT and
+start a new conversation.
+
+## Upgrade checklist
+
+1. Read the live unit state with `systemctl show` for `ExecStart`, `User`,
+   `Environment`, `WorkingDirectory`, and `NRestarts`.
+2. Confirm the Node executable and installed Gateway/MCP package paths used by
+   the service.
+3. Back up affected unit files, drop-ins, and operator configs without copying
+   secrets into logs.
+4. Run package installs/builds with Node.js 20 or newer.
+5. Reinstall Playwright Chromium when the deployed Playwright package version
+   changes, using the tunnel service cache path.
+6. Verify OpenCode and Codex credentials under the service or DevOps OS user
+   that actually runs them.
+7. Run `systemctl daemon-reload`, restart only affected services, and confirm
+   health/readiness plus `NRestarts`.
+8. Run Agent, Browser, and Terminal smoke tests through the deployed path.
+9. Refresh the ChatGPT plugin only when MCP tools or schemas changed, or when
+   ChatGPT continues showing stale tools after a tunnel restart.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Check | Fix |
+| --- | --- | --- | --- |
+| Browser says Chromium is not installed even though files exist | Service is missing `PLAYWRIGHT_BROWSERS_PATH`, cache ownership blocks traversal, or the installed browser revision does not match the deployed Playwright package | Compare `systemctl show pickleshell-tunnel.service -p Environment` with `node_modules/playwright-core/browsers.json`; run a Chromium launch as the tunnel service user | Install Chromium with the deployed package version into the stable cache, set `HOME`, `XDG_CACHE_HOME`, and `PLAYWRIGHT_BROWSERS_PATH` in the tunnel unit/drop-in, then restart only the tunnel |
+| OpenCode exits `127` or cannot find provider config | Gateway service XDG paths differ from the interactive shell where OpenCode was configured | Inspect Gateway `Environment`, `OPENCODE_CONFIG_DIR`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME`; run an exact `PONG` through Gateway | Move or recreate OpenCode config under the service XDG paths with correct ownership, then restart Gateway only if the unit changed |
+| Codex returns `401` or stale refresh-token errors | Codex auth belongs to the wrong OS user or stored ChatGPT tokens are stale | Run `codex doctor` as the intended DevOps OS user without printing auth files | Reauthenticate that user, or copy only explicitly authorized Codex auth/config with mode `0600` and correct ownership |
+| Codex rejects the configured model | CLI version is older than the selected model metadata or entitlement | Check `codex --version`, `codex doctor`, and the exact model smoke-test error | Upgrade Codex CLI or choose an allowlisted model supported by the installed CLI and provider account |
+| Terminal becomes unavailable after config change | Socket path, auth token, service identity, or workspace path changed without matching Gateway/systemd permissions | Check Terminal service state, private socket ownership, Gateway terminal config, and a spawn/write/output smoke test | Restore matching socket/auth settings, keep ordinary `NoNewPrivileges=true`, daemon-reload, and restart only affected services |
+| Services are healthy locally but ChatGPT still shows stale tools | ChatGPT cached the MCP tool registration before the tunnel restart or schema change | Compare local MCP tools with the plugin tool list | Refresh the plugin registration, enable new tools if prompted, and start a new conversation |
+
+## Terminal capacity profiles
+
+The project default is intentionally conservative: `maxTerminals: 8`,
+`ringBytes: 1048576`, and `ttlMs: 1800000`. Operators who need sustained
+parallel DevOps sessions can opt into a high-capacity profile up to the current
+policy ceiling: `maxTerminals: 32`, `ringBytes: 16777216`, and
+`ttlMs: 86400000`. Treat that profile as a deliberate resource and retention decision,
+not a baseline default.
 
 ## Smoke test
 

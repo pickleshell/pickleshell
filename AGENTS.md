@@ -37,6 +37,35 @@ npm --prefix mcp-server audit --omit=dev
 git diff --check
 ```
 
+## Operational deployment guidance
+
+- Run repository operations as the deployment owner. Avoid recursive ACL changes;
+  if permissions are wrong, fix ownership of the affected files explicitly.
+- Before remote work, verify the SSH identity, host key policy, target user, and
+  authorized sudo route. Use non-interactive sudo only where the deployment
+  procedure requires it.
+- Keep ordinary Terminal isolation separate from any privileged DevOps account.
+  Do not weaken `NoNewPrivileges` or grant Terminal sudo merely to make host
+  administration easier.
+- Inspect the live systemd `ExecStart`, `User`, `Environment`, and installed
+  Node/MCP package paths before changing a service. Do not infer paths from a
+  previous host.
+- Install Playwright browsers for the exact deployed package version. Expose the
+  browser cache to the tunnel/MCP service with stable `HOME`, `XDG_CACHE_HOME`,
+  `PLAYWRIGHT_BROWSERS_PATH`, and matching writable paths for runtime state.
+- OpenCode auth and config resolution follows the Gateway service environment,
+  especially `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `OPENCODE_CONFIG_DIR`.
+- Run Codex CLI under its intended OS user. Its auth/config files must be owned
+  by that user with mode `0600`; verify with `codex doctor` and a non-mutating
+  exact `PONG` execution. CLI version and model compatibility are runtime
+  requirements.
+- Back up affected unit files, drop-ins, and operator configs before edits. Run
+  `systemctl daemon-reload`, restart only affected services, then verify
+  health/readiness, `NRestarts`, and end-to-end Agent, Browser, and Terminal
+  behavior.
+- Never print credential contents, private keys, token files, tunnel profiles,
+  or environment files containing secrets.
+
 ## Security invariants
 
 - Never build a shell command by concatenating request fields. Use argv-based

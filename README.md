@@ -245,6 +245,7 @@ availability guarantees, and vulnerability reporting.
 
 - Linux;
 - Node.js 20 or newer;
+- Playwright Chromium installed for the deployed MCP package version;
 - an Agent backend installed and configured (OpenCode by default, or Codex);
 - OpenAI Secure MCP Reverse Tunnel access;
 - a dedicated local service account is strongly recommended.
@@ -265,8 +266,9 @@ npm run audit
 ## Documentation
 
 - [ChatGPT setup](docs/chatgpt.md) — connect the plugin and run the connection test
-- [Deployment guide](docs/deployment.md) — install the Gateway, tunnel, and systemd units
+- [Deployment guide](docs/deployment.md) — install, upgrade, verify, and troubleshoot the Gateway, tunnel, Browser, and Terminal services
 - [API reference](docs/api.md) — MCP tool schemas, async protocol, and Gateway endpoints
+- [Model allowlist](docs/models.md) - maintained model IDs and runtime selection guidance
 - [Security policy](SECURITY.md) — trust model, threat boundaries, and vulnerability reporting
 - [Roadmap](docs/roadmap.md) — v1 production checklist and deferred features
 

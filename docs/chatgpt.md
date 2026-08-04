@@ -63,6 +63,9 @@ PickleShell in ChatGPT.
 
 See [Deployment](deployment.md) for installation commands. The `tunnel-client`
 and the PickleShell services must both report healthy/ready before continuing.
+If the local services are healthy but the plugin still shows old tools after a
+tunnel restart or upgrade, refresh the plugin registration and start a new
+conversation before retesting.
 
 ## 5. Create the PickleShell plugin
 
@@ -155,12 +158,9 @@ Receiving `409 session_busy` (state: "rejected") during a race is expected;
 use `next_action: "session-status"` and `retry_after_ms` from the response
 to wait and retry.
 
-
 ## 11. Browser smoke test
 
-
 Use this test after the plugin shows all 56 tools in a fresh conversation.
-
 
 1. Call `browser_navigate` with `url: "about:blank"`.
 
@@ -169,7 +169,6 @@ Use this test after the plugin shows all 56 tools in a fresh conversation.
 3. Call `browser_snapshot` to inspect the blank page DOM.
 
 4. Navigate to a public URL and take a screenshot with `browser_screenshot`.
-
 
 Expected result: each tool returns a success response with page state or
 
