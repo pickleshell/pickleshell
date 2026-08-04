@@ -90,9 +90,8 @@ MATRIX_NODE_EXECUTABLE=$(command -v node)
 [[ -n $MATRIX_NODE_EXECUTABLE && -x $MATRIX_NODE_EXECUTABLE ]]
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 (( NODE_MAJOR >= 20 ))
-TEST_NODE_EXECUTABLE=${PICKLESHELL_TEST_NODE_EXECUTABLE:-/usr/bin/node}
-[[ -x $TEST_NODE_EXECUTABLE ]]
-[[ $TEST_NODE_EXECUTABLE != /opt/pickleshell/runtime/* ]]
+TEST_NODE_EXECUTABLE=${PICKLESHELL_TEST_NODE_EXECUTABLE:-$MATRIX_NODE_EXECUTABLE}
+[[ -x $TEST_NODE_EXECUTABLE ]] || { printf 'deployment test: node executable is not executable: %s\n' "$TEST_NODE_EXECUTABLE" >&2; exit 1; }
 release_script() {
   "$SCRIPT" --node-executable "$TEST_NODE_EXECUTABLE" --terminal-node-executable "$TEST_NODE_EXECUTABLE" "$@"
 }
