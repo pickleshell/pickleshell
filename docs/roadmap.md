@@ -28,16 +28,15 @@ implemented, while Settings remains the next planned milestone.
   a first-class alternative behind the same MCP interface. Both are replaceable
   provider adapters with the same schema, session continuity, idempotency,
   cancellation, and task semantics. The Codex runtime has passed the production
-  MCP/Gateway smoke path through PickleShell ACE.
+  MCP/Gateway smoke path through the reference test tunnel.
 - **Browser:** Playwright is implemented and validated as the browser execution
   layer (52 tools registered on the PickleShell MCP server).
-- **Terminal:** implemented and production E2E verified on BOS ordinary and
-    BOSsudo/ChatGPT profiles across all six operations. It uses a separate
+- **Terminal:** implemented and E2E verified across ordinary and privileged
+    reference profiles across all six operations. It uses a separate
     node-pty runtime with a dedicated unprivileged identity by default, supports
     explicit deployment-time selection of an existing Linux service user,
     delegated cgroup-v2 lifecycle cleanup, and exposes the six-tool MCP contract.
-    Six-operation Terminal E2E is also verified on ACE. The clean external
-    release-installation gate remains open.
+    The clean external release-installation gate remains open.
 - **Settings:** planned. `settings-get` and `settings-update` manage
   policy-controlled mutable defaults such as the agent backend
   (OpenCode/Codex), the model allowlist, file-transfer limits (files per
@@ -70,10 +69,9 @@ implemented, while Settings remains the next planned milestone.
 - [x] Verify Terminal reconnect through a restartable local Gateway/proxy
       transport: the Terminal service retains the PTY, terminal ID, and cursor;
       output and writes continue after reconnect.
-- [x] Complete BOS ordinary and BOSsudo/ChatGPT production E2E across all six
+- [x] Complete ordinary and privileged reference-profile E2E across all six
       Terminal operations.
-- [x] Complete ACE Terminal E2E across all six MCP operations. This verifies the
-      deployed ACE contract; it does not validate the later close.reason change.
+- [x] Complete reference test-tunnel Terminal E2E across all six MCP operations.
 - [ ] Pass Linux Node 20/22/24 CI with a forced node-pty source rebuild and native PTY smoke test.
 - [ ] Pass the separately delegated systemd cgroup integration gate; standard CI explicitly skips it.
 - [ ] Run the complete production smoke test before creating a release tag.

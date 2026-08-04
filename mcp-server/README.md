@@ -15,7 +15,7 @@ The process requires:
 PICKLESHELL_GATEWAY_URL=http://127.0.0.1:18092
 PICKLESHELL_API_KEY=lag_v1_...
 PICKLESHELL_TIMEOUT_MS=420000
-MCP_TEMP_DIR=/home/pickleshell/.mcp-temp
+MCP_TEMP_DIR=/var/lib/pickleshell/mcp-temp
 ```
 
 Optional (required for Playwright tools):

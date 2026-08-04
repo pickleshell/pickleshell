@@ -99,7 +99,7 @@ null until execution completes. After completion, the real runtime
 
 ```json
 {
-  "chat_id": "pickleshell-main",
+  "chat_id": "example-chat",
   "message": "Review the attached file",
   "session_id": "ses_example",
   "runtime": "opencode",
@@ -133,7 +133,7 @@ Destination resolution: `files[].dest_dir` > `destination_dir` > `.inbox/<reques
 ```json
 {
   "ok": true,
-  "chat_id": "pickleshell-main",
+  "chat_id": "example-chat",
   "request_id": "req_abc123",
   "session_id": null,
   "state": "busy",

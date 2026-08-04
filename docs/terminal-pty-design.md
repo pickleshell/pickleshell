@@ -1,8 +1,8 @@
 # Terminal PTY Design
 
 Status: approved design; v1 implementation, deployment-time service identity
-selection, and six-operation ACE Terminal E2E are present. Broader deployment
-and clean external release-installation gates remain separate.
+selection, and six-operation Terminal E2E are present. Broader deployment and
+clean external release-installation gates remain separate.
 
 ## Purpose and Scope
 
@@ -50,7 +50,7 @@ Prefer `node-pty` if it can be installed and supported by the repository's
 Node 20 CI and target Linux ABI. It supplies a real pseudoterminal, merged
 terminal output, resize handling, and child process-group behavior. Do not add
 it merely as an incidental dependency: first prove native build availability
-on CI and ACE.
+on CI and a representative Linux deployment.
 
 If `node-pty` cannot meet that requirement, use a small reviewed native PTY
 helper with a narrow argv/stdin/stdout protocol over a Unix socket. Do not use
@@ -590,8 +590,8 @@ permissions, groups, sudoers, and systemd remain authoritative for access.
   credentials or raw command output.
 - Verify two terminals are independent, the ownership boundary rejects a
   different `chat_id`, and a service restart requires a fresh spawn.
-- The six-operation Terminal E2E has passed through the ACE test tunnel and on
-  BOS ordinary and BOSsudo/ChatGPT profiles; broader deployment and release
+- The six-operation Terminal E2E has passed through the reference test tunnel
+  and across ordinary and privileged profiles; broader deployment and release
   gates remain separate.
 
 ## Deployment Sequence
@@ -599,15 +599,15 @@ permissions, groups, sudoers, and systemd remain authoritative for access.
 1. Implement the Terminal service, Gateway adapter/routes, MCP schemas, limits,
    and tests in small reviewable changes; add CI coverage for the PTY backend
    and native build prerequisites.
-2. Deploy the implementation to the ACE test tunnel only, using a dedicated
+2. Deploy the implementation to a test tunnel only, using a dedicated
    unprivileged test profile and no production credentials. Verify the service
    unit sandbox and the complete MCP contract.
-3. Run real ChatGPT interaction tests through ACE, including incremental
+3. Run real ChatGPT interaction tests through the test tunnel, including incremental
    output, prompt input, resize, Ctrl-C, close, TTL, truncation, restart, and
    concurrent terminals.
-4. Fix findings on ACE and repeat the full test matrix. Do not infer success
+4. Fix findings in the test environment and repeat the full test matrix. Do not infer success
    from local tests alone.
-5. Only after ACE verification is clean, deploy to BOS production with an
+5. Only after test-environment verification is clean, deploy to production with an
    operator-reviewed limit/profile configuration and a rollback plan.
 
 ## Inspected Evidence and Open Questions
@@ -619,25 +619,16 @@ The existing Agent environment allowlist and systemd isolation are useful
 precedents, but are not copied blindly because Terminal needs PTY-specific
 state and byte semantics.
 
-On BOS, read-only checks found Linux x86_64, Node `20.20.2`, npm `10.8.2`,
-systemd `255`, `/dev/ptmx`, and `/usr/bin/script`, `/usr/bin/setsid`, and
-`/usr/bin/stty`. The active Gateway runs as `pickleshell` with 256 tasks and a
-4 GiB memory maximum; the active tunnel runs as `pickleshell-tunnel` with 128
-tasks and a 1 GiB memory maximum. Both units report the documented systemd
-hardening properties.
-
-ACE host facts were not independently inspected: the configured SSH host alias
-resolves to `ace`, but the read-only connection probe was blocked by SSH
-host-key verification before remote facts could be collected. No SSH
-configuration or access was changed. The six-operation Terminal E2E nevertheless
-passed against the existing ACE deployment; confirm Node ABI, PTY backend
-availability, service users, systemd restrictions, allowed roots, and the full
-test tunnel separately before treating the broader deployment gate as complete.
+Platform-specific facts such as the Linux ABI, Node version, PTY backend,
+service identities, systemd restrictions, allowed roots, and tunnel health are
+deployment-specific. Repeat those checks for every target environment; do not
+record host aliases, account names, or filesystem layouts in this document.
 
 Genuinely blocking questions for implementation are limited to operator
 configuration choices: the final allowed workspace roots/executable allowlist,
-the production terminal count and memory limits, and whether CI/ACE can build
-the selected `node-pty` version. None changes the protocol above.
+the production terminal count and memory limits, and whether CI and the target
+deployment can build the selected `node-pty` version. None changes the protocol
+above.
 
 ## Implementation Phases
 
@@ -652,4 +643,5 @@ the selected `node-pty` version. None changes the protocol above.
 4. Add the six MCP tools and exact schemas, errors, examples, and MCP client
    tests; verify the generated tool surface through the tunnel.
 5. Add systemd/CI/deployment changes in a separate implementation review, run
-   ACE tests and real ChatGPT tests, fix ACE, then perform the BOS release gate.
+   test-tunnel and real ChatGPT tests, fix findings, then perform the production
+   release gate.

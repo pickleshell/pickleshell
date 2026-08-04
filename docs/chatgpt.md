@@ -111,7 +111,7 @@ Test:
 
 ```text
 Use PickleShell.
-chat_id: pickleshell-main
+chat_id: example-chat
 message: Reply with exactly: pong. Do not use tools or modify files.
 ```
 
@@ -124,7 +124,7 @@ a different session for unrelated work.
 ## 9. Plugin tool smoke test
 
 Use this checklist in a fresh ChatGPT conversation after the initial `pong`
-test. All messages below target `chat_id: pickleshell-main` and must not edit
+test. All messages below target `chat_id: example-chat` and must not edit
 files.
 
 1. Call `send-chat` with: `Reply exactly: PONG_TEST. Do not use tools or modify files.`
@@ -180,7 +180,7 @@ a Chromium launch problem; check the tunnel logs.
 ## 10. Async chat smoke test
 
 Use this test after the provider is available. Set `chat_id` to
-`pickleshell-main` and do not attach files.
+`example-chat` and do not attach files.
 
 1. Call `session-status` without `session_id`. Expect `state: "new_session"`.
 2. Call `send-chat` without `session_id` with:

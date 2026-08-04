@@ -22,6 +22,7 @@ Examples below use:
 sudo useradd --create-home --shell /bin/bash pickleshell
 sudo install -d -o pickleshell -g pickleshell /opt/pickleshell
 sudo install -d -m 700 -o pickleshell -g pickleshell /etc/pickleshell
+sudo install -d -o pickleshell -g pickleshell /srv/pickleshell/workspace
 sudo git clone https://github.com/pickleshell/pickleshell.git /opt/pickleshell
 sudo chown -R pickleshell:pickleshell /opt/pickleshell
 
@@ -136,8 +137,8 @@ defense-in-depth only. Selecting a privileged account increases the impact of
 commands ChatGPT can run.
 
 Install the unit, then verify the private socket is accessible only to the
-Gateway service group. Do not deploy to ACE or BOS production until the complete
-test tunnel and live MCP matrix pass.
+Gateway service group. Do not deploy to production until the complete test
+tunnel and live MCP matrix pass.
 
 The privileged lifecycle integration is opt-in only and must run in a temporary
 isolated systemd service, never inside the Gateway/OpenCode worker group:
@@ -160,7 +161,7 @@ Create `/etc/pickleshell/mcp.env`:
 PICKLESHELL_GATEWAY_URL=http://127.0.0.1:18092
 PICKLESHELL_API_KEY=lag_v1_<same-secret>
 PICKLESHELL_TIMEOUT_MS=420000
-MCP_TEMP_DIR=/home/pickleshell/.mcp-temp
+MCP_TEMP_DIR=/var/lib/pickleshell/mcp-temp
 ```
 
 ```bash
@@ -206,7 +207,7 @@ Expected responses are `live` and `ready`.
 ```bash
 cd /opt/pickleshell/gateway
 PICKLESHELL_API_KEY=lag_v1_... \
-PICKLESHELL_SMOKE_CHAT_ID=pickleshell-main \
+PICKLESHELL_SMOKE_CHAT_ID=example-chat \
 PICKLESHELL_RUN_AGENT_SMOKE=1 \
 npm run test:smoke
 ```

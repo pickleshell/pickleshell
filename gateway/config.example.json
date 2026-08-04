@@ -1,7 +1,7 @@
 {
   "chats": {
-    "pickleshell-main": {
-      "workspace": "/home/pickleshell/workspace",
+    "example-chat": {
+      "workspace": "/srv/pickleshell/workspace",
       "agent": "opencode"
     }
   },

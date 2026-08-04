@@ -24,7 +24,7 @@ Set each workspace in `config.json` and keep the file untracked.
 
 The Gateway validates a runtime per chat and a global default before execution.
 OpenCode remains the supported default. The Codex runtime is implemented and
-has been verified through PickleShell ACE.
+has been verified through the reference test tunnel.
 
 - `default_runtime`: the runtime used when a chat does not specify one.
   Defaults to `opencode` when absent.
@@ -63,7 +63,7 @@ The safe default is `HOST=127.0.0.1`.
 npm test
 
 PICKLESHELL_API_KEY=... \
-PICKLESHELL_SMOKE_CHAT_ID=pickleshell-main \
+PICKLESHELL_SMOKE_CHAT_ID=example-chat \
 npm run test:smoke
 ```
 

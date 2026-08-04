@@ -142,10 +142,9 @@ flowchart TD
     class E,SVC,WS local
 ```
 
-All three core service boxes are implemented. Terminal production E2E has been
-verified on BOS ordinary and BOSsudo/ChatGPT profiles across all six operations;
-the same six-operation Terminal E2E has also passed on ACE. The clean external
-release-installation gate remains open.
+All three core service boxes are implemented. Terminal E2E has been verified
+across ordinary and privileged reference profiles through the six-operation
+contract. The clean external release-installation gate remains open.
 
 The tunnel is initiated from the local machine over outbound HTTPS. The Gateway
 remains reachable only inside the trusted local environment.
@@ -156,9 +155,9 @@ The three mandatory core services all run locally on your machine:
 
 | Service | Status | Notes |
 | --- | --- | --- |
-| **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface and has been verified through PickleShell ACE. |
+| **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface and has been verified through the reference test tunnel. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
-| **Terminal** | Implemented, BOS and ACE E2E verified | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. Verified on BOS ordinary, BOSsudo/ChatGPT profiles, and ACE; the clean external release-installation gate remains open. |
+| **Terminal** | Implemented, E2E verified across reference profiles | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. The clean external release-installation gate remains open. |
 
 ## Async Workflow
 
@@ -288,11 +287,11 @@ service runtime security, and updates the ChatGPT Assistant setup and product
 documentation.
 
 The unreleased main branch includes the Codex runtime integration, verified
-through PickleShell ACE, and the Terminal implementation with deployment-time
-Linux service identity selection. Terminal has passed production E2E on BOS
-ordinary and BOSsudo/ChatGPT profiles and six-operation E2E on ACE, but a clean
-end-to-end installation on a separate machine remains a release gate. Do not
-create the next release or tag yet.
+through the reference test tunnel, and the Terminal implementation with
+deployment-time Linux service identity selection. Terminal has passed the
+six-operation E2E contract across ordinary and privileged reference profiles,
+but a clean end-to-end installation on a separate machine remains a release
+gate. Do not create the next release or tag yet.
 
 This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 
@@ -301,14 +300,13 @@ This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 ### Unreleased
 
 - Added the native Codex runtime as a first-class alternative to OpenCode,
-  verified through PickleShell ACE.
+  verified through the reference test tunnel.
 - Added a persistent interactive Terminal PTY with six MCP operations, plus
   isolation, lifecycle, and delegated cgroup safeguards for ordinary and
   ChatGPT profiles.
 - Added automated Terminal reconnect E2E coverage and a consistent bounded
   `terminal-close` reason contract.
-- Verified Terminal production E2E on BOS ordinary, BOSsudo/ChatGPT profiles,
-  and ACE.
+- Verified Terminal E2E across ordinary and privileged reference profiles.
 - Added the project Philosophy statement.
 
 ### [v0.1.1](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.1)
