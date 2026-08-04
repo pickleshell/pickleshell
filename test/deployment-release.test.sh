@@ -65,6 +65,7 @@ chmod +x "$BIN/tar"
 cat > "$BIN/chown" <<'FAKE_CHOWN'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ $1 == -h ]]; then shift; fi
 [[ $1 == -- ]]
 shift
 owner=$1
@@ -271,6 +272,39 @@ FAKE_NPM_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \
 [[ $(readlink "$DEPLOY/active") == releases/$TWO ]]
 [[ ! -e $DEPLOY/releases/$FOUR ]]
 ! compgen -G "$DEPLOY/releases/.staging-*" >/dev/null
+
+mkdir -p "$SOURCE/gateway/node_modules/npm-package/bin" "$SOURCE/gateway/node_modules/.bin"
+printf '#!/bin/sh\n' > "$SOURCE/gateway/node_modules/npm-package/bin/tool"
+chmod +x "$SOURCE/gateway/node_modules/npm-package/bin/tool"
+ln -s ../npm-package/bin/tool "$SOURCE/gateway/node_modules/.bin/tool"
+git -C "$SOURCE" add gateway/node_modules
+git -C "$SOURCE" commit -q -m 'allow internal release symlinks'
+SAFE_LINK=$(git -C "$SOURCE" rev-parse HEAD)
+"$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$SAFE_LINK" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null
+[[ $(readlink "$DEPLOY/active") == releases/$SAFE_LINK ]]
+[[ $(readlink "$DEPLOY/releases/$SAFE_LINK/gateway/node_modules/.bin/tool") == '../npm-package/bin/tool' ]]
+[[ $(stat -c '%a' "$DEPLOY/releases/$SAFE_LINK/gateway/node_modules/npm-package/bin/tool") == 555 ]]
+
+for link_case in external absolute traversal broken; do
+  rm "$SOURCE/gateway/node_modules/.bin/tool"
+  case "$link_case" in
+    external) ln -s ../../../deploy/systemd/pickleshell-gateway.service.in "$SOURCE/gateway/node_modules/.bin/tool" ;;
+    absolute) ln -s /tmp/outside-release-target "$SOURCE/gateway/node_modules/.bin/tool" ;;
+    traversal) ln -s ../../../../outside-release-target "$SOURCE/gateway/node_modules/.bin/tool" ;;
+    broken) ln -s ../npm-package/bin/missing "$SOURCE/gateway/node_modules/.bin/tool" ;;
+  esac
+  git -C "$SOURCE" add -A gateway/node_modules/.bin/tool
+  git -C "$SOURCE" commit -q -m "reject $link_case release symlink"
+  UNSAFE_LINK=$(git -C "$SOURCE" rev-parse HEAD)
+  if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$UNSAFE_LINK" \
+    --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1; then
+    exit 1
+  fi
+  [[ $(readlink "$DEPLOY/active") == releases/$SAFE_LINK ]]
+  [[ ! -e "$DEPLOY/releases/$UNSAFE_LINK" ]]
+  ! compgen -G "$DEPLOY/releases/.staging-*" >/dev/null
+done
 
 printf 'dirty\n' > "$SOURCE/untracked-file"
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \

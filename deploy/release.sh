@@ -347,10 +347,26 @@ stage() {
   run git -C "$SOURCE" archive --format=tar "$RESOLVED" 'deploy/systemd' 'gateway' 'mcp-server' 'terminal' | run tar -xf - -C "$WORK_RELEASE"
   [[ -f $WORK_RELEASE/gateway/package.json && -f $WORK_RELEASE/mcp-server/package.json && -f $WORK_RELEASE/terminal/package.json ]] || die 'archive is missing a required component'
   while IFS= read -r -d '' path; do
-    [[ ! -L $path ]] || die 'archive contains an unsafe symbolic link'
-  done < <(find "$WORK_RELEASE" -type l -print0)
+    validate_release_symlink "$path"
+  done < <(find -P "$WORK_RELEASE" -type l -print0)
   printf '%s\n' "$RESOLVED" > "$WORK_RELEASE/.release-sha"
   [[ $(<"$WORK_RELEASE/.release-sha") == "$RESOLVED" ]] || die 'staged SHA does not match requested commit'
+}
+
+validate_release_symlink() {
+  local link=$1 target resolved component component_root
+  target=$(readlink -- "$link") || die 'could not read release symbolic link'
+  [[ $target != /* ]] || die 'release contains an absolute symbolic link'
+
+  component=${link#"$WORK_RELEASE"/}
+  component=${component%%/*}
+  case "$component" in
+    gateway|mcp-server|terminal) ;;
+    *) die 'release symbolic link is outside a component' ;;
+  esac
+  component_root="$WORK_RELEASE/$component"
+  resolved=$(realpath -e -- "$link") || die 'release contains a broken or cyclic symbolic link'
+  [[ $resolved == "$component_root"/* ]] || die 'release symbolic link escapes its component'
 }
 
 component_user_group() {
@@ -366,7 +382,7 @@ prepare_component() {
   local component=$1 directory="$WORK_RELEASE/$1" owner
   [[ -d $directory && ! -L $directory ]] || die "component directory is unsafe: $component"
   owner=$(component_user_group "$component")
-  run chown -- "$owner" "$directory"
+  run chown -h -- "$owner" "$directory"
   run chmod u+rwx -- "$directory"
 }
 
@@ -376,11 +392,14 @@ harden_release() {
     for component in gateway mcp-server terminal; do
       path="$WORK_RELEASE/$component"
       [[ -d $path && ! -L $path ]] || die "component directory is unsafe: $component"
-      run chown -- root:root "$path"
+      run chown -h -- root:root "$path"
     done
   fi
   while IFS= read -r -d '' path; do
-    [[ ! -L $path ]] || die 'release contains an unsafe symbolic link'
+    if [[ -L $path ]]; then
+      validate_release_symlink "$path"
+      continue
+    fi
     if [[ -d $path ]]; then
       run chmod 0555 -- "$path"
     else
@@ -392,9 +411,9 @@ harden_release() {
       fi
     fi
     if [[ $(id -u) -eq 0 ]]; then
-      run chown -- root:root "$path"
+      run chown -h -- root:root "$path"
     fi
-  done < <(find "$WORK_RELEASE" -xdev -depth -print0)
+  done < <(find -P "$WORK_RELEASE" -xdev -depth -print0)
 }
 
 build() {
