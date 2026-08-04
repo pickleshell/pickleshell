@@ -5,7 +5,7 @@
 
 <p align="center"><strong>Give ChatGPT a local machine to work with</strong></p>
 
-[![Release](https://img.shields.io/badge/release-v0.1.1-f5a623)](#release-history)
+[![Release](https://img.shields.io/badge/release-v0.1.2-f5a623)](#release-history)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](#development)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#requirements)
@@ -78,7 +78,7 @@ carry out a complex task directly from ChatGPT.
 
 > [!WARNING]
 > **The `main` branch may contain unreleased changes.** The latest stable
-> release is `v0.1.1`; use it only with trusted users and a dedicated service
+> release is `v0.1.2`; use it only with trusted users and a dedicated service
 > account. Read
 > [SECURITY.md](SECURITY.md) before deployment.
 
@@ -327,23 +327,17 @@ Include the relevant setup details and steps to reproduce the problem.
 
 ## Project Status
 
-PickleShell `0.1.1` is the latest release. It adds the Playwright browser
-runtime and browser automation documentation, hardens agent isolation and
-service runtime security, and updates the ChatGPT Assistant setup and product
-documentation.
-
-The unreleased main branch includes the Codex runtime integration, verified
-through the reference test tunnel, and the Terminal implementation with
-deployment-time Linux service identity selection. Terminal has passed the
-six-operation E2E contract across ordinary and privileged reference profiles,
-but a clean end-to-end installation on a separate machine remains a release
-gate. Do not create the next release or tag yet.
+PickleShell `0.1.2` is the latest release. It adds the native Codex runtime
+adapter, persistent Terminal PTY runtime, immutable release migration, and
+deployment verification gates for Agent, Browser, and Terminal.
 
 This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 
 ## Release History
 
 ### Unreleased
+
+### [v0.1.2](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.2)
 
 - Added the native Codex runtime as a first-class alternative to OpenCode,
   verified through the reference test tunnel.
@@ -353,6 +347,8 @@ This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 - Added automated Terminal reconnect E2E coverage and a consistent bounded
   `terminal-close` reason contract.
 - Verified Terminal E2E across ordinary and privileged reference profiles.
+- Added immutable release migration, rollback, isolated systemd unit, and
+  production smoke verification gates.
 - Added the project Philosophy statement.
 
 ### [v0.1.1](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.1)
