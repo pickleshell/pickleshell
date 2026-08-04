@@ -47,6 +47,7 @@ for (const line of [
   "Environment=PLAYWRIGHT_BROWSERS_PATH=/var/cache/pickleshell/ms-playwright",
   "ReadWritePaths=/var/lib/pickleshell/mcp-home",
   "ReadWritePaths=/var/cache/pickleshell/mcp",
+  "TasksMax=256",
   "NoNewPrivileges=true",
 ]) {
   assertIncludes(tunnelService, line, "tunnel systemd template");

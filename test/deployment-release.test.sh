@@ -185,6 +185,7 @@ grep -q 'ExecStart=/usr/local/bin/tunnel-client run --profile-file /etc/picklesh
 grep -q 'RuntimeDirectory=pickleshell-test-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'BindPaths=/run/pickleshell-test-mcp:/run/pickleshell-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'ReadWritePaths=/var/lib/pickleshell-test/mcp-temp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
+grep -q 'TasksMax=256' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'Environment=PICKLESHELL_TERMINAL_SOCKET=/run/pickleshell-test-terminal/service.sock' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
 [[ ! -e "$ISOLATED_UNITS/terminal-chatgpt.service" ]]
 
