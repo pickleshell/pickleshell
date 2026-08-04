@@ -288,7 +288,7 @@ sudo -u pickleshell-tunnel -H tunnel-client init \
   --sample sample_mcp_stdio_local \
   --profile pickleshell \
   --tunnel-id "tunnel_..." \
-  --mcp-command "node /opt/pickleshell/mcp-server/dist/index.js" \
+  --mcp-command "node /path/to/pickleshell/mcp-server/dist/index.js" \
   --health-listen-addr "127.0.0.1:18093" \
   --control-plane-api-key-ref "file:/etc/pickleshell/control-plane.key"
 

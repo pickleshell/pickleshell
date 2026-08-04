@@ -98,29 +98,36 @@ mkdir -p "$ISOLATED_UNITS"
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service \
-  --mcp-service pickleshell-test-mcp.service \
+  --mcp-service pickleshell-test-tunnel.service \
   --terminal-service pickleshell-test-terminal.service --include-terminal \
   --config-root /etc/pickleshell-test --state-root /var/lib/pickleshell-test \
   --cache-root /var/cache/pickleshell-test --workspace-root /srv/pickleshell-test/workspace \
   --terminal-workspace-root /srv/pickleshell-test/workspace \
   --mcp-runtime-dir /run/pickleshell-test-mcp --terminal-runtime-dir /run/pickleshell-test-terminal \
+  --mcp-bind-source /run/pickleshell-test-mcp --mcp-bind-target /run/pickleshell-mcp \
+  --mcp-temp-dir /var/lib/pickleshell-test/mcp-temp \
+  --tunnel-profile /etc/pickleshell-test/tunnel-client/pickleshell-test.yaml \
   --terminal-socket /run/pickleshell-test-terminal/service.sock \
-  --node-executable /opt/pickleshell-test/runtime/node/bin/node \
-  --tunnel-client-executable /opt/pickleshell-test/runtime/tunnel-client \
+  --node-executable /usr/bin/node \
+  --tunnel-client-executable /usr/local/bin/tunnel-client \
   --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS"
-for unit in pickleshell-test-gateway.service pickleshell-test-mcp.service pickleshell-test-terminal.service; do
+for unit in pickleshell-test-gateway.service pickleshell-test-tunnel.service pickleshell-test-terminal.service; do
   [[ -s "$ISOLATED_UNITS/$unit" ]]
   ! grep -E '/opt/pickleshell/|/etc/pickleshell/|/var/lib/pickleshell/|/var/cache/pickleshell/|/srv/pickleshell/|User=pickleshell($|[^-])|User=pickleshell-tunnel|User=pickleshell-terminal|pickleshell-gateway.service' "$ISOLATED_UNITS/$unit"
   grep -q 'NoNewPrivileges=true' "$ISOLATED_UNITS/$unit"
 done
-grep -q 'After=network-online.target pickleshell-test-gateway.service' "$ISOLATED_UNITS/pickleshell-test-mcp.service"
+grep -q 'After=network-online.target pickleshell-test-gateway.service' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
+grep -q 'ExecStart=/usr/local/bin/tunnel-client run --profile-file /etc/pickleshell-test/tunnel-client/pickleshell-test.yaml' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
+grep -q 'RuntimeDirectory=pickleshell-test-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
+grep -q 'BindPaths=/run/pickleshell-test-mcp:/run/pickleshell-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
+grep -q 'ReadWritePaths=/var/lib/pickleshell-test/mcp-temp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'Environment=PICKLESHELL_TERMINAL_SOCKET=/run/pickleshell-test-terminal/service.sock' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
 [[ ! -e "$ISOLATED_UNITS/terminal-chatgpt.service" ]]
 
 FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --gateway-service pickleshell-test-gateway.service \
-  --mcp-service pickleshell-test-mcp.service \
+  --mcp-service pickleshell-test-tunnel.service \
   --terminal-service pickleshell-test-terminal.service --include-terminal \
   --systemctl "$BIN/fake-systemctl" --units-dir "$UNITS" >/dev/null 2>&1 && exit 1 || true
 [[ $(readlink "$DEPLOY/active") == releases/$TWO ]]
@@ -129,20 +136,20 @@ FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$T
 [[ $(<"$UNITS/pickleshell-terminal.service") == 'production terminal sentinel' ]]
 [[ $(<"$UNITS/terminal-chatgpt.service") == 'separately managed terminal profile' ]]
 [[ ! -e $UNITS/pickleshell-test-gateway.service ]]
-[[ ! -e $UNITS/pickleshell-test-mcp.service ]]
+[[ ! -e $UNITS/pickleshell-test-tunnel.service ]]
 [[ ! -e $UNITS/pickleshell-test-terminal.service ]]
 [[ $(<"$FAKE_SYSTEMCTL_LOG") == *'restart pickleshell-test-gateway.service'* ]]
-[[ $(<"$FAKE_SYSTEMCTL_LOG") == *'restart pickleshell-test-mcp.service'* ]]
+[[ $(<"$FAKE_SYSTEMCTL_LOG") == *'restart pickleshell-test-tunnel.service'* ]]
 
 mkdir -p "$TMP/first-units"
 if FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$TMP/first-fail" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
-  --gateway-service pickleshell-test-gateway.service --mcp-service pickleshell-test-mcp.service \
+  --gateway-service pickleshell-test-gateway.service --mcp-service pickleshell-test-tunnel.service \
   --terminal-service pickleshell-test-terminal.service --include-terminal \
   --systemctl "$BIN/fake-systemctl" --units-dir "$TMP/first-units" >/dev/null 2>&1; then exit 1; fi
 [[ ! -e $TMP/first-fail/active ]]
 [[ ! -e $TMP/first-units/pickleshell-test-gateway.service ]]
-[[ ! -e $TMP/first-units/pickleshell-test-mcp.service ]]
+[[ ! -e $TMP/first-units/pickleshell-test-tunnel.service ]]
 [[ ! -e $TMP/first-units/pickleshell-test-terminal.service ]]
 
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
@@ -163,6 +170,16 @@ if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
   --config-root '/etc/@GATEWAY_USER@' >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+  --node-executable '/tmp/node;systemd-directive' >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+  --tunnel-profile '/etc/pickleshell/tunnel-client/../leak.yaml' >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+  --mcp-bind-source /run/other-runtime >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+  --mcp-bind-target /run/other-runtime >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+  --mcp-temp-dir /tmp/pickleshell-mcp >/dev/null 2>&1; then exit 1; fi
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --units-dir "$TMP/units/../units" >/dev/null 2>&1; then exit 1; fi

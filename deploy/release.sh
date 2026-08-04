@@ -10,7 +10,8 @@ usage() {
     '                   [--config-root PATH] [--state-root PATH] [--cache-root PATH]' \
     '                   [--workspace-root PATH] [--mcp-runtime-dir PATH] [--terminal-runtime-dir PATH]' \
     '                   [--terminal-socket PATH] [--node-executable PATH] [--terminal-node-executable PATH]' \
-    '                   [--tunnel-client-executable PATH]' \
+    '                   [--tunnel-client-executable PATH] [--tunnel-profile PATH]' \
+    '                   [--mcp-bind-source PATH] [--mcp-bind-target PATH] [--mcp-temp-dir PATH]' \
     '                   [--gateway-user USER] [--mcp-user USER] [--terminal-user USER]' \
     '                   [--gateway-group GROUP] [--mcp-group GROUP] [--terminal-group GROUP]' \
     '                   [--gateway-service NAME] [--mcp-service NAME] [--terminal-service NAME]' \
@@ -39,11 +40,15 @@ CACHE_ROOT='/var/cache/pickleshell'
 WORKSPACE_ROOT='/srv/pickleshell/workspace'
 TERMINAL_WORKSPACE_ROOT='/srv/pickleshell/workspace'
 MCP_RUNTIME_DIR='/run/pickleshell-mcp'
+MCP_BIND_SOURCE='/run/pickleshell-mcp'
+MCP_BIND_TARGET='/run/pickleshell-mcp'
+MCP_TEMP_DIR='/var/lib/pickleshell/mcp-temp'
 TERMINAL_RUNTIME_DIR='/run/pickleshell-terminal'
 TERMINAL_SOCKET='/run/pickleshell-terminal/service.sock'
 NODE_EXECUTABLE='/opt/pickleshell/runtime/node-v20.20.2/bin/node'
 TERMINAL_NODE_EXECUTABLE='/usr/bin/node'
 TUNNEL_CLIENT_EXECUTABLE='/usr/local/bin/tunnel-client'
+TUNNEL_PROFILE='/etc/pickleshell/tunnel-client/pickleshell.yaml'
 INCLUDE_TERMINAL=0
 NO_SYSTEMD=0
 DRY_RUN=0
@@ -62,14 +67,17 @@ while (($#)); do
           ROOT=${ROOT:-/opt/pickleshell-test}
           GATEWAY_USER=pickleshell-test; MCP_USER=pickleshell-test-tunnel; TERMINAL_USER=pickleshell-test-terminal
           GATEWAY_GROUP=pickleshell-test; MCP_GROUP=pickleshell-test-tunnel; TERMINAL_GROUP=pickleshell-test-terminal
-          GATEWAY_SERVICE=pickleshell-test-gateway.service; MCP_SERVICE=pickleshell-test-mcp.service; TERMINAL_SERVICE=pickleshell-test-terminal.service
+          GATEWAY_SERVICE=pickleshell-test-gateway.service; MCP_SERVICE=pickleshell-test-tunnel.service; TERMINAL_SERVICE=pickleshell-test-terminal.service
           CONFIG_ROOT=/etc/pickleshell-test; STATE_ROOT=/var/lib/pickleshell-test; CACHE_ROOT=/var/cache/pickleshell-test
           WORKSPACE_ROOT=/srv/pickleshell-test/workspace; TERMINAL_WORKSPACE_ROOT=/srv/pickleshell-test/workspace
           MCP_RUNTIME_DIR=/run/pickleshell-test-mcp; TERMINAL_RUNTIME_DIR=/run/pickleshell-test-terminal
+          MCP_BIND_SOURCE=/run/pickleshell-test-mcp; MCP_BIND_TARGET=/run/pickleshell-mcp
+          MCP_TEMP_DIR=/var/lib/pickleshell-test/mcp-temp
           TERMINAL_SOCKET=/run/pickleshell-test-terminal/service.sock
-          NODE_EXECUTABLE=/opt/pickleshell-test/runtime/node/bin/node
-          TERMINAL_NODE_EXECUTABLE=/opt/pickleshell-test/runtime/node/bin/node
-          TUNNEL_CLIENT_EXECUTABLE=/opt/pickleshell-test/runtime/tunnel-client
+          NODE_EXECUTABLE=/usr/bin/node
+          TERMINAL_NODE_EXECUTABLE=/usr/bin/node
+          TUNNEL_CLIENT_EXECUTABLE=/usr/local/bin/tunnel-client
+          TUNNEL_PROFILE=/etc/pickleshell-test/tunnel-client/pickleshell-test.yaml
           ;;
         *) usage >&2; die 'profile must be production or isolated' ;;
       esac
@@ -89,11 +97,15 @@ while (($#)); do
     --workspace-root) WORKSPACE_ROOT=${2:-}; shift 2 ;;
     --terminal-workspace-root) TERMINAL_WORKSPACE_ROOT=${2:-}; shift 2 ;;
     --mcp-runtime-dir) MCP_RUNTIME_DIR=${2:-}; shift 2 ;;
+    --mcp-bind-source) MCP_BIND_SOURCE=${2:-}; shift 2 ;;
+    --mcp-bind-target) MCP_BIND_TARGET=${2:-}; shift 2 ;;
+    --mcp-temp-dir) MCP_TEMP_DIR=${2:-}; shift 2 ;;
     --terminal-runtime-dir) TERMINAL_RUNTIME_DIR=${2:-}; shift 2 ;;
     --terminal-socket) TERMINAL_SOCKET=${2:-}; shift 2 ;;
     --node-executable) NODE_EXECUTABLE=${2:-}; shift 2 ;;
     --terminal-node-executable) TERMINAL_NODE_EXECUTABLE=${2:-}; shift 2 ;;
     --tunnel-client-executable) TUNNEL_CLIENT_EXECUTABLE=${2:-}; shift 2 ;;
+    --tunnel-profile) TUNNEL_PROFILE=${2:-}; shift 2 ;;
     --gateway-service) GATEWAY_SERVICE=${2:-}; shift 2 ;;
     --mcp-service|--tunnel-service) MCP_SERVICE=${2:-}; shift 2 ;;
     --terminal-service) TERMINAL_SERVICE=${2:-}; shift 2 ;;
@@ -130,6 +142,41 @@ validate_name() {
   [[ $value =~ ^[a-z_][a-z0-9_-]*$ && $value != root ]] || die "unsafe $label name"
 }
 
+validate_executable() {
+  local value=$1 label=$2 resolved parent mode trusted_exact=0
+  validate_path "$value" "$label"
+  resolved=$(realpath -e -- "$value") || die "$label must resolve to an executable"
+  [[ -f $resolved && -x $resolved && ! -L $resolved ]] || die "$label must resolve to a regular executable"
+  case "$resolved" in
+    /usr/bin/*|/usr/local/bin/*|/opt/pickleshell/runtime/*) ;;
+    *) die "$label is outside the trusted executable locations" ;;
+  esac
+  case "$resolved" in
+    /usr/bin/node|/usr/local/bin/tunnel-client|/opt/pickleshell/runtime/node-v20.20.2/bin/node) trusted_exact=1 ;;
+  esac
+  parent=$resolved
+  while [[ $parent == */* ]]; do
+    parent=$(dirname -- "$parent")
+    [[ ! -L $parent ]] || die "$label has an unsafe symlinked parent"
+    [[ -d $parent ]] || die "$label has an invalid parent"
+    [[ $(stat -c '%u' -- "$parent") == 0 ]] || die "$label parent must be root-owned"
+    mode=$(stat -c '%a' -- "$parent")
+    (( trusted_exact || (8#$mode & 022) == 0 )) || die "$label parent is writable"
+    [[ $parent == / ]] && break
+  done
+  [[ $(stat -c '%u' -- "$resolved") == 0 ]] || die "$label must be root-owned"
+  mode=$(stat -c '%a' -- "$resolved")
+  (( trusted_exact || (8#$mode & 022) == 0 )) || die "$label is writable"
+}
+
+validate_profile() {
+  local value=$1 base
+  validate_path "$value" tunnel-profile
+  [[ $value == "$CONFIG_ROOT"/tunnel-client/* ]] || die 'tunnel profile must be under config root tunnel-client'
+  base=${value##*/}
+  [[ $base =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.yaml$ ]] || die 'tunnel profile must have a safe .yaml basename'
+}
+
 validate_path "$ROOT" app-root
 validate_path "$CONFIG_ROOT" config-root
 validate_path "$STATE_ROOT" state-root
@@ -137,13 +184,21 @@ validate_path "$CACHE_ROOT" cache-root
 validate_path "$WORKSPACE_ROOT" workspace-root
 validate_path "$TERMINAL_WORKSPACE_ROOT" terminal-workspace-root
 validate_path "$MCP_RUNTIME_DIR" mcp-runtime-dir
+validate_path "$MCP_BIND_SOURCE" mcp-bind-source
+validate_path "$MCP_BIND_TARGET" mcp-bind-target
+validate_path "$MCP_TEMP_DIR" mcp-temp-dir
 validate_path "$TERMINAL_RUNTIME_DIR" terminal-runtime-dir
 validate_path "$TERMINAL_SOCKET" terminal-socket
-validate_path "$NODE_EXECUTABLE" node-executable
-validate_path "$TERMINAL_NODE_EXECUTABLE" terminal-node-executable
-validate_path "$TUNNEL_CLIENT_EXECUTABLE" tunnel-client-executable
+validate_executable "$NODE_EXECUTABLE" node-executable
+validate_executable "$TERMINAL_NODE_EXECUTABLE" terminal-node-executable
+validate_executable "$TUNNEL_CLIENT_EXECUTABLE" tunnel-client-executable
+validate_profile "$TUNNEL_PROFILE"
 [[ $MCP_RUNTIME_DIR == /run/* && $TERMINAL_RUNTIME_DIR == /run/* ]] || die 'runtime directories must be under /run'
 [[ $MCP_RUNTIME_DIR =~ ^/run/[A-Za-z0-9_.-]+$ && $TERMINAL_RUNTIME_DIR =~ ^/run/[A-Za-z0-9_.-]+$ ]] || die 'runtime directories must be single safe names under /run'
+[[ $MCP_BIND_SOURCE == "$MCP_RUNTIME_DIR" ]] || die 'MCP bind source must equal MCP runtime directory'
+[[ $MCP_BIND_SOURCE =~ ^/run/[A-Za-z0-9_.-]+$ ]] || die 'MCP bind source must be a dedicated runtime directory'
+[[ $MCP_BIND_TARGET == /run/pickleshell-mcp ]] || die 'MCP bind target must be /run/pickleshell-mcp'
+[[ $MCP_TEMP_DIR == "$STATE_ROOT"/mcp-temp ]] || die 'MCP temp directory must be state-root/mcp-temp'
 [[ $TERMINAL_SOCKET == "$TERMINAL_RUNTIME_DIR"/* ]] || die 'terminal socket must be under terminal runtime directory'
 [[ $MCP_RUNTIME_DIR != "$TERMINAL_RUNTIME_DIR" ]] || die 'runtime directories must be distinct'
 [[ $ROOT != "$CONFIG_ROOT" && $ROOT != "$STATE_ROOT" && $ROOT != "$CACHE_ROOT" && $ROOT != "$WORKSPACE_ROOT" ]] || die 'deployment roots must be distinct'
@@ -316,6 +371,7 @@ render_unit() {
     TERMINAL_WORKSPACE_ROOT \
     NODE_BIN_DIR NODE_EXECUTABLE TERMINAL_NODE_EXECUTABLE TUNNEL_CLIENT_EXECUTABLE GATEWAY_USER GATEWAY_GROUP \
     MCP_USER MCP_GROUP TERMINAL_USER TERMINAL_GROUP GATEWAY_SERVICE MCP_RUNTIME_NAME \
+    MCP_BIND_SOURCE MCP_BIND_TARGET MCP_TEMP_DIR TUNNEL_PROFILE \
     TERMINAL_RUNTIME_NAME TERMINAL_RUNTIME_DIR TERMINAL_SOCKET; do
     case "$token" in
       APP_ROOT) value=$ROOT; ACTIVE_ROOT="$ROOT/active" ;;
@@ -337,6 +393,10 @@ render_unit() {
       TERMINAL_GROUP) value=$TERMINAL_GROUP ;;
       GATEWAY_SERVICE) value=$GATEWAY_SERVICE ;;
       MCP_RUNTIME_NAME) value=${MCP_RUNTIME_DIR#/run/} ;;
+      MCP_BIND_SOURCE) value=$MCP_BIND_SOURCE ;;
+      MCP_BIND_TARGET) value=$MCP_BIND_TARGET ;;
+      MCP_TEMP_DIR) value=$MCP_TEMP_DIR ;;
+      TUNNEL_PROFILE) value=$TUNNEL_PROFILE ;;
       TERMINAL_RUNTIME_NAME) value=${TERMINAL_RUNTIME_DIR#/run/} ;;
       TERMINAL_RUNTIME_DIR) value=$TERMINAL_RUNTIME_DIR ;;
       TERMINAL_SOCKET) value=$TERMINAL_SOCKET ;;
@@ -345,7 +405,7 @@ render_unit() {
   done
   [[ $contents != *'@'* ]] || die "unresolved placeholder in $component unit"
   if [[ $PROFILE == isolated ]]; then
-    [[ $contents != *'/opt/pickleshell/'* && $contents != *'/etc/pickleshell/'* && $contents != *'/var/lib/pickleshell/'* && $contents != *'/var/cache/pickleshell/'* && $contents != *'/srv/pickleshell/'* && $contents != *'User=pickleshell'* && $contents != *'User=pickleshell-tunnel'* && $contents != *'User=pickleshell-terminal'* && $contents != *'Group=pickleshell'* && $contents != *'Group=pickleshell-tunnel'* && $contents != *'Group=pickleshell-terminal'* && $contents != *'pickleshell-gateway.service'* ]] || die "production value leaked into isolated $component unit"
+    [[ $contents != *'/opt/pickleshell/'* && $contents != *'/etc/pickleshell/'* && $contents != *'/var/lib/pickleshell/'* && $contents != *'/var/cache/pickleshell/'* && $contents != *'/srv/pickleshell/'* && $contents != *$'\nUser=pickleshell\n'* && $contents != *$'\nUser=pickleshell-tunnel\n'* && $contents != *$'\nUser=pickleshell-terminal\n'* && $contents != *$'\nGroup=pickleshell\n'* && $contents != *$'\nGroup=pickleshell-tunnel\n'* && $contents != *$'\nGroup=pickleshell-terminal\n'* && $contents != *'pickleshell-gateway.service'* ]] || die "production value leaked into isolated $component unit"
   fi
   printf '%s\n' "$contents"
 }

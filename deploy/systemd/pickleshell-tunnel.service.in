@@ -13,7 +13,8 @@ Environment=HOME=@STATE_ROOT@/mcp-home
 Environment=XDG_CACHE_HOME=@CACHE_ROOT@/mcp
 Environment=PLAYWRIGHT_BROWSERS_PATH=@CACHE_ROOT@/ms-playwright
 EnvironmentFile=@CONFIG_ROOT@/mcp.env
-ExecStart=@TUNNEL_CLIENT_EXECUTABLE@ run --profile-file @CONFIG_ROOT@/tunnel-client/pickleshell.yaml
+Environment=MCP_TEMP_DIR=@MCP_TEMP_DIR@
+ExecStart=@TUNNEL_CLIENT_EXECUTABLE@ run --profile-file @TUNNEL_PROFILE@
 Restart=always
 RestartSec=5
 TimeoutStopSec=20
@@ -22,6 +23,7 @@ TasksMax=128
 MemoryMax=1G
 RuntimeDirectory=@MCP_RUNTIME_NAME@
 RuntimeDirectoryMode=0700
+BindPaths=@MCP_BIND_SOURCE@:@MCP_BIND_TARGET@
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
@@ -36,8 +38,9 @@ LockPersonality=true
 SystemCallArchitectures=native
 ReadWritePaths=@STATE_ROOT@/mcp-home
 ReadWritePaths=@CACHE_ROOT@/mcp
+ReadWritePaths=@MCP_TEMP_DIR@
 ReadOnlyPaths=@APP_ROOT@
-ReadOnlyPaths=@CONFIG_ROOT@/tunnel-client/pickleshell.yaml
+ReadOnlyPaths=@TUNNEL_PROFILE@
 ReadOnlyPaths=@CONFIG_ROOT@/control-plane.key
 InaccessiblePaths=-@CONFIG_ROOT@/gateway.env
 InaccessiblePaths=-@CONFIG_ROOT@/opencode.jsonc
