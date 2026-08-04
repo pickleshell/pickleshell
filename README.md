@@ -77,8 +77,9 @@ technical specification to asking the Agent on a selected machine to
 carry out a complex task directly from ChatGPT.
 
 > [!WARNING]
-> **PickleShell is pre-release software (`0.1.0`).** Use it only with trusted
-> users and a dedicated service account. Read
+> **The `main` branch may contain unreleased changes.** The latest stable
+> release is `v0.1.1`; use it only with trusted users and a dedicated service
+> account. Read
 > [SECURITY.md](SECURITY.md) before deployment.
 
 ## Quick Start
@@ -170,7 +171,7 @@ ChatGPT for the next coordination step.
 ```mermaid
 flowchart TB
     C["ChatGPT Orchestrator"]
-    P["PickleShell<br/>Secure Control Layer"]
+    P["PickleShell"]
 
     C <--> P
 

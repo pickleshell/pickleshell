@@ -23,7 +23,7 @@ const config = loadConfig();
 const client = new GatewayClient(config);
 const mcp = new McpServer({
   name: "pickleshell",
-  version: "0.1.0",
+  version: "0.1.1",
 });
 
 registerSendChat(mcp, client);
@@ -111,7 +111,7 @@ async function setupPlaywrightTools() {
     await pwServer.connect(pwServerTransport);
 
     const pwClient = new Client(
-      { name: "pickleshell-playwright", version: "0.1.0" },
+      { name: "pickleshell-playwright", version: "0.1.1" },
       { capabilities: {} },
     );
     await pwClient.connect(pwClientTransport);
