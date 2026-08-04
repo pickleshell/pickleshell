@@ -86,6 +86,24 @@ chmod +x "$BIN/chown"
 
 USER=$(id -un)
 export PATH="$BIN:$PATH"
+MATRIX_NODE_EXECUTABLE=$(command -v node)
+[[ -n $MATRIX_NODE_EXECUTABLE && -x $MATRIX_NODE_EXECUTABLE ]]
+[[ $MATRIX_NODE_EXECUTABLE != /opt/pickleshell/runtime/* ]]
+MATRIX_NODE_RESOLVED=$(realpath -e -- "$MATRIX_NODE_EXECUTABLE")
+RUNNER_NODE_RESOLVED=$(node -p 'require("fs").realpathSync(process.execPath)')
+[[ $RUNNER_NODE_RESOLVED == "$MATRIX_NODE_RESOLVED" ]]
+NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+(( NODE_MAJOR >= 20 ))
+TEST_NODE_EXECUTABLE=$MATRIX_NODE_EXECUTABLE
+case $(realpath -e -- "$TEST_NODE_EXECUTABLE") in
+  /usr/bin/node|/usr/local/bin/node) ;;
+  *) TEST_NODE_EXECUTABLE=/usr/bin/node ;;
+esac
+[[ -x $TEST_NODE_EXECUTABLE ]]
+[[ $TEST_NODE_EXECUTABLE != /opt/pickleshell/runtime/* ]]
+release_script() {
+  "$SCRIPT" --node-executable "$TEST_NODE_EXECUTABLE" --terminal-node-executable "$TEST_NODE_EXECUTABLE" "$@"
+}
 
 cat > "$BIN/id" <<'FAKE_ID'
 #!/usr/bin/env bash
@@ -120,7 +138,7 @@ exec /usr/bin/rm "$@"
 FAKE_RM
 chmod +x "$BIN/rm"
 
-"$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$ONE" \
+release_script --source "$SOURCE" --root "$DEPLOY" --commit "$ONE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd
 [[ -L $DEPLOY/active ]]
 [[ $(readlink "$DEPLOY/active") == releases/$ONE ]]
@@ -138,7 +156,7 @@ printf 'two\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt
 git -C "$SOURCE" commit -q -m two
 TWO=$(git -C "$SOURCE" rev-parse HEAD)
-"$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$TWO" \
+release_script --source "$SOURCE" --root "$DEPLOY" --commit "$TWO" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd
 [[ $(readlink "$DEPLOY/active") == releases/$TWO ]]
 [[ $(<"$DEPLOY/state/previous-target") == releases/$ONE ]]
@@ -162,13 +180,13 @@ git -C "$SOURCE" add gateway/version.txt
 git -C "$SOURCE" commit -q -m three
 THREE=$(git -C "$SOURCE" rev-parse HEAD)
 
-PATH="$BIN:$PATH" "$SCRIPT" --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
+PATH="$BIN:$PATH" release_script --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
   --node-executable /usr/bin/node --tunnel-client-executable /usr/local/bin/tunnel-client --dry-run >/dev/null
 
 ISOLATED_DEPLOY=$TMP/isolated-deploy
 ISOLATED_UNITS=$TMP/isolated-units
 mkdir -p "$ISOLATED_UNITS"
-"$SCRIPT" --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$THREE" \
+release_script --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service \
@@ -258,7 +276,7 @@ grep -q '^setfacl -m d:u:release-terminal:rwX -- .*/home/workspace/existing$' "$
 ) >"$TMP/no-acl.out" 2>"$TMP/no-acl.err" && exit 1 || true
 grep -q 'setfacl and getfacl are required to grant terminal workspace access' "$TMP/no-acl.err"
 
-FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+FAKE_SYSTEMCTL_FAIL=1 release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --gateway-service pickleshell-test-gateway.service \
   --mcp-service pickleshell-test-tunnel.service \
@@ -276,7 +294,7 @@ FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$T
 [[ $(<"$FAKE_SYSTEMCTL_LOG") == *'restart pickleshell-test-tunnel.service'* ]]
 
 mkdir -p "$TMP/first-units"
-if FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$TMP/first-fail" --commit "$THREE" \
+if FAKE_SYSTEMCTL_FAIL=1 release_script --source "$SOURCE" --root "$TMP/first-fail" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --gateway-service pickleshell-test-gateway.service --mcp-service pickleshell-test-tunnel.service \
   --terminal-service pickleshell-test-terminal.service --include-terminal \
@@ -293,7 +311,7 @@ printf '%s\n' "$THREE" > "$TMP/first-rollback/releases/$THREE/.release-sha"
 ln -s "releases/$THREE" "$TMP/first-rollback/active"
 printf 'releases/%s\n' "$THREE" > "$TMP/first-rollback/state/current-target"
 printf '' > "$TMP/first-rollback/state/previous-target"
-if "$SCRIPT" --root "$TMP/first-rollback" --rollback --include-terminal \
+if release_script --root "$TMP/first-rollback" --rollback --include-terminal \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service --mcp-service pickleshell-test-tunnel.service \
   --terminal-service pickleshell-test-terminal.service \
@@ -301,50 +319,50 @@ if "$SCRIPT" --root "$TMP/first-rollback" --rollback --include-terminal \
 grep -q 'first activation rollback requires manual backup restore' "$TMP/first-rollback.err"
 [[ $(readlink "$TMP/first-rollback/active") == releases/$THREE ]]
 
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
   --gateway-service 'bad/name.service' >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
   --mcp-service 'bad name.service' >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
   --terminal-service terminal-chatgpt.service >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
   --gateway-service duplicate.service --mcp-service duplicate.service >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
   --config-root '/etc/pickle shell' >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
   --config-root '/etc/@GATEWAY_USER@' >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
   --node-executable '/tmp/node;systemd-directive' >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
   --tunnel-profile '/etc/pickleshell/tunnel-client/../leak.yaml' >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
   --mcp-bind-source /run/other-runtime >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
   --mcp-bind-target /run/other-runtime >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
   --mcp-temp-dir /tmp/pickleshell-mcp >/dev/null 2>&1; then exit 1; fi
 
 UNTRUSTED_EXECUTABLE=$TMP/untrusted-executable
 printf '#!/bin/sh\n' > "$UNTRUSTED_EXECUTABLE"
 chmod 777 "$UNTRUSTED_EXECUTABLE"
-if PATH="$BIN:$PATH" "$SCRIPT" --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
+if PATH="$BIN:$PATH" release_script --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
   --node-executable "$UNTRUSTED_EXECUTABLE" --dry-run >/dev/null 2>&1; then exit 1; fi
 ln -s "$UNTRUSTED_EXECUTABLE" "$TMP/unsafe-executable-link"
-if PATH="$BIN:$PATH" "$SCRIPT" --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
+if PATH="$BIN:$PATH" release_script --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
   --node-executable "$TMP/unsafe-executable-link" --dry-run >/dev/null 2>&1; then exit 1; fi
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --units-dir "$TMP/units/../units" >/dev/null 2>&1; then exit 1; fi
 
 rm "$ISOLATED_UNITS/pickleshell-test-gateway.service"
 ln -s "$TMP/outside-unit" "$ISOLATED_UNITS/pickleshell-test-gateway.service"
-if "$SCRIPT" --profile isolated --root "$ISOLATED_DEPLOY" --rollback \
+if release_script --profile isolated --root "$ISOLATED_DEPLOY" --rollback \
   --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS" >/dev/null 2>&1; then exit 1; fi
 rm "$ISOLATED_UNITS/pickleshell-test-gateway.service"
 
@@ -352,7 +370,7 @@ printf 'four\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt
 git -C "$SOURCE" commit -q -m four
 FOUR=$(git -C "$SOURCE" rev-parse HEAD)
-"$SCRIPT" --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$FOUR" \
+release_script --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$FOUR" \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service \
   --mcp-service pickleshell-test-tunnel.service \
@@ -363,7 +381,7 @@ FOUR=$(git -C "$SOURCE" rev-parse HEAD)
 [[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$FOUR ]]
 [[ $(<"$ISOLATED_DEPLOY/state/previous-target") == releases/$THREE ]]
 FOUR_GATEWAY_UNIT=$(<"$ISOLATED_UNITS/pickleshell-test-gateway.service")
-"$SCRIPT" --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
+release_script --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service \
   --mcp-service pickleshell-test-tunnel.service \
@@ -382,7 +400,7 @@ grep -q 'restart pickleshell-test-terminal.service' "$FAKE_SYSTEMCTL_LOG"
 grep -q 'is-active pickleshell-test-terminal.service' "$FAKE_SYSTEMCTL_LOG"
 
 printf 'releases/invalid-target\n' > "$ISOLATED_DEPLOY/state/previous-target"
-if "$SCRIPT" --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
+if release_script --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service \
   --mcp-service pickleshell-test-tunnel.service \
@@ -392,7 +410,7 @@ if "$SCRIPT" --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
 [[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$THREE ]]
 [[ $(<"$ISOLATED_UNITS/pickleshell-test-gateway.service") == "$THREE_GATEWAY_UNIT" ]]
 
-FAKE_NPM_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \
+FAKE_NPM_FAIL=1 release_script --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1 && exit 1 || true
 [[ $(readlink "$DEPLOY/active") == releases/$TWO ]]
 [[ ! -e $DEPLOY/releases/$FOUR ]]
@@ -405,7 +423,7 @@ ln -s ../npm-package/bin/tool "$SOURCE/gateway/node_modules/.bin/tool"
 git -C "$SOURCE" add gateway/node_modules
 git -C "$SOURCE" commit -q -m 'allow internal release symlinks'
 SAFE_LINK=$(git -C "$SOURCE" rev-parse HEAD)
-"$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$SAFE_LINK" \
+release_script --source "$SOURCE" --root "$DEPLOY" --commit "$SAFE_LINK" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null
 [[ $(readlink "$DEPLOY/active") == releases/$SAFE_LINK ]]
 [[ $(readlink "$DEPLOY/releases/$SAFE_LINK/gateway/node_modules/.bin/tool") == '../npm-package/bin/tool' ]]
@@ -422,7 +440,7 @@ for link_case in external absolute traversal broken; do
   git -C "$SOURCE" add -A gateway/node_modules/.bin/tool
   git -C "$SOURCE" commit -q -m "reject $link_case release symlink"
   UNSAFE_LINK=$(git -C "$SOURCE" rev-parse HEAD)
-  if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$UNSAFE_LINK" \
+  if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$UNSAFE_LINK" \
     --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1; then
     exit 1
   fi
@@ -432,22 +450,22 @@ for link_case in external absolute traversal broken; do
 done
 
 printf 'dirty\n' > "$SOURCE/untracked-file"
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1; then exit 1; fi
 rm "$SOURCE/untracked-file"
 
-if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "0000000000000000000000000000000000000000" \
+if release_script --source "$SOURCE" --root "$DEPLOY" --commit "0000000000000000000000000000000000000000" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1; then exit 1; fi
 
 ln -s "$DEPLOY" "$TMP/deploy-link"
-if "$SCRIPT" --source "$SOURCE" --root "$TMP/deploy-link" --commit "$TWO" \
+if release_script --source "$SOURCE" --root "$TMP/deploy-link" --commit "$TWO" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1; then exit 1; fi
 
-if "$SCRIPT" --source "$SOURCE" --root "$TMP/unsafe/.." --commit "$TWO" \
+if release_script --source "$SOURCE" --root "$TMP/unsafe/.." --commit "$TWO" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1; then exit 1; fi
 
 DRY_ROOT=$TMP/dry-run-root
-"$SCRIPT" --source "$SOURCE" --root "$DRY_ROOT" --commit "$FOUR" \
+release_script --source "$SOURCE" --root "$DRY_ROOT" --commit "$FOUR" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --dry-run >/dev/null
 [[ ! -e "$DRY_ROOT" ]]
 
@@ -484,7 +502,7 @@ if [[ $prefix == */mcp-server ]]; then mkdir -p "$prefix/dist"; printf '// test\
 elif [[ $prefix == */terminal ]]; then mkdir -p "$prefix/bin"; printf '#!/bin/sh\n' > "$prefix/bin/cgroup-launcher"; chmod +x "$prefix/bin/cgroup-launcher"; fi
 FAKE_NPM_ENV_CHECK
 chmod +x "$BIN/npm"
-PATH="$BIN:$PATH" "$SCRIPT" --source "$SOURCE" --root "$isolated_env_deploy" --commit "$FOUR" \
+PATH="$BIN:$PATH" release_script --source "$SOURCE" --root "$isolated_env_deploy" --commit "$FOUR" \
   --gateway-user release-gateway --mcp-user release-mcp --terminal-user release-terminal --no-systemd >/dev/null
 [[ -L "$isolated_env_deploy/active" ]]
 [[ $(readlink "$isolated_env_deploy/active") == "releases/$FOUR" ]]
