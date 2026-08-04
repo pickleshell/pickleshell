@@ -4,12 +4,12 @@ After=local-fs.target
 
 [Service]
 Type=simple
-User=pickleshell-terminal
-Group=pickleshell-terminal
-ExecStart=/usr/bin/node /opt/pickleshell/active/terminal/src/server.js
-Environment=PICKLESHELL_TERMINAL_CONFIG=/etc/pickleshell/terminal.json
-Environment=PICKLESHELL_TERMINAL_SOCKET=/run/pickleshell-terminal/service.sock
-RuntimeDirectory=pickleshell-terminal
+User=@TERMINAL_USER@
+Group=@TERMINAL_GROUP@
+ExecStart=@TERMINAL_NODE_EXECUTABLE@ @ACTIVE_ROOT@/terminal/src/server.js
+Environment=PICKLESHELL_TERMINAL_CONFIG=@CONFIG_ROOT@/terminal.json
+Environment=PICKLESHELL_TERMINAL_SOCKET=@TERMINAL_SOCKET@
+RuntimeDirectory=@TERMINAL_RUNTIME_NAME@
 RuntimeDirectoryMode=0750
 Restart=on-failure
 Delegate=yes
@@ -26,8 +26,8 @@ RestrictAddressFamilies=AF_UNIX
 PrivateTmp=true
 TasksMax=128
 MemoryMax=1G
-ReadWritePaths=/run/pickleshell-terminal
-ReadOnlyPaths=/opt/pickleshell/active/terminal /srv/example/workspace
+ReadWritePaths=@TERMINAL_RUNTIME_DIR@
+ReadOnlyPaths=@ACTIVE_ROOT@/terminal @TERMINAL_WORKSPACE_ROOT@
 
 [Install]
 WantedBy=multi-user.target

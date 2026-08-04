@@ -6,7 +6,13 @@ set -Eeuo pipefail
 usage() {
   printf '%s\n' \
     'Usage: release.sh --source REPOSITORY --root ABSOLUTE_ROOT --commit SHA' \
+    '                   [--profile production|isolated]' \
+    '                   [--config-root PATH] [--state-root PATH] [--cache-root PATH]' \
+    '                   [--workspace-root PATH] [--mcp-runtime-dir PATH] [--terminal-runtime-dir PATH]' \
+    '                   [--terminal-socket PATH] [--node-executable PATH] [--terminal-node-executable PATH]' \
+    '                   [--tunnel-client-executable PATH]' \
     '                   [--gateway-user USER] [--mcp-user USER] [--terminal-user USER]' \
+    '                   [--gateway-group GROUP] [--mcp-group GROUP] [--terminal-group GROUP]' \
     '                   [--gateway-service NAME] [--mcp-service NAME] [--terminal-service NAME]' \
     '                   [--include-terminal] [--no-systemd] [--dry-run] [--rollback]'
 }
@@ -17,12 +23,27 @@ log() { printf 'release: %s\n' "$1"; }
 SOURCE=''
 ROOT=''
 COMMIT=''
+PROFILE=production
 GATEWAY_USER='pickleshell'
 MCP_USER='pickleshell-tunnel'
 TERMINAL_USER='pickleshell-terminal'
+GATEWAY_GROUP='pickleshell'
+MCP_GROUP='pickleshell-tunnel'
+TERMINAL_GROUP='pickleshell-terminal'
 GATEWAY_SERVICE='pickleshell-gateway.service'
 MCP_SERVICE='pickleshell-tunnel.service'
 TERMINAL_SERVICE='pickleshell-terminal.service'
+CONFIG_ROOT='/etc/pickleshell'
+STATE_ROOT='/var/lib/pickleshell'
+CACHE_ROOT='/var/cache/pickleshell'
+WORKSPACE_ROOT='/srv/pickleshell/workspace'
+TERMINAL_WORKSPACE_ROOT='/srv/pickleshell/workspace'
+MCP_RUNTIME_DIR='/run/pickleshell-mcp'
+TERMINAL_RUNTIME_DIR='/run/pickleshell-terminal'
+TERMINAL_SOCKET='/run/pickleshell-terminal/service.sock'
+NODE_EXECUTABLE='/opt/pickleshell/runtime/node-v20.20.2/bin/node'
+TERMINAL_NODE_EXECUTABLE='/usr/bin/node'
+TUNNEL_CLIENT_EXECUTABLE='/usr/local/bin/tunnel-client'
 INCLUDE_TERMINAL=0
 NO_SYSTEMD=0
 DRY_RUN=0
@@ -33,12 +54,46 @@ RESOLVED=''
 
 while (($#)); do
   case "$1" in
+    --profile)
+      PROFILE=${2:-}
+      case "$PROFILE" in
+        production) ;;
+        isolated)
+          ROOT=${ROOT:-/opt/pickleshell-test}
+          GATEWAY_USER=pickleshell-test; MCP_USER=pickleshell-test-tunnel; TERMINAL_USER=pickleshell-test-terminal
+          GATEWAY_GROUP=pickleshell-test; MCP_GROUP=pickleshell-test-tunnel; TERMINAL_GROUP=pickleshell-test-terminal
+          GATEWAY_SERVICE=pickleshell-test-gateway.service; MCP_SERVICE=pickleshell-test-mcp.service; TERMINAL_SERVICE=pickleshell-test-terminal.service
+          CONFIG_ROOT=/etc/pickleshell-test; STATE_ROOT=/var/lib/pickleshell-test; CACHE_ROOT=/var/cache/pickleshell-test
+          WORKSPACE_ROOT=/srv/pickleshell-test/workspace; TERMINAL_WORKSPACE_ROOT=/srv/pickleshell-test/workspace
+          MCP_RUNTIME_DIR=/run/pickleshell-test-mcp; TERMINAL_RUNTIME_DIR=/run/pickleshell-test-terminal
+          TERMINAL_SOCKET=/run/pickleshell-test-terminal/service.sock
+          NODE_EXECUTABLE=/opt/pickleshell-test/runtime/node/bin/node
+          TERMINAL_NODE_EXECUTABLE=/opt/pickleshell-test/runtime/node/bin/node
+          TUNNEL_CLIENT_EXECUTABLE=/opt/pickleshell-test/runtime/tunnel-client
+          ;;
+        *) usage >&2; die 'profile must be production or isolated' ;;
+      esac
+      shift 2 ;;
     --source) SOURCE=${2:-}; shift 2 ;;
     --root) ROOT=${2:-}; shift 2 ;;
     --commit) COMMIT=${2:-}; shift 2 ;;
     --gateway-user) GATEWAY_USER=${2:-}; shift 2 ;;
     --mcp-user) MCP_USER=${2:-}; shift 2 ;;
     --terminal-user) TERMINAL_USER=${2:-}; shift 2 ;;
+    --gateway-group) GATEWAY_GROUP=${2:-}; shift 2 ;;
+    --mcp-group) MCP_GROUP=${2:-}; shift 2 ;;
+    --terminal-group) TERMINAL_GROUP=${2:-}; shift 2 ;;
+    --config-root) CONFIG_ROOT=${2:-}; shift 2 ;;
+    --state-root) STATE_ROOT=${2:-}; shift 2 ;;
+    --cache-root) CACHE_ROOT=${2:-}; shift 2 ;;
+    --workspace-root) WORKSPACE_ROOT=${2:-}; shift 2 ;;
+    --terminal-workspace-root) TERMINAL_WORKSPACE_ROOT=${2:-}; shift 2 ;;
+    --mcp-runtime-dir) MCP_RUNTIME_DIR=${2:-}; shift 2 ;;
+    --terminal-runtime-dir) TERMINAL_RUNTIME_DIR=${2:-}; shift 2 ;;
+    --terminal-socket) TERMINAL_SOCKET=${2:-}; shift 2 ;;
+    --node-executable) NODE_EXECUTABLE=${2:-}; shift 2 ;;
+    --terminal-node-executable) TERMINAL_NODE_EXECUTABLE=${2:-}; shift 2 ;;
+    --tunnel-client-executable) TUNNEL_CLIENT_EXECUTABLE=${2:-}; shift 2 ;;
     --gateway-service) GATEWAY_SERVICE=${2:-}; shift 2 ;;
     --mcp-service|--tunnel-service) MCP_SERVICE=${2:-}; shift 2 ;;
     --terminal-service) TERMINAL_SERVICE=${2:-}; shift 2 ;;
@@ -53,11 +108,58 @@ while (($#)); do
   esac
 done
 
+validate_path() {
+  local value=$1 label=$2
+  [[ $value = /* && $value != / && $value != /opt && $value != /etc && $value != /usr && $value != /var && $value != /srv && $value != /run && $value != /home ]] || die "$label must be a specific absolute path"
+  [[ $value != *'..'* && $value != *[[:space:]@]* ]] || die "$label contains an unsafe path component"
+  [[ $value != *[\;\|\&\$\(\)\<\>\\\"\'\`\*\?\[\]]* ]] || die "$label contains an unsafe character"
+  if [[ $PROFILE == isolated ]]; then
+    case "$label" in
+      app-root|node-executable|terminal-node-executable|tunnel-client-executable) [[ $value == /opt/pickleshell-test || $value == /opt/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
+      config-root) [[ $value == /etc/pickleshell-test || $value == /etc/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
+      state-root) [[ $value == /var/lib/pickleshell-test || $value == /var/lib/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
+      cache-root) [[ $value == /var/cache/pickleshell-test || $value == /var/cache/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
+      workspace-root|terminal-workspace-root) [[ $value == /srv/pickleshell-test || $value == /srv/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
+      mcp-runtime-dir|terminal-runtime-dir|terminal-socket) [[ $value == /run/pickleshell-test-* || $value == /run/pickleshell-test-*/* ]] || die "$label is outside the isolated prefix" ;;
+    esac
+  fi
+}
+
+validate_name() {
+  local value=$1 label=$2
+  [[ $value =~ ^[a-z_][a-z0-9_-]*$ && $value != root ]] || die "unsafe $label name"
+}
+
+validate_path "$ROOT" app-root
+validate_path "$CONFIG_ROOT" config-root
+validate_path "$STATE_ROOT" state-root
+validate_path "$CACHE_ROOT" cache-root
+validate_path "$WORKSPACE_ROOT" workspace-root
+validate_path "$TERMINAL_WORKSPACE_ROOT" terminal-workspace-root
+validate_path "$MCP_RUNTIME_DIR" mcp-runtime-dir
+validate_path "$TERMINAL_RUNTIME_DIR" terminal-runtime-dir
+validate_path "$TERMINAL_SOCKET" terminal-socket
+validate_path "$NODE_EXECUTABLE" node-executable
+validate_path "$TERMINAL_NODE_EXECUTABLE" terminal-node-executable
+validate_path "$TUNNEL_CLIENT_EXECUTABLE" tunnel-client-executable
+[[ $MCP_RUNTIME_DIR == /run/* && $TERMINAL_RUNTIME_DIR == /run/* ]] || die 'runtime directories must be under /run'
+[[ $MCP_RUNTIME_DIR =~ ^/run/[A-Za-z0-9_.-]+$ && $TERMINAL_RUNTIME_DIR =~ ^/run/[A-Za-z0-9_.-]+$ ]] || die 'runtime directories must be single safe names under /run'
+[[ $TERMINAL_SOCKET == "$TERMINAL_RUNTIME_DIR"/* ]] || die 'terminal socket must be under terminal runtime directory'
+[[ $MCP_RUNTIME_DIR != "$TERMINAL_RUNTIME_DIR" ]] || die 'runtime directories must be distinct'
+[[ $ROOT != "$CONFIG_ROOT" && $ROOT != "$STATE_ROOT" && $ROOT != "$CACHE_ROOT" && $ROOT != "$WORKSPACE_ROOT" ]] || die 'deployment roots must be distinct'
+validate_name "$GATEWAY_USER" gateway-user; validate_name "$MCP_USER" mcp-user; validate_name "$TERMINAL_USER" terminal-user
+validate_name "$GATEWAY_GROUP" gateway-group; validate_name "$MCP_GROUP" mcp-group; validate_name "$TERMINAL_GROUP" terminal-group
+if [[ $PROFILE == isolated ]]; then
+  [[ $GATEWAY_USER == pickleshell-test && $MCP_USER == pickleshell-test-tunnel && $TERMINAL_USER == pickleshell-test-terminal ]] || die 'isolated profile requires its dedicated service users'
+  [[ $GATEWAY_GROUP == pickleshell-test && $MCP_GROUP == pickleshell-test-tunnel && $TERMINAL_GROUP == pickleshell-test-terminal ]] || die 'isolated profile requires its dedicated service groups'
+fi
+
 [[ $ROOT = /* ]] || die 'root must be an absolute path'
 [[ $ROOT != / && $ROOT != /etc && $ROOT != /usr && $ROOT != /var && $ROOT != /home ]] || die 'root is too broad'
 [[ $ROOT != */.. && $ROOT != */../* && $ROOT != *'/.' ]] || die 'root contains an unsafe path component'
 [[ $SYSTEMCTL != */* || $SYSTEMCTL = /* ]] || die 'unsafe systemctl command path'
 [[ $UNITS_DIR = /* && $UNITS_DIR != / && $UNITS_DIR != /etc && $UNITS_DIR != /usr ]] || die 'unsafe units directory'
+[[ $UNITS_DIR != *'..'* && $UNITS_DIR != *[[:space:]@]* ]] || die 'unsafe units directory'
 if [[ -e $UNITS_DIR ]]; then
   [[ -d $UNITS_DIR && ! -L $UNITS_DIR ]] || die 'units directory must be a real directory'
 else
@@ -69,7 +171,7 @@ fi
 
 validate_service_name() {
   local name=$1 label=$2
-  [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*\.service$ ]] || die "unsafe $label service name"
+  [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.service$ ]] || die "unsafe $label service name"
   [[ $name != *..* ]] || die "unsafe $label service name"
   case "$name" in
     pickleshell-terminal-chatgpt.service|terminal-chatgpt.service) die "protected $label service name" ;;
@@ -98,8 +200,13 @@ else
   SOURCE=$(realpath -e -- "$SOURCE") || die 'source does not exist'
   [[ -d $SOURCE/.git ]] || die 'source is not a Git worktree'
 fi
-mkdir -p -- "$ROOT"
-ROOT=$(realpath -e -- "$ROOT") || die 'cannot resolve root'
+if [[ -e $ROOT ]]; then
+  ROOT=$(realpath -e -- "$ROOT") || die 'cannot resolve root'
+else
+  root_parent=$(realpath -e -- "$(dirname -- "$ROOT")") || die 'root parent does not exist'
+  [[ ! -L $root_parent ]] || die 'root parent must not be a symlink'
+  ROOT=$root_parent/$(basename -- "$ROOT")
+fi
 [[ -z $SOURCE || $ROOT != "$SOURCE" ]] || die 'source and deployment root must be different'
 
 if ((ROLLBACK)); then
@@ -134,16 +241,15 @@ WORK_RELEASE="${RELEASES:-}/.staging-$RESOLVED-$$"
 if ((ROLLBACK)); then
   [[ -d $RELEASES && ! -L $RELEASES ]] || die 'rollback releases directory is missing or unsafe'
 else
+  if ((DRY_RUN)); then
+    log "would stage $RESOLVED under $RELEASE and activate it"
+    exit 0
+  fi
   mkdir -p -- "$RELEASES" "$STATE"
 fi
 [[ ! -e $RELEASE || -L $RELEASE ]] || die 'release path exists and is not a directory'
 [[ ! -e $WORK_RELEASE || -L $WORK_RELEASE ]] || die 'staging path exists and is not a directory'
 trap 'rm -rf -- "$WORK_RELEASE"' EXIT
-
-if ((DRY_RUN && !ROLLBACK)); then
-  log "would stage $RESOLVED under $RELEASE and activate it"
-  exit 0
-fi
 
 run() {
   if ((DRY_RUN)); then
@@ -173,7 +279,7 @@ required_files() {
 stage() {
   log "staging commit $RESOLVED"
   mkdir -p -- "$WORK_RELEASE"
-  run git -C "$SOURCE" archive --format=tar "$RESOLVED" 'gateway' 'mcp-server' 'terminal' | run tar -xf - -C "$WORK_RELEASE"
+  run git -C "$SOURCE" archive --format=tar "$RESOLVED" 'deploy/systemd' 'gateway' 'mcp-server' 'terminal' | run tar -xf - -C "$WORK_RELEASE"
   [[ -f $WORK_RELEASE/gateway/package.json && -f $WORK_RELEASE/mcp-server/package.json && -f $WORK_RELEASE/terminal/package.json ]] || die 'archive is missing a required component'
   while IFS= read -r -d '' path; do
     [[ ! -L $path ]] || die 'archive contains an unsafe symbolic link'
@@ -203,42 +309,92 @@ unit_for() {
   esac
 }
 
+render_unit() {
+  local component=$1 template=$2 contents token value
+  contents=$(<"$template")
+  for token in APP_ROOT ACTIVE_ROOT CONFIG_ROOT STATE_ROOT CACHE_ROOT WORKSPACE_ROOT \
+    TERMINAL_WORKSPACE_ROOT \
+    NODE_BIN_DIR NODE_EXECUTABLE TERMINAL_NODE_EXECUTABLE TUNNEL_CLIENT_EXECUTABLE GATEWAY_USER GATEWAY_GROUP \
+    MCP_USER MCP_GROUP TERMINAL_USER TERMINAL_GROUP GATEWAY_SERVICE MCP_RUNTIME_NAME \
+    TERMINAL_RUNTIME_NAME TERMINAL_RUNTIME_DIR TERMINAL_SOCKET; do
+    case "$token" in
+      APP_ROOT) value=$ROOT; ACTIVE_ROOT="$ROOT/active" ;;
+      ACTIVE_ROOT) value=$ACTIVE_ROOT ;;
+      CONFIG_ROOT) value=$CONFIG_ROOT ;;
+      STATE_ROOT) value=$STATE_ROOT ;;
+      CACHE_ROOT) value=$CACHE_ROOT ;;
+      WORKSPACE_ROOT) value=$WORKSPACE_ROOT ;;
+      TERMINAL_WORKSPACE_ROOT) value=$TERMINAL_WORKSPACE_ROOT ;;
+      NODE_BIN_DIR) value=$NODE_BIN_DIR ;;
+      NODE_EXECUTABLE) value=$NODE_EXECUTABLE ;;
+      TERMINAL_NODE_EXECUTABLE) value=$TERMINAL_NODE_EXECUTABLE ;;
+      TUNNEL_CLIENT_EXECUTABLE) value=$TUNNEL_CLIENT_EXECUTABLE ;;
+      GATEWAY_USER) value=$GATEWAY_USER ;;
+      GATEWAY_GROUP) value=$GATEWAY_GROUP ;;
+      MCP_USER) value=$MCP_USER ;;
+      MCP_GROUP) value=$MCP_GROUP ;;
+      TERMINAL_USER) value=$TERMINAL_USER ;;
+      TERMINAL_GROUP) value=$TERMINAL_GROUP ;;
+      GATEWAY_SERVICE) value=$GATEWAY_SERVICE ;;
+      MCP_RUNTIME_NAME) value=${MCP_RUNTIME_DIR#/run/} ;;
+      TERMINAL_RUNTIME_NAME) value=${TERMINAL_RUNTIME_DIR#/run/} ;;
+      TERMINAL_RUNTIME_DIR) value=$TERMINAL_RUNTIME_DIR ;;
+      TERMINAL_SOCKET) value=$TERMINAL_SOCKET ;;
+    esac
+    contents=${contents//"@$token@"/"$value"}
+  done
+  [[ $contents != *'@'* ]] || die "unresolved placeholder in $component unit"
+  if [[ $PROFILE == isolated ]]; then
+    [[ $contents != *'/opt/pickleshell/'* && $contents != *'/etc/pickleshell/'* && $contents != *'/var/lib/pickleshell/'* && $contents != *'/var/cache/pickleshell/'* && $contents != *'/srv/pickleshell/'* && $contents != *'User=pickleshell'* && $contents != *'User=pickleshell-tunnel'* && $contents != *'User=pickleshell-terminal'* && $contents != *'Group=pickleshell'* && $contents != *'Group=pickleshell-tunnel'* && $contents != *'Group=pickleshell-terminal'* && $contents != *'pickleshell-gateway.service'* ]] || die "production value leaked into isolated $component unit"
+  fi
+  printf '%s\n' "$contents"
+}
+
 install_units() {
   ((NO_SYSTEMD)) && return 0
   [[ $(id -u) -eq 0 || $SYSTEMCTL != systemctl ]] || die 'systemd installation requires root'
+  for group in "$GATEWAY_GROUP" "$MCP_GROUP" "$TERMINAL_GROUP"; do
+    getent group "$group" >/dev/null 2>&1 || die "service group does not exist: $group"
+  done
   local backup_dir=$STATE/unit-backups
-  mkdir -p -- "$backup_dir"
+  [[ ! -e $backup_dir || ! -L $backup_dir ]] || die 'unit backup directory is a symlink'
+  mkdir -m 0700 -p -- "$backup_dir"
+  chmod 0700 -- "$backup_dir"
+  [[ -d $backup_dir && ! -L $backup_dir ]] || die 'unit backup directory is unsafe'
   local component unit source_unit target
+  NODE_BIN_DIR=$(dirname -- "$NODE_EXECUTABLE")
   for component in gateway mcp; do
     unit=$(unit_for "$component")
-    [[ $component == gateway ]] && source_unit=$RELEASE/gateway/systemd/pickleshell-gateway.service || source_unit=$RELEASE/mcp-server/systemd/pickleshell-tunnel.service
+    [[ $component == gateway ]] && source_unit=$RELEASE/deploy/systemd/pickleshell-gateway.service.in || source_unit=$RELEASE/deploy/systemd/pickleshell-tunnel.service.in
     [[ -f $source_unit && ! -L $source_unit ]] || { log "missing unit file for $component" >&2; return 1; }
     local unit_contents
-    unit_contents=$(<"$source_unit")
-    unit_contents=${unit_contents//\/opt\/pickleshell/$ROOT}
+    unit_contents=$(render_unit "$component" "$source_unit")
     target=$UNITS_DIR/$unit
     [[ ! -L $target ]] || die "unit path is a symlink: $unit"
     [[ ! -e $target || -f $target ]] || die "unit path is not a regular file: $unit"
     if [[ -e $target ]]; then
-      run cp -p -- "$target" "$backup_dir/$unit" || return 1
+      [[ ! -L $backup_dir/$unit ]] || die "unit backup path is a symlink: $unit"
+      run install -m 0600 -- "$target" "$backup_dir/$unit" || return 1
     else
+      [[ ! -L $backup_dir/$unit ]] || die "unit backup path is a symlink: $unit"
       run rm -f -- "$backup_dir/$unit" || return 1
     fi
     printf '%s\n' "$unit_contents" | run install -m 0644 /dev/stdin "$target" || return 1
   done
   if ((INCLUDE_TERMINAL)); then
     unit=$(unit_for terminal)
-    source_unit=$RELEASE/terminal/systemd/pickleshell-terminal.service
+    source_unit=$RELEASE/deploy/systemd/pickleshell-terminal.service.in
     [[ -f $source_unit && ! -L $source_unit ]] || { log 'missing unit file for terminal' >&2; return 1; }
     local unit_contents
-    unit_contents=$(<"$source_unit")
-    unit_contents=${unit_contents//\/opt\/pickleshell/$ROOT}
+    unit_contents=$(render_unit terminal "$source_unit")
     target=$UNITS_DIR/$unit
     [[ ! -L $target ]] || die "unit path is a symlink: $unit"
     [[ ! -e $target || -f $target ]] || die "unit path is not a regular file: $unit"
     if [[ -e $target ]]; then
-      run cp -p -- "$target" "$backup_dir/$unit" || return 1
+      [[ ! -L $backup_dir/$unit ]] || die "unit backup path is a symlink: $unit"
+      run install -m 0600 -- "$target" "$backup_dir/$unit" || return 1
     else
+      [[ ! -L $backup_dir/$unit ]] || die "unit backup path is a symlink: $unit"
       run rm -f -- "$backup_dir/$unit" || return 1
     fi
     printf '%s\n' "$unit_contents" | run install -m 0644 /dev/stdin "$target" || return 1
@@ -249,11 +405,14 @@ install_units() {
 restore_units() {
   ((NO_SYSTEMD)) && return 0
   local backup_dir=$STATE/unit-backups
+  [[ ! -L $backup_dir ]] || die 'unit backup directory is a symlink'
   local component unit backup target
   for component in gateway mcp; do
     unit=$(unit_for "$component")
     backup=$backup_dir/$unit
     target=$UNITS_DIR/$unit
+    [[ ! -L $target ]] || die "unit path is a symlink: $unit"
+    [[ ! -L $backup ]] || die "unit backup path is a symlink: $unit"
     if [[ -f $backup && ! -L $backup ]]; then
       run install -m 0644 -- "$backup" "$target" || return 1
     else
@@ -264,6 +423,8 @@ restore_units() {
     unit=$(unit_for terminal)
     backup=$backup_dir/$unit
     target=$UNITS_DIR/$unit
+    [[ ! -L $target ]] || die "unit path is a symlink: $unit"
+    [[ ! -L $backup ]] || die "unit backup path is a symlink: $unit"
     if [[ -f $backup && ! -L $backup ]]; then
       run install -m 0644 -- "$backup" "$target" || return 1
     else

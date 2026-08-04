@@ -12,6 +12,7 @@ BIN=$TMP/bin
 UNITS=$TMP/units
 mkdir -p "$SOURCE" "$BIN" "$UNITS"
 mkdir -p "$DEPLOY/gateway" "$DEPLOY/mcp-server" "$DEPLOY/terminal-chatgpt"
+mkdir -p "$SOURCE/deploy/systemd"
 printf 'operator state\n' > "$DEPLOY/gateway/operator-state"
 printf 'operator state\n' > "$DEPLOY/mcp-server/operator-state"
 printf 'separately managed\n' > "$DEPLOY/terminal-chatgpt/marker"
@@ -27,6 +28,7 @@ done
 cp "$ROOT_DIR/gateway/systemd/pickleshell-gateway.service" "$SOURCE/gateway/systemd/"
 cp "$ROOT_DIR/mcp-server/systemd/pickleshell-tunnel.service" "$SOURCE/mcp-server/systemd/"
 cp "$ROOT_DIR/terminal/systemd/pickleshell-terminal.service" "$SOURCE/terminal/systemd/"
+cp "$ROOT_DIR/deploy/systemd/"*.in "$SOURCE/deploy/systemd/"
 printf 'one\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add .
 git -C "$SOURCE" commit -q -m one
@@ -88,6 +90,33 @@ printf 'three\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt
 git -C "$SOURCE" commit -q -m three
 THREE=$(git -C "$SOURCE" rev-parse HEAD)
+
+ISOLATED_DEPLOY=$TMP/isolated-deploy
+ISOLATED_UNITS=$TMP/isolated-units
+mkdir -p "$ISOLATED_UNITS"
+"$SCRIPT" --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$THREE" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
+  --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
+  --gateway-service pickleshell-test-gateway.service \
+  --mcp-service pickleshell-test-mcp.service \
+  --terminal-service pickleshell-test-terminal.service --include-terminal \
+  --config-root /etc/pickleshell-test --state-root /var/lib/pickleshell-test \
+  --cache-root /var/cache/pickleshell-test --workspace-root /srv/pickleshell-test/workspace \
+  --terminal-workspace-root /srv/pickleshell-test/workspace \
+  --mcp-runtime-dir /run/pickleshell-test-mcp --terminal-runtime-dir /run/pickleshell-test-terminal \
+  --terminal-socket /run/pickleshell-test-terminal/service.sock \
+  --node-executable /opt/pickleshell-test/runtime/node/bin/node \
+  --tunnel-client-executable /opt/pickleshell-test/runtime/tunnel-client \
+  --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS"
+for unit in pickleshell-test-gateway.service pickleshell-test-mcp.service pickleshell-test-terminal.service; do
+  [[ -s "$ISOLATED_UNITS/$unit" ]]
+  ! grep -E '/opt/pickleshell/|/etc/pickleshell/|/var/lib/pickleshell/|/var/cache/pickleshell/|/srv/pickleshell/|User=pickleshell($|[^-])|User=pickleshell-tunnel|User=pickleshell-terminal|pickleshell-gateway.service' "$ISOLATED_UNITS/$unit"
+  grep -q 'NoNewPrivileges=true' "$ISOLATED_UNITS/$unit"
+done
+grep -q 'After=network-online.target pickleshell-test-gateway.service' "$ISOLATED_UNITS/pickleshell-test-mcp.service"
+grep -q 'Environment=PICKLESHELL_TERMINAL_SOCKET=/run/pickleshell-test-terminal/service.sock' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+[[ ! -e "$ISOLATED_UNITS/terminal-chatgpt.service" ]]
+
 FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --gateway-service pickleshell-test-gateway.service \
@@ -128,6 +157,21 @@ if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
   --gateway-service duplicate.service --mcp-service duplicate.service >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
+  --config-root '/etc/pickle shell' >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
+  --config-root '/etc/@GATEWAY_USER@' >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
+  --units-dir "$TMP/units/../units" >/dev/null 2>&1; then exit 1; fi
+
+rm "$ISOLATED_UNITS/pickleshell-test-gateway.service"
+ln -s "$TMP/outside-unit" "$ISOLATED_UNITS/pickleshell-test-gateway.service"
+if "$SCRIPT" --profile isolated --root "$ISOLATED_DEPLOY" --rollback \
+  --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS" >/dev/null 2>&1; then exit 1; fi
+rm "$ISOLATED_UNITS/pickleshell-test-gateway.service"
 
 printf 'four\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt
@@ -152,5 +196,10 @@ if "$SCRIPT" --source "$SOURCE" --root "$TMP/deploy-link" --commit "$TWO" \
 
 if "$SCRIPT" --source "$SOURCE" --root "$TMP/unsafe/.." --commit "$TWO" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1; then exit 1; fi
+
+DRY_ROOT=$TMP/dry-run-root
+"$SCRIPT" --source "$SOURCE" --root "$DRY_ROOT" --commit "$FOUR" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --dry-run >/dev/null
+[[ ! -e "$DRY_ROOT" ]]
 
 printf 'deployment release tests passed\n'

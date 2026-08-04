@@ -1,0 +1,51 @@
+[Unit]
+Description=PickleShell Secure MCP Tunnel
+After=network-online.target @GATEWAY_SERVICE@
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@MCP_USER@
+Group=@MCP_GROUP@
+WorkingDirectory=@ACTIVE_ROOT@/mcp-server
+Environment=PATH=@NODE_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=@STATE_ROOT@/mcp-home
+Environment=XDG_CACHE_HOME=@CACHE_ROOT@/mcp
+Environment=PLAYWRIGHT_BROWSERS_PATH=@CACHE_ROOT@/ms-playwright
+EnvironmentFile=@CONFIG_ROOT@/mcp.env
+ExecStart=@TUNNEL_CLIENT_EXECUTABLE@ run --profile-file @CONFIG_ROOT@/tunnel-client/pickleshell.yaml
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+TasksMax=128
+MemoryMax=1G
+RuntimeDirectory=@MCP_RUNTIME_NAME@
+RuntimeDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+ReadWritePaths=@STATE_ROOT@/mcp-home
+ReadWritePaths=@CACHE_ROOT@/mcp
+ReadOnlyPaths=@APP_ROOT@
+ReadOnlyPaths=@CONFIG_ROOT@/tunnel-client/pickleshell.yaml
+ReadOnlyPaths=@CONFIG_ROOT@/control-plane.key
+InaccessiblePaths=-@CONFIG_ROOT@/gateway.env
+InaccessiblePaths=-@CONFIG_ROOT@/opencode.jsonc
+InaccessiblePaths=-@CONFIG_ROOT@/config.json
+InaccessiblePaths=-@CONFIG_ROOT@/mcp.env
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

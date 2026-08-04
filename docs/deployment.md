@@ -41,30 +41,33 @@ Use `--rollback` to repeat the recorded rollback. `--dry-run` validates inputs
 without staging, and `--no-systemd --root <temporary-root>` supports isolated
 tests without host systemd. Do not pass production paths to an isolated test.
 
-For an isolated systemd rehearsal, use a temporary deployment root and units
-directory, a fake or temporary systemctl contour, and distinct service names.
-The source unit filenames remain the shipped names; only the installed targets
-change. For example:
+For an isolated systemd rehearsal, use the built-in `isolated` profile. It
+renders every selected unit with the dedicated test roots, users, runtime
+directories, executable paths, and service dependency; the three test users
+and groups must already exist. Use a fake or temporary systemctl contour and
+keep the units directory separate from `/etc/systemd/system`:
 
 ```bash
 deploy/release.sh \
   --source /path/to/clean/checkout \
-  --root /tmp/pickleshell-test-root \
+  --profile isolated \
+  --root /opt/pickleshell-test \
   --commit <full-git-sha> \
-  --gateway-user test-gateway-user \
-  --mcp-user test-mcp-user \
-  --terminal-user test-terminal-user \
-  --gateway-service pickleshell-test-gateway.service \
-  --mcp-service pickleshell-test-mcp.service \
-  --terminal-service pickleshell-test-terminal.service \
   --include-terminal \
   --systemctl /path/to/fake-systemctl \
   --units-dir /tmp/pickleshell-test-units
 ```
 
-Service names must be distinct safe `.service` basenames. This command does
-not select or overwrite the shipped production names, and separately managed
-terminal profile units must remain outside the selected names.
+The isolated profile uses `/opt/pickleshell-test`, `/etc/pickleshell-test`,
+`/var/lib/pickleshell-test`, `/var/cache/pickleshell-test`,
+`/srv/pickleshell-test/workspace`, `/run/pickleshell-test-mcp`, and
+`/run/pickleshell-test-terminal/service.sock`, with `pickleshell-test`,
+`pickleshell-test-tunnel`, and `pickleshell-test-terminal` identities and
+`pickleshell-test-gateway.service` as the MCP dependency. Remove
+`--no-systemd` for a rehearsal using the supplied fake systemctl. Service
+names must be distinct safe `.service` basenames. The profile refuses paths
+outside its dedicated prefixes and never selects the production or separately
+managed ChatGPT terminal units.
 
 The script refuses dirty source, unresolved or mismatched commits, missing
 files/users, unsafe roots or symlinks, incomplete builds, and invalid rollback
