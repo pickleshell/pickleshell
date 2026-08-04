@@ -330,11 +330,30 @@ run() {
 
 as_user() {
   local user=$1; shift
+  local build_env_root="$WORK_RELEASE/.build-env/$user"
+  local isolated_home="$build_env_root/home"
+  local isolated_tmp="$build_env_root/tmp"
+  local isolated_cache="$build_env_root/npm-cache"
+  [[ $(id -u) -eq 0 ]] || [[ $(id -un) == "$user" ]] || die "run as $user or root to build components"
+  run mkdir -p -- "$isolated_home" "$isolated_tmp" "$isolated_cache"
   if [[ $(id -u) -eq 0 ]]; then
-    run runuser -u "$user" -- "$@"
+    run chown -hR -- "$user" "$build_env_root"
+  fi
+  run chmod 0700 -- "$build_env_root" "$isolated_home" "$isolated_tmp" "$isolated_cache"
+  if [[ $(id -u) -eq 0 ]]; then
+    run runuser -u "$user" -- env \
+      PATH="$PATH" \
+      HOME="$isolated_home" \
+      TMPDIR="$isolated_tmp" \
+      NPM_CONFIG_CACHE="$isolated_cache" \
+      "$@"
   else
-    [[ $(id -un) == "$user" ]] || die "run as $user or root to build components"
-    run "$@"
+    run env \
+      PATH="$PATH" \
+      HOME="$isolated_home" \
+      TMPDIR="$isolated_tmp" \
+      NPM_CONFIG_CACHE="$isolated_cache" \
+      "$@"
   fi
 }
 
@@ -424,12 +443,13 @@ build() {
   prepare_component gateway
   prepare_component mcp-server
   prepare_component terminal
-  as_user "$GATEWAY_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/gateway" ci --omit=dev
-  as_user "$MCP_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/mcp-server" ci
-  as_user "$MCP_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/mcp-server" run build
-  as_user "$TERMINAL_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/terminal" ci
-  as_user "$TERMINAL_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/terminal" run build
+  as_user "$GATEWAY_USER" npm --prefix "$WORK_RELEASE/gateway" ci --omit=dev
+  as_user "$MCP_USER" npm --prefix "$WORK_RELEASE/mcp-server" ci
+  as_user "$MCP_USER" npm --prefix "$WORK_RELEASE/mcp-server" run build
+  as_user "$TERMINAL_USER" npm --prefix "$WORK_RELEASE/terminal" ci
+  as_user "$TERMINAL_USER" npm --prefix "$WORK_RELEASE/terminal" run build
   [[ -f $WORK_RELEASE/mcp-server/dist/index.js && -x $WORK_RELEASE/terminal/bin/cgroup-launcher ]] || die 'component build did not produce required files'
+  rm -rf -- "$WORK_RELEASE/.build-env"
   harden_release
   mv -T -- "$WORK_RELEASE" "$RELEASE"
 }

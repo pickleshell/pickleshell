@@ -62,16 +62,24 @@ for component in gateway mcp-server terminal; do chmod a-w "$destination/$compon
 FAKE_TAR
 chmod +x "$BIN/tar"
 
+FAKE_CHOWN_LOG=$TMP/chown.log
+export FAKE_CHOWN_LOG
 cat > "$BIN/chown" <<'FAKE_CHOWN'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-if [[ $1 == -h ]]; then shift; fi
-[[ $1 == -- ]]
-shift
+while (($#)); do
+  case "$1" in
+    -h|-R|-hR|-Rh) shift ;;
+    --) shift; break ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
 owner=$1
 shift
 [[ $# -eq 1 ]]
 path=$1
+printf '%s %s\n' "$owner" "$path" >> "${FAKE_CHOWN_LOG:-/dev/null}"
 [[ $owner == root:root ]] && chmod a-w -- "$path" || chmod u+rwx -- "$path"
 FAKE_CHOWN
 chmod +x "$BIN/chown"
@@ -84,7 +92,7 @@ cat > "$BIN/id" <<'FAKE_ID'
 set -Eeuo pipefail
 if [[ $1 == -u ]]; then printf '0\n'; exit 0; fi
 case "$1" in
-  pickleshell-test|pickleshell-test-tunnel|pickleshell-test-terminal) exit 0 ;;
+  pickleshell-test|pickleshell-test-tunnel|pickleshell-test-terminal|release-gateway|release-mcp|release-terminal) exit 0 ;;
   *) exec /usr/bin/id "$@" ;;
 esac
 FAKE_ID
@@ -94,7 +102,9 @@ cat > "$BIN/runuser" <<'FAKE_RUNUSER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 [[ $1 == -u && $3 == -- ]]
+user=$2
 shift 3
+export FAKE_RUNUSER_USER=$user
 exec "$@"
 FAKE_RUNUSER
 chmod +x "$BIN/runuser"
@@ -366,5 +376,66 @@ DRY_ROOT=$TMP/dry-run-root
 "$SCRIPT" --source "$SOURCE" --root "$DRY_ROOT" --commit "$FOUR" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --dry-run >/dev/null
 [[ ! -e "$DRY_ROOT" ]]
+
+isolated_env_deploy=$TMP/isolated-env-deploy
+NPM_ENV_LOG=$TMP/npm-env.log
+export NPM_ENV_LOG
+cat > "$BIN/npm" <<'FAKE_NPM_ENV_CHECK'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+prefix=''
+while (($#)); do
+  if [[ $1 == --prefix ]]; then prefix=$2; shift 2; else shift; fi
+done
+[[ -n $prefix ]]
+[[ -w $prefix ]] || { printf 'env-check: prefix not writable: %s\n' "$prefix" >&2; exit 13; }
+case "$prefix" in
+  */gateway) expected_user=release-gateway ;;
+  */mcp-server) expected_user=release-mcp ;;
+  */terminal) expected_user=release-terminal ;;
+  *) printf 'env-check: unexpected prefix: %s\n' "$prefix" >&2; exit 13 ;;
+esac
+release_root=${prefix%/*}
+[[ ${FAKE_RUNUSER_USER:-} == "$expected_user" ]] || { printf 'env-check: wrong runuser target for %s: %s\n' "$prefix" "${FAKE_RUNUSER_USER:-}" >&2; exit 13; }
+[[ ${HOME:-} == "$release_root/.build-env/$expected_user/home" ]] || { printf 'env-check: bad HOME: %s\n' "${HOME:-}" >&2; exit 13; }
+[[ ${TMPDIR:-} == "$release_root/.build-env/$expected_user/tmp" ]] || { printf 'env-check: bad TMPDIR: %s\n' "${TMPDIR:-}" >&2; exit 13; }
+[[ ${NPM_CONFIG_CACHE:-} == "$release_root/.build-env/$expected_user/npm-cache" ]] || { printf 'env-check: bad NPM_CONFIG_CACHE: %s\n' "${NPM_CONFIG_CACHE:-}" >&2; exit 13; }
+[[ "$HOME" != /nonexistent ]] || { printf 'env-check: HOME still /nonexistent\n' >&2; exit 13; }
+for dir in "$HOME" "$TMPDIR" "$NPM_CONFIG_CACHE"; do
+  [[ -d $dir ]] || { printf 'env-check: missing dir: %s\n' "$dir" >&2; exit 13; }
+  [[ -w $dir ]] || { printf 'env-check: dir not writable: %s\n' "$dir" >&2; exit 13; }
+done
+printf '%s %s %s %s\n' "$expected_user" "$HOME" "$TMPDIR" "$NPM_CONFIG_CACHE" >> "${NPM_ENV_LOG:?}"
+if [[ $prefix == */mcp-server ]]; then mkdir -p "$prefix/dist"; printf '// test\n' > "$prefix/dist/index.js"
+elif [[ $prefix == */terminal ]]; then mkdir -p "$prefix/bin"; printf '#!/bin/sh\n' > "$prefix/bin/cgroup-launcher"; chmod +x "$prefix/bin/cgroup-launcher"; fi
+FAKE_NPM_ENV_CHECK
+chmod +x "$BIN/npm"
+PATH="$BIN:$PATH" "$SCRIPT" --source "$SOURCE" --root "$isolated_env_deploy" --commit "$FOUR" \
+  --gateway-user release-gateway --mcp-user release-mcp --terminal-user release-terminal --no-systemd >/dev/null
+[[ -L "$isolated_env_deploy/active" ]]
+[[ $(readlink "$isolated_env_deploy/active") == "releases/$FOUR" ]]
+! compgen -G "$isolated_env_deploy/releases/.staging-*" >/dev/null
+[[ ! -e "$isolated_env_deploy/releases/$FOUR/.build-env" ]]
+grep -q "^release-gateway $isolated_env_deploy/releases/.staging-$FOUR-" "$NPM_ENV_LOG"
+grep -q "^release-mcp $isolated_env_deploy/releases/.staging-$FOUR-" "$NPM_ENV_LOG"
+grep -q "^release-terminal $isolated_env_deploy/releases/.staging-$FOUR-" "$NPM_ENV_LOG"
+grep -q "release-gateway $isolated_env_deploy/releases/.staging-$FOUR-.*/.build-env/release-gateway$" "$FAKE_CHOWN_LOG"
+grep -q "release-mcp $isolated_env_deploy/releases/.staging-$FOUR-.*/.build-env/release-mcp$" "$FAKE_CHOWN_LOG"
+grep -q "release-terminal $isolated_env_deploy/releases/.staging-$FOUR-.*/.build-env/release-terminal$" "$FAKE_CHOWN_LOG"
+
+cat > "$BIN/npm" <<'FAKE_NPM'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+prefix=''
+while (($#)); do
+  if [[ $1 == --prefix ]]; then prefix=$2; shift 2; else shift; fi
+done
+[[ -n $prefix ]]
+[[ -w $prefix ]] || { printf 'fake npm: prefix is not writable: %s\n' "$prefix" >&2; exit 13; }
+if [[ ${FAKE_NPM_FAIL:-0} == 1 ]]; then exit 42; fi
+if [[ $prefix == */mcp-server ]]; then mkdir -p "$prefix/dist"; printf '// test\n' > "$prefix/dist/index.js"
+elif [[ $prefix == */terminal ]]; then mkdir -p "$prefix/bin"; printf '#!/bin/sh\n' > "$prefix/bin/cgroup-launcher"; chmod +x "$prefix/bin/cgroup-launcher"; fi
+FAKE_NPM
+chmod +x "$BIN/npm"
 
 printf 'deployment release tests passed\n'
