@@ -327,6 +327,13 @@ BindPaths=/run/pickleshell-test-mcp:/run/pickleshell-mcp
 Do not share the runtime directory between instances. Keep their users, ports,
 configuration, caches, state directories, and systemd units separate as well.
 
+Terminal keeps `ProtectHome=true`. For a workspace source below a protected
+home, the release unit binds the configured host workspace read-write to a
+private path below the terminal runtime directory and sets
+`PICKLESHELL_TERMINAL_ROOT_OVERRIDE` to that private path. When this override is
+set, it replaces all configured terminal roots instead of adding another root,
+so service policy never has to traverse the protected host home path.
+
 After any unit or drop-in change, back up the affected files, run
 `systemctl daemon-reload`, restart only the changed service, and verify:
 

@@ -9,6 +9,7 @@ Group=pickleshell-terminal
 ExecStart=/usr/bin/node /opt/pickleshell/active/terminal/src/server.js
 Environment=PICKLESHELL_TERMINAL_CONFIG=/etc/pickleshell/terminal.json
 Environment=PICKLESHELL_TERMINAL_SOCKET=/run/pickleshell-terminal/service.sock
+Environment=PICKLESHELL_TERMINAL_ROOT_OVERRIDE=/run/pickleshell-terminal/workspace
 RuntimeDirectory=pickleshell-terminal
 RuntimeDirectoryMode=0750
 Restart=on-failure
@@ -27,7 +28,8 @@ PrivateTmp=true
 TasksMax=128
 MemoryMax=1G
 ReadWritePaths=/run/pickleshell-terminal
-ReadOnlyPaths=/opt/pickleshell/active/terminal /srv/example/workspace
+BindPaths=/srv/example/workspace:/run/pickleshell-terminal/workspace
+ReadOnlyPaths=/opt/pickleshell/active/terminal
 
 [Install]
 WantedBy=multi-user.target

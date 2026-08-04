@@ -470,7 +470,7 @@ render_unit() {
   local component=$1 template=$2 contents token value
   contents=$(<"$template")
   for token in APP_ROOT ACTIVE_ROOT CONFIG_ROOT STATE_ROOT CACHE_ROOT WORKSPACE_ROOT \
-    TERMINAL_WORKSPACE_ROOT \
+    TERMINAL_WORKSPACE_ROOT TERMINAL_WORKSPACE_BIND_TARGET \
     NODE_BIN_DIR NODE_EXECUTABLE TERMINAL_NODE_EXECUTABLE TUNNEL_CLIENT_EXECUTABLE GATEWAY_USER GATEWAY_GROUP \
     MCP_USER MCP_GROUP TERMINAL_USER TERMINAL_GROUP GATEWAY_SERVICE MCP_RUNTIME_NAME \
     MCP_BIND_SOURCE MCP_BIND_TARGET MCP_TEMP_DIR TUNNEL_PROFILE \
@@ -483,6 +483,7 @@ render_unit() {
       CACHE_ROOT) value=$CACHE_ROOT ;;
       WORKSPACE_ROOT) value=$WORKSPACE_ROOT ;;
       TERMINAL_WORKSPACE_ROOT) value=$TERMINAL_WORKSPACE_ROOT ;;
+      TERMINAL_WORKSPACE_BIND_TARGET) value=$TERMINAL_RUNTIME_DIR/workspace ;;
       NODE_BIN_DIR) value=$NODE_BIN_DIR ;;
       NODE_EXECUTABLE) value=$NODE_EXECUTABLE ;;
       TERMINAL_NODE_EXECUTABLE) value=$TERMINAL_NODE_EXECUTABLE ;;
@@ -578,6 +579,16 @@ prepare_service_dir() {
   run chmod "$mode" -- "$path" || return 1
 }
 
+prepare_terminal_workspace_acl() {
+  command -v setfacl >/dev/null && command -v getfacl >/dev/null || die 'setfacl and getfacl are required to grant terminal workspace access'
+  [[ -d $TERMINAL_WORKSPACE_ROOT && ! -L $TERMINAL_WORKSPACE_ROOT ]] || die "service path is unsafe: $TERMINAL_WORKSPACE_ROOT"
+  run setfacl -R -P -m "u:$TERMINAL_USER:rwX" -- "$TERMINAL_WORKSPACE_ROOT" || return 1
+  while IFS= read -r -d '' path; do
+    run setfacl -m "d:u:$TERMINAL_USER:rwX" -- "$path" || return 1
+  done < <(find -P "$TERMINAL_WORKSPACE_ROOT" -type d -print0)
+  getfacl -cp -- "$TERMINAL_WORKSPACE_ROOT" | grep -Eq "^user:$TERMINAL_USER:rwx$" || die 'terminal workspace ACL verification failed'
+}
+
 prepare_service_paths() {
   ((NO_SYSTEMD)) && return 0
   is_real_systemctl || return 0
@@ -594,8 +605,9 @@ prepare_service_paths() {
   prepare_service_dir "$MCP_TEMP_DIR" "$MCP_USER:$MCP_GROUP" 0700 || return 1
   prepare_service_dir "$MCP_BIND_SOURCE" "$MCP_USER:$MCP_GROUP" 0700 || return 1
   prepare_service_dir "$TERMINAL_RUNTIME_DIR" "$TERMINAL_USER:$TERMINAL_GROUP" 0750 || return 1
-  [[ -d $TERMINAL_WORKSPACE_ROOT && ! -L $TERMINAL_WORKSPACE_ROOT ]] || prepare_service_dir "$TERMINAL_WORKSPACE_ROOT" "$TERMINAL_USER:$TERMINAL_GROUP" 0750 || return 1
+  prepare_service_dir "$TERMINAL_RUNTIME_DIR/workspace" "$TERMINAL_USER:$TERMINAL_GROUP" 0750 || return 1
   [[ -d $TERMINAL_WORKSPACE_ROOT && ! -L $TERMINAL_WORKSPACE_ROOT ]] || die "service path is unsafe: $TERMINAL_WORKSPACE_ROOT"
+  prepare_terminal_workspace_acl || return 1
 }
 
 restore_units() {

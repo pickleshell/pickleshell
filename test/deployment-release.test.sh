@@ -198,10 +198,65 @@ grep -q 'ReadWritePaths=/var/lib/pickleshell-test/mcp-temp' "$ISOLATED_UNITS/pic
 grep -q 'ReadWritePaths=/var/cache/pickleshell-test/ms-playwright' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'TasksMax=256' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'Environment=PICKLESHELL_TERMINAL_SOCKET=/run/pickleshell-test-terminal/service.sock' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+grep -q 'Environment=PICKLESHELL_TERMINAL_ROOT_OVERRIDE=/run/pickleshell-test-terminal/workspace' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
 grep -q 'ProtectHome=true' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
-grep -q 'BindReadOnlyPaths=/srv/pickleshell-test/workspace' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
-grep -q 'ReadOnlyPaths=.* /srv/pickleshell-test/workspace' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+grep -q 'BindPaths=/srv/pickleshell-test/workspace:/run/pickleshell-test-terminal/workspace' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+grep -q 'ReadWritePaths=/run/pickleshell-test-terminal' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+! grep -q 'BindReadOnlyPaths=.*workspace' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+! grep -q 'ReadOnlyPaths=.* /srv/pickleshell-test/workspace' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
 [[ ! -e "$ISOLATED_UNITS/terminal-chatgpt.service" ]]
+
+PREP_HELPERS=$TMP/release-prep-helpers.sh
+sed -n '/^run() {/,/^restore_units() {/p' "$SCRIPT" | sed '$d' > "$PREP_HELPERS"
+ACL_BIN=$TMP/acl-bin
+mkdir -p "$ACL_BIN"
+ACL_LOG=$TMP/acl.log
+export ACL_LOG
+cat > "$ACL_BIN/setfacl" <<'FAKE_SETFACL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'setfacl' >> "${ACL_LOG:?}"
+for arg in "$@"; do printf ' %s' "$arg" >> "${ACL_LOG:?}"; done
+printf '\n' >> "${ACL_LOG:?}"
+FAKE_SETFACL
+chmod +x "$ACL_BIN/setfacl"
+cat > "$ACL_BIN/getfacl" <<'FAKE_GETFACL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'user::rwx\nuser:release-terminal:rwx\ngroup::---\nmask::rwx\nother::---\n'
+FAKE_GETFACL
+chmod +x "$ACL_BIN/getfacl"
+(
+  set -Eeuo pipefail
+  die() { printf 'release: error: %s\n' "$1" >&2; exit 1; }
+  # shellcheck source=/dev/null
+  source "$PREP_HELPERS"
+  PATH="$ACL_BIN:$BIN:/usr/bin:/bin"
+  NO_SYSTEMD=0; DRY_RUN=0; SYSTEMCTL=systemctl
+  GATEWAY_USER=release-gateway; GATEWAY_GROUP=release-gateway
+  MCP_USER=release-mcp; MCP_GROUP=release-mcp
+  TERMINAL_USER=release-terminal; TERMINAL_GROUP=release-terminal
+  STATE_ROOT=$TMP/prep/state; CACHE_ROOT=$TMP/prep/cache; WORKSPACE_ROOT=$TMP/prep/workspace
+  MCP_TEMP_DIR=$TMP/prep/state/mcp-temp; MCP_BIND_SOURCE=$TMP/prep/run-mcp
+  TERMINAL_RUNTIME_DIR=$TMP/prep/run-terminal; TERMINAL_WORKSPACE_ROOT=$TMP/prep/home/workspace
+  mkdir -p "$TERMINAL_WORKSPACE_ROOT/existing"
+  prepare_service_paths
+)
+[[ -d $TMP/prep/run-terminal/workspace ]]
+grep -q '^setfacl -R -P -m u:release-terminal:rwX -- .*/home/workspace$' "$ACL_LOG"
+grep -q '^setfacl -m d:u:release-terminal:rwX -- .*/home/workspace$' "$ACL_LOG"
+grep -q '^setfacl -m d:u:release-terminal:rwX -- .*/home/workspace/existing$' "$ACL_LOG"
+(
+  set -Eeuo pipefail
+  die() { printf 'release: error: %s\n' "$1" >&2; exit 1; }
+  # shellcheck source=/dev/null
+  source "$PREP_HELPERS"
+  PATH="$TMP/no-acl-bin"
+  TERMINAL_WORKSPACE_ROOT=$TMP/prep/home/workspace
+  TERMINAL_USER=release-terminal
+  prepare_terminal_workspace_acl
+) >"$TMP/no-acl.out" 2>"$TMP/no-acl.err" && exit 1 || true
+grep -q 'setfacl and getfacl are required to grant terminal workspace access' "$TMP/no-acl.err"
 
 FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \

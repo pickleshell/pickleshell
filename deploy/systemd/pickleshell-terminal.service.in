@@ -9,6 +9,7 @@ Group=@TERMINAL_GROUP@
 ExecStart=@TERMINAL_NODE_EXECUTABLE@ @ACTIVE_ROOT@/terminal/src/server.js
 Environment=PICKLESHELL_TERMINAL_CONFIG=@CONFIG_ROOT@/terminal.json
 Environment=PICKLESHELL_TERMINAL_SOCKET=@TERMINAL_SOCKET@
+Environment=PICKLESHELL_TERMINAL_ROOT_OVERRIDE=@TERMINAL_WORKSPACE_BIND_TARGET@
 RuntimeDirectory=@TERMINAL_RUNTIME_NAME@
 RuntimeDirectoryMode=0750
 Restart=on-failure
@@ -27,8 +28,8 @@ PrivateTmp=true
 TasksMax=128
 MemoryMax=1G
 ReadWritePaths=@TERMINAL_RUNTIME_DIR@
-BindReadOnlyPaths=@TERMINAL_WORKSPACE_ROOT@
-ReadOnlyPaths=@ACTIVE_ROOT@/terminal @TERMINAL_WORKSPACE_ROOT@
+BindPaths=@TERMINAL_WORKSPACE_ROOT@:@TERMINAL_WORKSPACE_BIND_TARGET@
+ReadOnlyPaths=@ACTIVE_ROOT@/terminal
 
 [Install]
 WantedBy=multi-user.target

@@ -14,12 +14,27 @@ function config() {
   if (!parsed.auth_token || typeof parsed.auth_token !== 'string') throw new Error('terminal auth token is required');
   return parsed;
 }
+function terminalRootOverride(value = process.env.PICKLESHELL_TERMINAL_ROOT_OVERRIDE) {
+  if (value === undefined || value === '') return null;
+  if (typeof value !== 'string' || value.includes('\0') || !path.isAbsolute(value)) throw new Error('PICKLESHELL_TERMINAL_ROOT_OVERRIDE must be a specific absolute path');
+  const normalized = path.normalize(value);
+  const broad = new Set(['/', '/home', '/run', '/tmp', '/var', '/srv', '/etc', '/opt', '/usr']);
+  if (normalized !== value || broad.has(normalized)) throw new Error('PICKLESHELL_TERMINAL_ROOT_OVERRIDE must be a specific absolute path');
+  return normalized;
+}
+function runtimeConfig() {
+  const cfg = config();
+  const override = terminalRootOverride();
+  // The systemd release binds the configured host workspace to this private path.
+  // When set, the override replaces configured roots instead of widening them.
+  return override ? { ...cfg, roots: [override] } : cfg;
+}
 function sameSecret(actual, expected) {
   if (typeof actual !== 'string' || typeof expected !== 'string') return false;
   const a = Buffer.from(actual); const b = Buffer.from(expected); return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 function start(options = {}) {
-  const cfg = config(); const token = process.env.PICKLESHELL_TERMINAL_AUTH || cfg.auth_token;
+  const cfg = runtimeConfig(); const token = process.env.PICKLESHELL_TERMINAL_AUTH || cfg.auth_token;
   if (!token) throw new Error('PICKLESHELL_TERMINAL_AUTH or config auth_token is required');
   const socketPath = process.env.PICKLESHELL_TERMINAL_SOCKET || cfg.socket || '/run/pickleshell-terminal/service.sock';
   const service = options.service || new TerminalService({ ...cfg, ...(options.cgroupManager ? { cgroupManager: options.cgroupManager } : {}) });
@@ -58,4 +73,4 @@ function start(options = {}) {
   return { server, service, socketPath };
 }
 if (require.main === module) start();
-module.exports = { start };
+module.exports = { start, config, runtimeConfig, terminalRootOverride };

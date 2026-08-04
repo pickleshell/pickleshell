@@ -9,7 +9,7 @@ const { OutputRing } = require('../src/ring');
 const { makePolicy, safeCwd } = require('../src/policy');
 const { spawnRequest, decodeData, isValidUtf8 } = require('../src/validation');
 const { TerminalService } = require('../src/service');
-const { start } = require('../src/server');
+const { start, runtimeConfig, terminalRootOverride } = require('../src/server');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function eventually(fn) { for (let i = 0; i < 100; i++) { const value = await fn(); if (value) return value; await wait(10); } throw new Error('timed out'); }
@@ -18,6 +18,28 @@ function socketRequest(socketPath, request) { return new Promise((resolve, rejec
 async function main() {
   const ring = new OutputRing(5); ring.append(Buffer.from([0, 1, 2])); assert.equal(ring.read(0, 10).nextCursor, 3); assert.deepEqual([...ring.read(1, 1).data], [1]); ring.append(Buffer.from([3, 4, 5])); const lost = ring.read(0, 20); assert.equal(lost.truncated, true); assert.equal(lost.truncatedFrom, 0); assert.deepEqual([...lost.data], [1, 2, 3, 4, 5]);
   assert.throws(() => decodeData('!'), /invalid/); assert.equal(isValidUtf8(Buffer.from('€')), true); assert.equal(isValidUtf8(Buffer.from([0xff])), false); assert.throws(() => spawnRequest({ chat_id: 'x', executable: '/bin/false' }, makePolicy()), (e) => e.code === 'executable_not_allowed');
+  const previousRootOverride = process.env.PICKLESHELL_TERMINAL_ROOT_OVERRIDE;
+  const previousConfig = process.env.PICKLESHELL_TERMINAL_CONFIG;
+  try {
+    delete process.env.PICKLESHELL_TERMINAL_ROOT_OVERRIDE;
+    delete process.env.PICKLESHELL_TERMINAL_CONFIG;
+    assert.equal(terminalRootOverride(), null);
+    process.env.PICKLESHELL_TERMINAL_ROOT_OVERRIDE = '/run/pickleshell-terminal/workspace';
+    assert.equal(terminalRootOverride(), '/run/pickleshell-terminal/workspace');
+    assert.deepEqual(runtimeConfig().roots, ['/run/pickleshell-terminal/workspace']);
+    const configFile = path.join(os.tmpdir(), `pickleshell-terminal-config-${process.pid}.json`);
+    fs.writeFileSync(configFile, JSON.stringify({ auth_token: 'config-token', roots: ['/srv/one', '/srv/two'] }));
+    process.env.PICKLESHELL_TERMINAL_CONFIG = configFile;
+    assert.deepEqual(runtimeConfig().roots, ['/run/pickleshell-terminal/workspace']);
+    assert.throws(() => terminalRootOverride('relative/workspace'), /specific absolute path/);
+    assert.throws(() => terminalRootOverride('/run'), /specific absolute path/);
+    assert.throws(() => terminalRootOverride('/run/service/../workspace'), /specific absolute path/);
+    assert.throws(() => terminalRootOverride('/run/service/\0workspace'), /specific absolute path/);
+    fs.unlinkSync(configFile);
+  } finally {
+    if (previousRootOverride === undefined) delete process.env.PICKLESHELL_TERMINAL_ROOT_OVERRIDE; else process.env.PICKLESHELL_TERMINAL_ROOT_OVERRIDE = previousRootOverride;
+    if (previousConfig === undefined) delete process.env.PICKLESHELL_TERMINAL_CONFIG; else process.env.PICKLESHELL_TERMINAL_CONFIG = previousConfig;
+  }
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pickleshell-terminal-')); fs.mkdirSync(path.join(root, 'sub')); fs.symlinkSync(path.join(root, 'sub'), path.join(root, 'link')); const policy = makePolicy({ roots: [root], executables: ['/bin/sh'] }); assert.equal(safeCwd('sub', policy), path.join(root, 'sub')); assert.throws(() => safeCwd('link', policy), (e) => e.code === 'invalid_working_directory'); assert.throws(() => safeCwd('../', policy), (e) => e.code === 'invalid_working_directory');
   const testCgroups = { launcherPath: null, initialize: async () => {}, create: (id) => ({ name: `terminal-${id}`, path: path.join(root, `terminal-${id}`) }), killAndRemove: async () => {} };
   const service = new TerminalService({ roots: [root], executables: ['/bin/sh'], maxTerminals: 1, ringBytes: 128, ttlMs: 60000, cgroupManager: testCgroups });
