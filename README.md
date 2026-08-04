@@ -164,9 +164,9 @@ The three mandatory core services all run locally on your machine:
 
 One ChatGPT can act as the main orchestrator and use PickleShell to coordinate
 different machines and capabilities: a development agent, a dedicated
-interactive terminal, parallel agents on one server, and a browser-testing
-agent. Tasks are sent to workers, while progress and results are returned to
-ChatGPT for the next coordination step.
+interactive terminal, parallel agents on one server, and the Browser tool
+directly. Tasks are sent to workers, while browser actions, progress, and
+results are returned to ChatGPT for the next coordination step.
 
 ```mermaid
 flowchart TB
@@ -189,10 +189,8 @@ flowchart TB
         A4["Agent C"]
     end
 
-    subgraph S4["Server 4 — Browser Testing"]
-        A5["Testing Agent"]
+    subgraph S4["Server 4 — Browser"]
         B["Browser"]
-        A5 --> B
     end
 
     P <--> A1
@@ -200,7 +198,7 @@ flowchart TB
     P <--> A2
     P <--> A3
     P <--> A4
-    P <--> A5
+    P <--> B
 ```
 
 ## Async Workflow
