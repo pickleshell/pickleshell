@@ -169,7 +169,7 @@ ChatGPT for the next coordination step.
 
 ```mermaid
 flowchart TB
-    C["ChatGPT<br/>Main Orchestrator"]
+    C["ChatGPT Orchestrator"]
     P["PickleShell<br/>Secure Control Layer"]
 
     C <--> P
