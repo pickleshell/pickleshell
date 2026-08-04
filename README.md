@@ -10,7 +10,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#requirements)
 
-**Website:** [pickleshell.github.io](https://pickleshell.github.io/)
+**Website:** [pickleshell.github.io](https://pickleshell.github.io/) · [Quick Notes](https://pickleshell.github.io/quick-notes.html)
 
 > Want to give your ChatGPT a gift? Give it PickleShell.
 
@@ -158,6 +158,49 @@ The three mandatory core services all run locally on your machine:
 | **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface and has been verified through the reference test tunnel. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
 | **Terminal** | Implemented, E2E verified across reference profiles | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. The clean external release-installation gate remains open. |
+
+## Use Case Example
+
+One ChatGPT can act as the main orchestrator and use PickleShell to coordinate
+different machines and capabilities: a development agent, a dedicated
+interactive terminal, parallel agents on one server, and a browser-testing
+agent. Tasks are sent to workers, while progress and results are returned to
+ChatGPT for the next coordination step.
+
+```mermaid
+flowchart TB
+    C["ChatGPT<br/>Main Orchestrator"]
+    P["PickleShell<br/>Secure Control Layer"]
+
+    C <--> P
+
+    subgraph S1["Server 1"]
+        A1["Development Agent"]
+    end
+
+    subgraph S2["Server 2"]
+        T["Interactive Terminal"]
+    end
+
+    subgraph S3["Server 3 — Parallel Execution"]
+        A2["Agent A"]
+        A3["Agent B"]
+        A4["Agent C"]
+    end
+
+    subgraph S4["Server 4 — Browser Testing"]
+        A5["Testing Agent"]
+        B["Browser"]
+        A5 --> B
+    end
+
+    P <--> A1
+    P <--> T
+    P <--> A2
+    P <--> A3
+    P <--> A4
+    P <--> A5
+```
 
 ## Async Workflow
 
