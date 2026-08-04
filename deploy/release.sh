@@ -304,7 +304,17 @@ else
 fi
 [[ ! -e $RELEASE || -L $RELEASE ]] || die 'release path exists and is not a directory'
 [[ ! -e $WORK_RELEASE || -L $WORK_RELEASE ]] || die 'staging path exists and is not a directory'
-trap 'rm -rf -- "$WORK_RELEASE"' EXIT
+
+cleanup_staging() {
+  if [[ -d $WORK_RELEASE && ! -L $WORK_RELEASE ]]; then
+    while IFS= read -r -d '' path; do
+      chmod u+w -- "$path"
+    done < <(find -P "$WORK_RELEASE" -type d -print0)
+  fi
+  rm -rf -- "$WORK_RELEASE"
+}
+
+trap cleanup_staging EXIT
 
 run() {
   if ((DRY_RUN)); then
@@ -343,15 +353,63 @@ stage() {
   [[ $(<"$WORK_RELEASE/.release-sha") == "$RESOLVED" ]] || die 'staged SHA does not match requested commit'
 }
 
+component_user_group() {
+  case "$1" in
+    gateway) printf '%s:%s' "$GATEWAY_USER" "$GATEWAY_GROUP" ;;
+    mcp-server) printf '%s:%s' "$MCP_USER" "$MCP_GROUP" ;;
+    terminal) printf '%s:%s' "$TERMINAL_USER" "$TERMINAL_GROUP" ;;
+    *) die "unknown component: $1" ;;
+  esac
+}
+
+prepare_component() {
+  local component=$1 directory="$WORK_RELEASE/$1" owner
+  [[ -d $directory && ! -L $directory ]] || die "component directory is unsafe: $component"
+  owner=$(component_user_group "$component")
+  run chown -- "$owner" "$directory"
+  run chmod u+rwx -- "$directory"
+}
+
+harden_release() {
+  local component path mode
+  if [[ $(id -u) -eq 0 ]]; then
+    for component in gateway mcp-server terminal; do
+      path="$WORK_RELEASE/$component"
+      [[ -d $path && ! -L $path ]] || die "component directory is unsafe: $component"
+      run chown -- root:root "$path"
+    done
+  fi
+  while IFS= read -r -d '' path; do
+    [[ ! -L $path ]] || die 'release contains an unsafe symbolic link'
+    if [[ -d $path ]]; then
+      run chmod 0555 -- "$path"
+    else
+      mode=$(stat -c '%a' -- "$path")
+      if ((8#$mode & 0111)); then
+        run chmod 0555 -- "$path"
+      else
+        run chmod 0444 -- "$path"
+      fi
+    fi
+    if [[ $(id -u) -eq 0 ]]; then
+      run chown -- root:root "$path"
+    fi
+  done < <(find "$WORK_RELEASE" -xdev -depth -print0)
+}
+
 build() {
   log 'building Gateway, MCP, and Terminal in the staged release'
   required_files gateway; required_files mcp-server; required_files terminal
+  prepare_component gateway
+  prepare_component mcp-server
+  prepare_component terminal
   as_user "$GATEWAY_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/gateway" ci --omit=dev
   as_user "$MCP_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/mcp-server" ci
   as_user "$MCP_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/mcp-server" run build
   as_user "$TERMINAL_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/terminal" ci
   as_user "$TERMINAL_USER" env PATH="$PATH" npm --prefix "$WORK_RELEASE/terminal" run build
   [[ -f $WORK_RELEASE/mcp-server/dist/index.js && -x $WORK_RELEASE/terminal/bin/cgroup-launcher ]] || die 'component build did not produce required files'
+  harden_release
   mv -T -- "$WORK_RELEASE" "$RELEASE"
 }
 
@@ -522,7 +580,7 @@ atomic_activate() {
   ln -s -- "releases/$RESOLVED" "$tmp"
   mv -Tf -- "$tmp" "$ACTIVE"
   [[ $(active_target) == releases/$RESOLVED ]] || die 'atomic active switch verification failed'
-  printf '%s\n' "$RESOLVED" > "$RELEASE/.release-sha"
+  [[ $(<"$RELEASE/.release-sha") == "$RESOLVED" ]] || die 'release SHA verification failed'
 }
 
 restart_and_verify() {

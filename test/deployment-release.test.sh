@@ -42,11 +42,38 @@ while (($#)); do
   if [[ $1 == --prefix ]]; then prefix=$2; shift 2; else shift; fi
 done
 [[ -n $prefix ]]
+[[ -w $prefix ]] || { printf 'fake npm: prefix is not writable: %s\n' "$prefix" >&2; exit 13; }
 if [[ ${FAKE_NPM_FAIL:-0} == 1 ]]; then exit 42; fi
 if [[ $prefix == */mcp-server ]]; then mkdir -p "$prefix/dist"; printf '// test\n' > "$prefix/dist/index.js"; fi
 if [[ $prefix == */terminal ]]; then mkdir -p "$prefix/bin"; printf '#!/bin/sh\n' > "$prefix/bin/cgroup-launcher"; chmod +x "$prefix/bin/cgroup-launcher"; fi
 FAKE_NPM
 chmod +x "$BIN/npm"
+
+cat > "$BIN/tar" <<'FAKE_TAR'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+/usr/bin/tar "$@"
+destination=''
+while (($#)); do
+  if [[ $1 == -C ]]; then destination=$2; shift 2; else shift; fi
+done
+[[ -n $destination ]]
+for component in gateway mcp-server terminal; do chmod a-w "$destination/$component"; done
+FAKE_TAR
+chmod +x "$BIN/tar"
+
+cat > "$BIN/chown" <<'FAKE_CHOWN'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ $1 == -- ]]
+shift
+owner=$1
+shift
+[[ $# -eq 1 ]]
+path=$1
+[[ $owner == root:root ]] && chmod a-w -- "$path" || chmod u+rwx -- "$path"
+FAKE_CHOWN
+chmod +x "$BIN/chown"
 
 USER=$(id -un)
 export PATH="$BIN:$PATH"
@@ -54,6 +81,7 @@ export PATH="$BIN:$PATH"
 cat > "$BIN/id" <<'FAKE_ID'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ $1 == -u ]]; then printf '0\n'; exit 0; fi
 case "$1" in
   pickleshell-test|pickleshell-test-tunnel|pickleshell-test-terminal) exit 0 ;;
   *) exec /usr/bin/id "$@" ;;
@@ -61,11 +89,33 @@ esac
 FAKE_ID
 chmod +x "$BIN/id"
 
+cat > "$BIN/runuser" <<'FAKE_RUNUSER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ $1 == -u && $3 == -- ]]
+shift 3
+exec "$@"
+FAKE_RUNUSER
+chmod +x "$BIN/runuser"
+
+cat > "$BIN/rm" <<'FAKE_RM'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+path=${@: -1}
+if [[ -d $path && ! -L $path ]]; then
+  /usr/bin/find "$path" -type d -exec chmod u+w -- {} +
+fi
+exec /usr/bin/rm "$@"
+FAKE_RM
+chmod +x "$BIN/rm"
+
 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$ONE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd
 [[ -L $DEPLOY/active ]]
 [[ $(readlink "$DEPLOY/active") == releases/$ONE ]]
 [[ $(<"$DEPLOY/releases/$ONE/.release-sha") == "$ONE" ]]
+[[ $(stat -c '%a' "$DEPLOY/releases/$ONE/gateway") == 555 ]]
+[[ $(stat -c '%a' "$DEPLOY/releases/$ONE/gateway/package.json") == 444 ]]
 [[ -f $DEPLOY/releases/$ONE/gateway/version.txt ]]
 [[ ! -e $DEPLOY/releases/$ONE/.env ]]
 [[ $(<"$DEPLOY/gateway/operator-state") == 'operator state' ]]
@@ -220,6 +270,7 @@ FAKE_NPM_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1 && exit 1 || true
 [[ $(readlink "$DEPLOY/active") == releases/$TWO ]]
 [[ ! -e $DEPLOY/releases/$FOUR ]]
+! compgen -G "$DEPLOY/releases/.staging-*" >/dev/null
 
 printf 'dirty\n' > "$SOURCE/untracked-file"
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \
