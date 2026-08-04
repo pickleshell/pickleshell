@@ -40,8 +40,28 @@ jobs:
         run: npm run build
       - name: Native PTY smoke test
         run: npm --prefix terminal run test:native-smoke
+      - name: Stage trusted Node for deployment tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix_node=$(command -v node)
+          matrix_version=$(node -p 'process.versions.node')
+          sudo install -d -o root -g root -m 0755 /opt /opt/pickleshell /opt/pickleshell/runtime /opt/pickleshell/runtime/ci-node /opt/pickleshell/runtime/ci-node/bin
+          sudo install -o root -g root -m 0755 "$matrix_node" /opt/pickleshell/runtime/ci-node/bin/node
+          staged_version=$(/opt/pickleshell/runtime/ci-node/bin/node -p 'process.versions.node')
+          if [[ $staged_version != "$matrix_version" ]]; then
+            printf 'staged Node version mismatch: matrix=%s staged=%s\n' "$matrix_version" "$staged_version" >&2
+            exit 1
+          fi
+          for path in /opt /opt/pickleshell /opt/pickleshell/runtime /opt/pickleshell/runtime/ci-node /opt/pickleshell/runtime/ci-node/bin /opt/pickleshell/runtime/ci-node/bin/node; do
+            [[ $(stat -c '%u' -- "$path") == 0 ]] || { printf 'trusted CI Node path is not root-owned: %s\n' "$path" >&2; exit 1; }
+            mode=$(stat -c '%a' -- "$path")
+            (( (8#$mode & 022) == 0 )) || { printf 'trusted CI Node path is group/other writable: %s mode=%s\n' "$path" "$mode" >&2; exit 1; }
+          done
       - name: Full tests
         shell: bash
+        env:
+          PICKLESHELL_TEST_NODE_EXECUTABLE: /opt/pickleshell/runtime/ci-node/bin/node
         run: |
           set -o pipefail
           log_file="$(mktemp)"
@@ -72,3 +92,6 @@ jobs:
       - name: Cgroup integration gate
         run: |
           echo 'SKIP: privileged cgroup integration requires a separately delegated systemd contour; standard GitHub runners do not run it'
+      - name: Clean trusted CI Node
+        if: always()
+        run: sudo rm -rf -- /opt/pickleshell/runtime/ci-node
