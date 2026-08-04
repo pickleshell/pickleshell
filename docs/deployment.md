@@ -10,6 +10,43 @@
 
 The default deployment uses one host and no inbound public port.
 
+## Immutable releases
+
+Use `deploy/release.sh` for upgrades. Run it from a clean checkout as the
+deployment owner, supplying the exact commit and the host's existing component
+users. It creates `releases/<full-sha>`, installs dependencies and builds
+Gateway, MCP, and Terminal with Node 20 or newer, then atomically updates
+`active`. The script never copies `/etc/operator` configuration, service homes,
+caches, workspaces, tunnel/plugin profiles, runtime files, or other operator
+state into a release. Existing mutable component directories are left in place
+on the first migration and are not used after `active` is installed.
+
+```bash
+sudo /path/to/checkout/deploy/release.sh \
+  --source /path/to/clean/checkout \
+  --root /opt/pickleshell \
+  --commit <full-git-sha> \
+  --gateway-user gateway-service \
+  --mcp-user tunnel-service \
+  --terminal-user terminal-service
+```
+
+The shipped Gateway and MCP units execute from `active`; Terminal unit changes
+are opt-in with `--include-terminal`. This keeps a separately managed Terminal
+profile or ChatGPT terminal runtime explicitly untouched. The script restarts
+only Gateway then MCP, and includes Terminal in that sequence only when opted
+in. It records the previous target in `state/previous-target` and restores it
+automatically if activation, service restart, or readiness verification fails.
+Use `--rollback` to repeat the recorded rollback. `--dry-run` validates inputs
+without staging, and `--no-systemd --root <temporary-root>` supports isolated
+tests without host systemd. Do not pass production paths to an isolated test.
+
+The script refuses dirty source, unresolved or mismatched commits, missing
+files/users, unsafe roots or symlinks, incomplete builds, and invalid rollback
+targets. It does not print environment files, credentials, profiles, or other
+secret contents. Backups of replaced unit files are kept under the deployment
+state directory before `daemon-reload`.
+
 Use the deployment owner for repository operations. Avoid recursive ACL changes;
 if ownership drifts, repair the specific files or directories instead. For any
 remote maintenance, verify the SSH identity, host key policy, target account,

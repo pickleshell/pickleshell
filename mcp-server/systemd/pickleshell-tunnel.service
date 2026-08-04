@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=pickleshell-tunnel
 Group=pickleshell-tunnel
-WorkingDirectory=/opt/pickleshell/mcp-server
+WorkingDirectory=/opt/pickleshell/active/mcp-server
 Environment=PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/var/lib/pickleshell/mcp-home
 Environment=XDG_CACHE_HOME=/var/cache/pickleshell/mcp

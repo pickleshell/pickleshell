@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build": "npm --prefix mcp-server run build && npm --prefix terminal run build",
-    "test": "npm --prefix gateway test && npm --prefix mcp-server test && npm --prefix terminal test",
+    "test": "npm --prefix gateway test && npm --prefix mcp-server test && npm --prefix terminal test && bash test/deployment-release.test.sh",
     "audit": "npm --prefix gateway audit --omit=dev && npm --prefix mcp-server audit --omit=dev && npm --prefix terminal audit --omit=dev"
   },
   "engines": {

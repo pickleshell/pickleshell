@@ -6,7 +6,7 @@ After=local-fs.target
 Type=simple
 User=pickleshell-terminal
 Group=pickleshell-terminal
-ExecStart=/usr/bin/node /opt/pickleshell/terminal/src/server.js
+ExecStart=/usr/bin/node /opt/pickleshell/active/terminal/src/server.js
 Environment=PICKLESHELL_TERMINAL_CONFIG=/etc/pickleshell/terminal.json
 RuntimeDirectory=pickleshell-terminal
 RuntimeDirectoryMode=0750
@@ -26,7 +26,7 @@ PrivateTmp=true
 TasksMax=128
 MemoryMax=1G
 ReadWritePaths=/run/pickleshell-terminal
-ReadOnlyPaths=/opt/pickleshell/terminal /srv/example/workspace
+ReadOnlyPaths=/opt/pickleshell/active/terminal /srv/example/workspace
 
 [Install]
 WantedBy=multi-user.target

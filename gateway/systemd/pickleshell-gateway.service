@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=pickleshell
 Group=pickleshell
-WorkingDirectory=/opt/pickleshell/gateway
+WorkingDirectory=/opt/pickleshell/active/gateway
 Environment=NODE_ENV=production
 Environment=PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/var/lib/pickleshell/agent-home
