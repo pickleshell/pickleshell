@@ -75,11 +75,35 @@ targets. It does not print environment files, credentials, profiles, or other
 secret contents. Backups of replaced unit files are kept under the deployment
 state directory before `daemon-reload`.
 
-Use the deployment owner for repository operations. Avoid recursive ACL changes;
-if ownership drifts, repair the specific files or directories instead. For any
-remote maintenance, verify the SSH identity, host key policy, target account,
-and authorized sudo route before changing services. Never print credential
-contents, private keys, tunnel profiles, or secret-bearing environment files.
+### Immutable migration notes
+
+- Back up operator-managed unit files, environment files, and tunnel profiles
+  separately before the first immutable activation. The release tree excludes
+  operator state by design.
+- The ordinary tunnel profile's MCP command must resolve through
+  `ROOT/active/mcp-server/dist/index.js`, not a mutable component directory.
+- Release builds run `npm` for each component as that component's service user
+  with an isolated writable `HOME`, `TMPDIR`, and `NPM_CONFIG_CACHE`; these
+  build-only directories are removed before final root-owned read-only
+  hardening.
+- Before restarting services, the installer creates every cache, state, and
+  runtime path referenced by the rendered units, including browser/MCP cache
+  paths and private runtime bind targets.
+- Terminal keeps `ProtectHome=true`. When the configured workspace source is
+  under a protected home, the installer grants the terminal service user access
+  with user-specific ACLs and binds that source read-write at
+  `TERMINAL_RUNTIME_DIR/workspace`. `setfacl` and `getfacl` are required; the
+  release fails closed if they are unavailable.
+- First immutable activation has no recorded immutable previous target, so keep
+  the ordinary unit/profile backup for manual rollback. Later activations use
+  the recorded `state/previous-target` rollback.
+
+Use the deployment owner for repository operations. Avoid ad hoc recursive ACL
+repairs outside the release installer; if ownership drifts, repair the specific
+files or directories instead. For any remote maintenance, verify the SSH
+identity, host key policy, target account, and authorized sudo route before
+changing services. Never print credential contents, private keys, tunnel
+profiles, or secret-bearing environment files.
 
 ## Install files
 

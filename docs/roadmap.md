@@ -36,7 +36,7 @@ implemented, while Settings remains the next planned milestone.
     node-pty runtime with a dedicated unprivileged identity by default, supports
     explicit deployment-time selection of an existing Linux service user,
     delegated cgroup-v2 lifecycle cleanup, and exposes the six-tool MCP contract.
-    The clean external release-installation gate remains open.
+    The immutable release-installation and production smoke gates are complete.
 - **Settings:** planned. `settings-get` and `settings-update` manage
   policy-controlled mutable defaults such as the agent backend
   (OpenCode/Codex), the model allowlist, file-transfer limits (files per
@@ -76,8 +76,13 @@ implemented, while Settings remains the next planned milestone.
       Tunnel, Browser, Agent, and Terminal end-to-end smoke tests.
 - [x] Pass Linux Node 20/22/24 CI with a forced node-pty source rebuild and native PTY smoke test.
 - [x] Pass the separately delegated systemd cgroup integration gate; standard CI explicitly skips it.
-- [x] Add an isolated-tested immutable release migration with deterministic rollback; production smoke remains separate.
-- [ ] Run the complete production smoke test before creating a release tag.
+- [x] Add an isolated-tested immutable release migration with deterministic rollback.
+- [x] Complete ordinary immutable production activation with structural checks:
+      active/current SHA, root-owned read-only release tree, unit/profile path
+      invariants, no restart deltas, and unchanged separately managed services.
+- [x] Run the complete production smoke gate before release: OpenCode/Codex
+      exact `PONG`, Terminal exact `PONG` with close and cgroup cleanup,
+      Browser navigate/snapshot/close, and no restart deltas or pids saturation.
 
 ### Correctness and reliability
 
