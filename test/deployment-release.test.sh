@@ -268,6 +268,46 @@ printf 'four\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt
 git -C "$SOURCE" commit -q -m four
 FOUR=$(git -C "$SOURCE" rev-parse HEAD)
+"$SCRIPT" --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$FOUR" \
+  --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
+  --gateway-service pickleshell-test-gateway.service \
+  --mcp-service pickleshell-test-tunnel.service \
+  --terminal-service pickleshell-test-terminal.service --include-terminal \
+  --node-executable /usr/bin/node \
+  --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS" >/dev/null
+[[ $(readlink "$ISOLATED_DEPLOY/active") == releases/$FOUR ]]
+[[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$FOUR ]]
+[[ $(<"$ISOLATED_DEPLOY/state/previous-target") == releases/$THREE ]]
+FOUR_GATEWAY_UNIT=$(<"$ISOLATED_UNITS/pickleshell-test-gateway.service")
+"$SCRIPT" --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
+  --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
+  --gateway-service pickleshell-test-gateway.service \
+  --mcp-service pickleshell-test-tunnel.service \
+  --terminal-service pickleshell-test-terminal.service \
+  --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS" >/dev/null
+[[ $(readlink "$ISOLATED_DEPLOY/active") == releases/$THREE ]]
+[[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$THREE ]]
+[[ $(<"$ISOLATED_DEPLOY/state/previous-target") == releases/$FOUR ]]
+[[ $(<"$ISOLATED_UNITS/pickleshell-test-gateway.service") != "$FOUR_GATEWAY_UNIT" ]]
+THREE_GATEWAY_UNIT=$(<"$ISOLATED_UNITS/pickleshell-test-gateway.service")
+grep -q 'restart pickleshell-test-gateway.service' "$FAKE_SYSTEMCTL_LOG"
+grep -q 'is-active pickleshell-test-gateway.service' "$FAKE_SYSTEMCTL_LOG"
+grep -q 'restart pickleshell-test-tunnel.service' "$FAKE_SYSTEMCTL_LOG"
+grep -q 'is-active pickleshell-test-tunnel.service' "$FAKE_SYSTEMCTL_LOG"
+grep -q 'restart pickleshell-test-terminal.service' "$FAKE_SYSTEMCTL_LOG"
+grep -q 'is-active pickleshell-test-terminal.service' "$FAKE_SYSTEMCTL_LOG"
+
+printf 'releases/invalid-target\n' > "$ISOLATED_DEPLOY/state/previous-target"
+if "$SCRIPT" --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
+  --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
+  --gateway-service pickleshell-test-gateway.service \
+  --mcp-service pickleshell-test-tunnel.service \
+  --terminal-service pickleshell-test-terminal.service \
+  --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS" >/dev/null 2>&1; then exit 1; fi
+[[ $(readlink "$ISOLATED_DEPLOY/active") == releases/$THREE ]]
+[[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$THREE ]]
+[[ $(<"$ISOLATED_UNITS/pickleshell-test-gateway.service") == "$THREE_GATEWAY_UNIT" ]]
+
 FAKE_NPM_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$FOUR" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd >/dev/null 2>&1 && exit 1 || true
 [[ $(readlink "$DEPLOY/active") == releases/$TWO ]]

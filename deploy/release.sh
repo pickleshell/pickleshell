@@ -289,21 +289,23 @@ fi
 RELEASES="$ROOT/releases"
 ACTIVE="$ROOT/active"
 STATE="$ROOT/state"
-RELEASE="${RELEASES:-}/$RESOLVED"
-WORK_RELEASE="${RELEASES:-}/.staging-$RESOLVED-$$"
+RELEASE=''
+WORK_RELEASE=''
 [[ ! -e $RELEASES || ( ! -L $RELEASES && -d $RELEASES ) ]] || die 'releases path is not a real directory'
 [[ ! -e $STATE || ( ! -L $STATE && -d $STATE ) ]] || die 'state path is not a real directory'
 if ((ROLLBACK)); then
   [[ -d $RELEASES && ! -L $RELEASES ]] || die 'rollback releases directory is missing or unsafe'
 else
+  RELEASE="$RELEASES/$RESOLVED"
+  WORK_RELEASE="$RELEASES/.staging-$RESOLVED-$$"
   if ((DRY_RUN)); then
     log "would stage $RESOLVED under $RELEASE and activate it"
     exit 0
   fi
   mkdir -p -- "$RELEASES" "$STATE"
+  [[ ! -e $RELEASE || -L $RELEASE ]] || die 'release path exists and is not a directory'
+  [[ ! -e $WORK_RELEASE || -L $WORK_RELEASE ]] || die 'staging path exists and is not a directory'
 fi
-[[ ! -e $RELEASE || -L $RELEASE ]] || die 'release path exists and is not a directory'
-[[ ! -e $WORK_RELEASE || -L $WORK_RELEASE ]] || die 'staging path exists and is not a directory'
 
 cleanup_staging() {
   if [[ -d $WORK_RELEASE && ! -L $WORK_RELEASE ]]; then
@@ -592,14 +594,19 @@ atomic_activate() {
     [[ -L $ACTIVE ]] || die 'active exists but is not a symlink'
     previous=$(active_target)
   fi
+  atomic_switch "releases/$RESOLVED" "$previous"
+  [[ $(<"$RELEASE/.release-sha") == "$RESOLVED" ]] || die 'release SHA verification failed'
+}
+
+atomic_switch() {
+  local target=$1 previous=$2
   printf '%s\n' "$previous" > "$STATE/previous-target"
-  printf '%s\n' "releases/$RESOLVED" > "$STATE/current-target"
+  printf '%s\n' "$target" > "$STATE/current-target"
   local tmp="$ROOT/.active.new.$$"
   rm -f -- "$tmp"
-  ln -s -- "releases/$RESOLVED" "$tmp"
+  ln -s -- "$target" "$tmp"
   mv -Tf -- "$tmp" "$ACTIVE"
-  [[ $(active_target) == releases/$RESOLVED ]] || die 'atomic active switch verification failed'
-  [[ $(<"$RELEASE/.release-sha") == "$RESOLVED" ]] || die 'release SHA verification failed'
+  [[ $(active_target) == "$target" ]] || die 'atomic active switch verification failed'
 }
 
 restart_and_verify() {
@@ -634,13 +641,33 @@ restore_previous() {
 }
 
 rollback() {
-  [[ -f $STATE/previous-target ]] || die 'no recorded previous target'
-  restore_previous
-  if [[ -L $ACTIVE ]]; then
-    log "rolled back to $(active_target)"
-  else
-    log 'rolled back with no active release'
+  local current previous active
+  [[ -f $STATE/current-target && ! -L $STATE/current-target ]] || die 'no recorded current target'
+  [[ -f $STATE/previous-target && ! -L $STATE/previous-target ]] || die 'no recorded previous target'
+  current=$(<"$STATE/current-target")
+  previous=$(<"$STATE/previous-target")
+  [[ $current == releases/* && $current != *'..'* ]] || die 'recorded current target is unsafe'
+  [[ $previous == releases/* && $previous != *'..'* ]] || die 'recorded rollback target is unsafe'
+  [[ -d $ROOT/$current && ! -L $ROOT/$current ]] || die 'recorded current target is unsafe or missing'
+  [[ -d $ROOT/$previous && ! -L $ROOT/$previous ]] || die 'recorded rollback target is unsafe or missing'
+  [[ $(<"$ROOT/$current/.release-sha") == "${current#releases/}" ]] || die 'recorded current release is invalid'
+  [[ $(<"$ROOT/$previous/.release-sha") == "${previous#releases/}" ]] || die 'recorded rollback release is invalid'
+  active=$(active_target) || die 'active release is missing or unsafe'
+  [[ $active == "$current" ]] || die 'active release does not match recorded current target'
+
+  RELEASE="$ROOT/$previous"
+  if ! install_units; then
+    restore_units || true
+    die 'unit installation failed during rollback'
   fi
+  atomic_switch "$previous" "$current"
+  if ! restart_and_verify; then
+    log 'rollback service verification failed; restoring previous release'
+    restore_units || true
+    atomic_switch "$current" "$previous"
+    die 'rollback failed'
+  fi
+  log "rolled back to $(active_target)"
 }
 
 if ((ROLLBACK)); then
