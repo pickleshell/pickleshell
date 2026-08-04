@@ -127,7 +127,7 @@ validate_path() {
   [[ $value != *[\;\|\&\$\(\)\<\>\\\"\'\`\*\?\[\]]* ]] || die "$label contains an unsafe character"
   if [[ $PROFILE == isolated ]]; then
     case "$label" in
-      app-root|node-executable|terminal-node-executable|tunnel-client-executable) [[ $value == /opt/pickleshell-test || $value == /opt/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
+      app-root) [[ $value == /opt/pickleshell-test || $value == /opt/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
       config-root) [[ $value == /etc/pickleshell-test || $value == /etc/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
       state-root) [[ $value == /var/lib/pickleshell-test || $value == /var/lib/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;
       cache-root) [[ $value == /var/cache/pickleshell-test || $value == /var/cache/pickleshell-test/* ]] || die "$label is outside the isolated prefix" ;;

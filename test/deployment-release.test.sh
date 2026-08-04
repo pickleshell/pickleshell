@@ -51,6 +51,16 @@ chmod +x "$BIN/npm"
 USER=$(id -un)
 export PATH="$BIN:$PATH"
 
+cat > "$BIN/id" <<'FAKE_ID'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+case "$1" in
+  pickleshell-test|pickleshell-test-tunnel|pickleshell-test-terminal) exit 0 ;;
+  *) exec /usr/bin/id "$@" ;;
+esac
+FAKE_ID
+chmod +x "$BIN/id"
+
 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$ONE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd
 [[ -L $DEPLOY/active ]]
@@ -90,6 +100,9 @@ printf 'three\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt
 git -C "$SOURCE" commit -q -m three
 THREE=$(git -C "$SOURCE" rev-parse HEAD)
+
+PATH="$BIN:$PATH" "$SCRIPT" --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
+  --node-executable /usr/bin/node --tunnel-client-executable /usr/local/bin/tunnel-client --dry-run >/dev/null
 
 ISOLATED_DEPLOY=$TMP/isolated-deploy
 ISOLATED_UNITS=$TMP/isolated-units
@@ -180,6 +193,15 @@ if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd 
   --mcp-bind-target /run/other-runtime >/dev/null 2>&1; then exit 1; fi
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" --no-systemd \
   --mcp-temp-dir /tmp/pickleshell-mcp >/dev/null 2>&1; then exit 1; fi
+
+UNTRUSTED_EXECUTABLE=$TMP/untrusted-executable
+printf '#!/bin/sh\n' > "$UNTRUSTED_EXECUTABLE"
+chmod 777 "$UNTRUSTED_EXECUTABLE"
+if PATH="$BIN:$PATH" "$SCRIPT" --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
+  --node-executable "$UNTRUSTED_EXECUTABLE" --dry-run >/dev/null 2>&1; then exit 1; fi
+ln -s "$UNTRUSTED_EXECUTABLE" "$TMP/unsafe-executable-link"
+if PATH="$BIN:$PATH" "$SCRIPT" --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
+  --node-executable "$TMP/unsafe-executable-link" --dry-run >/dev/null 2>&1; then exit 1; fi
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
   --units-dir "$TMP/units/../units" >/dev/null 2>&1; then exit 1; fi
