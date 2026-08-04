@@ -73,30 +73,61 @@ TWO=$(git -C "$SOURCE" rev-parse HEAD)
 cat > "$BIN/fake-systemctl" <<'FAKE_SYSTEMCTL'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+printf '%s\n' "$*" >> "${FAKE_SYSTEMCTL_LOG:?}"
 if [[ ${FAKE_SYSTEMCTL_FAIL:-0} == 1 && $1 == restart ]]; then exit 1; fi
 exit 0
 FAKE_SYSTEMCTL
 chmod +x "$BIN/fake-systemctl"
 printf 'old gateway unit\n' > "$UNITS/pickleshell-gateway.service"
 printf 'old mcp unit\n' > "$UNITS/pickleshell-tunnel.service"
+printf 'production terminal sentinel\n' > "$UNITS/pickleshell-terminal.service"
+printf 'separately managed terminal profile\n' > "$UNITS/terminal-chatgpt.service"
+FAKE_SYSTEMCTL_LOG=$TMP/systemctl.log
+export FAKE_SYSTEMCTL_LOG
 printf 'three\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt
 git -C "$SOURCE" commit -q -m three
 THREE=$(git -C "$SOURCE" rev-parse HEAD)
 FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
+  --gateway-service pickleshell-test-gateway.service \
+  --mcp-service pickleshell-test-mcp.service \
+  --terminal-service pickleshell-test-terminal.service --include-terminal \
   --systemctl "$BIN/fake-systemctl" --units-dir "$UNITS" >/dev/null 2>&1 && exit 1 || true
 [[ $(readlink "$DEPLOY/active") == releases/$TWO ]]
 [[ $(<"$UNITS/pickleshell-gateway.service") == 'old gateway unit' ]]
 [[ $(<"$UNITS/pickleshell-tunnel.service") == 'old mcp unit' ]]
+[[ $(<"$UNITS/pickleshell-terminal.service") == 'production terminal sentinel' ]]
+[[ $(<"$UNITS/terminal-chatgpt.service") == 'separately managed terminal profile' ]]
+[[ ! -e $UNITS/pickleshell-test-gateway.service ]]
+[[ ! -e $UNITS/pickleshell-test-mcp.service ]]
+[[ ! -e $UNITS/pickleshell-test-terminal.service ]]
+[[ $(<"$FAKE_SYSTEMCTL_LOG") == *'restart pickleshell-test-gateway.service'* ]]
+[[ $(<"$FAKE_SYSTEMCTL_LOG") == *'restart pickleshell-test-mcp.service'* ]]
 
 mkdir -p "$TMP/first-units"
 if FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$TMP/first-fail" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" \
+  --gateway-service pickleshell-test-gateway.service --mcp-service pickleshell-test-mcp.service \
+  --terminal-service pickleshell-test-terminal.service --include-terminal \
   --systemctl "$BIN/fake-systemctl" --units-dir "$TMP/first-units" >/dev/null 2>&1; then exit 1; fi
 [[ ! -e $TMP/first-fail/active ]]
-[[ ! -e $TMP/first-units/pickleshell-gateway.service ]]
-[[ ! -e $TMP/first-units/pickleshell-tunnel.service ]]
+[[ ! -e $TMP/first-units/pickleshell-test-gateway.service ]]
+[[ ! -e $TMP/first-units/pickleshell-test-mcp.service ]]
+[[ ! -e $TMP/first-units/pickleshell-test-terminal.service ]]
+
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
+  --gateway-service 'bad/name.service' >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
+  --mcp-service 'bad name.service' >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
+  --terminal-service terminal-chatgpt.service >/dev/null 2>&1; then exit 1; fi
+if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
+  --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
+  --gateway-service duplicate.service --mcp-service duplicate.service >/dev/null 2>&1; then exit 1; fi
 
 printf 'four\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt

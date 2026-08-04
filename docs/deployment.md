@@ -41,6 +41,31 @@ Use `--rollback` to repeat the recorded rollback. `--dry-run` validates inputs
 without staging, and `--no-systemd --root <temporary-root>` supports isolated
 tests without host systemd. Do not pass production paths to an isolated test.
 
+For an isolated systemd rehearsal, use a temporary deployment root and units
+directory, a fake or temporary systemctl contour, and distinct service names.
+The source unit filenames remain the shipped names; only the installed targets
+change. For example:
+
+```bash
+deploy/release.sh \
+  --source /path/to/clean/checkout \
+  --root /tmp/pickleshell-test-root \
+  --commit <full-git-sha> \
+  --gateway-user test-gateway-user \
+  --mcp-user test-mcp-user \
+  --terminal-user test-terminal-user \
+  --gateway-service pickleshell-test-gateway.service \
+  --mcp-service pickleshell-test-mcp.service \
+  --terminal-service pickleshell-test-terminal.service \
+  --include-terminal \
+  --systemctl /path/to/fake-systemctl \
+  --units-dir /tmp/pickleshell-test-units
+```
+
+Service names must be distinct safe `.service` basenames. This command does
+not select or overwrite the shipped production names, and separately managed
+terminal profile units must remain outside the selected names.
+
 The script refuses dirty source, unresolved or mismatched commits, missing
 files/users, unsafe roots or symlinks, incomplete builds, and invalid rollback
 targets. It does not print environment files, credentials, profiles, or other

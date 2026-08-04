@@ -7,6 +7,7 @@ usage() {
   printf '%s\n' \
     'Usage: release.sh --source REPOSITORY --root ABSOLUTE_ROOT --commit SHA' \
     '                   [--gateway-user USER] [--mcp-user USER] [--terminal-user USER]' \
+    '                   [--gateway-service NAME] [--mcp-service NAME] [--terminal-service NAME]' \
     '                   [--include-terminal] [--no-systemd] [--dry-run] [--rollback]'
 }
 
@@ -19,6 +20,9 @@ COMMIT=''
 GATEWAY_USER='pickleshell'
 MCP_USER='pickleshell-tunnel'
 TERMINAL_USER='pickleshell-terminal'
+GATEWAY_SERVICE='pickleshell-gateway.service'
+MCP_SERVICE='pickleshell-tunnel.service'
+TERMINAL_SERVICE='pickleshell-terminal.service'
 INCLUDE_TERMINAL=0
 NO_SYSTEMD=0
 DRY_RUN=0
@@ -35,6 +39,9 @@ while (($#)); do
     --gateway-user) GATEWAY_USER=${2:-}; shift 2 ;;
     --mcp-user) MCP_USER=${2:-}; shift 2 ;;
     --terminal-user) TERMINAL_USER=${2:-}; shift 2 ;;
+    --gateway-service) GATEWAY_SERVICE=${2:-}; shift 2 ;;
+    --mcp-service|--tunnel-service) MCP_SERVICE=${2:-}; shift 2 ;;
+    --terminal-service) TERMINAL_SERVICE=${2:-}; shift 2 ;;
     --include-terminal) INCLUDE_TERMINAL=1; shift ;;
     --no-systemd) NO_SYSTEMD=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -59,6 +66,20 @@ else
 fi
 [[ $GATEWAY_USER =~ ^[a-z_][a-z0-9_-]*$ && $MCP_USER =~ ^[a-z_][a-z0-9_-]*$ && $TERMINAL_USER =~ ^[a-z_][a-z0-9_-]*$ ]] || die 'unsafe service user name'
 [[ $GATEWAY_USER != root && $MCP_USER != root && $TERMINAL_USER != root ]] || die 'root is not a valid component user'
+
+validate_service_name() {
+  local name=$1 label=$2
+  [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*\.service$ ]] || die "unsafe $label service name"
+  [[ $name != *..* ]] || die "unsafe $label service name"
+  case "$name" in
+    pickleshell-terminal-chatgpt.service|terminal-chatgpt.service) die "protected $label service name" ;;
+  esac
+}
+
+validate_service_name "$GATEWAY_SERVICE" gateway
+validate_service_name "$MCP_SERVICE" mcp
+validate_service_name "$TERMINAL_SERVICE" terminal
+[[ $GATEWAY_SERVICE != "$MCP_SERVICE" && $GATEWAY_SERVICE != "$TERMINAL_SERVICE" && $MCP_SERVICE != "$TERMINAL_SERVICE" ]] || die 'service names must be distinct'
 
 [[ ! -L $ROOT ]] || die 'root must not be a symlink'
 if [[ -e $ROOT ]]; then
@@ -175,9 +196,9 @@ build() {
 
 unit_for() {
   case "$1" in
-    gateway) printf '%s' pickleshell-gateway.service ;;
-    mcp) printf '%s' pickleshell-tunnel.service ;;
-    terminal) printf '%s' pickleshell-terminal.service ;;
+    gateway) printf '%s' "$GATEWAY_SERVICE" ;;
+    mcp) printf '%s' "$MCP_SERVICE" ;;
+    terminal) printf '%s' "$TERMINAL_SERVICE" ;;
     *) die "unknown component: $1" ;;
   esac
 }
@@ -187,28 +208,40 @@ install_units() {
   [[ $(id -u) -eq 0 || $SYSTEMCTL != systemctl ]] || die 'systemd installation requires root'
   local backup_dir=$STATE/unit-backups
   mkdir -p -- "$backup_dir"
-  local component unit source_unit
+  local component unit source_unit target
   for component in gateway mcp; do
     unit=$(unit_for "$component")
-    [[ $component == gateway ]] && source_unit=$RELEASE/gateway/systemd/$unit || source_unit=$RELEASE/mcp-server/systemd/$unit
+    [[ $component == gateway ]] && source_unit=$RELEASE/gateway/systemd/pickleshell-gateway.service || source_unit=$RELEASE/mcp-server/systemd/pickleshell-tunnel.service
     [[ -f $source_unit && ! -L $source_unit ]] || { log "missing unit file for $component" >&2; return 1; }
     local unit_contents
     unit_contents=$(<"$source_unit")
     unit_contents=${unit_contents//\/opt\/pickleshell/$ROOT}
-    [[ ! -e $UNITS_DIR/$unit || -f $UNITS_DIR/$unit ]] || die "unit path is not a regular file: $unit"
-    [[ ! -e $UNITS_DIR/$unit ]] || run cp -p -- "$UNITS_DIR/$unit" "$backup_dir/$unit" || return 1
-    printf '%s\n' "$unit_contents" | run install -m 0644 /dev/stdin "$UNITS_DIR/$unit" || return 1
+    target=$UNITS_DIR/$unit
+    [[ ! -L $target ]] || die "unit path is a symlink: $unit"
+    [[ ! -e $target || -f $target ]] || die "unit path is not a regular file: $unit"
+    if [[ -e $target ]]; then
+      run cp -p -- "$target" "$backup_dir/$unit" || return 1
+    else
+      run rm -f -- "$backup_dir/$unit" || return 1
+    fi
+    printf '%s\n' "$unit_contents" | run install -m 0644 /dev/stdin "$target" || return 1
   done
   if ((INCLUDE_TERMINAL)); then
     unit=$(unit_for terminal)
-    source_unit=$RELEASE/terminal/systemd/$unit
+    source_unit=$RELEASE/terminal/systemd/pickleshell-terminal.service
     [[ -f $source_unit && ! -L $source_unit ]] || { log 'missing unit file for terminal' >&2; return 1; }
     local unit_contents
     unit_contents=$(<"$source_unit")
     unit_contents=${unit_contents//\/opt\/pickleshell/$ROOT}
-    [[ ! -e $UNITS_DIR/$unit || -f $UNITS_DIR/$unit ]] || die "unit path is not a regular file: $unit"
-    [[ ! -e $UNITS_DIR/$unit ]] || run cp -p -- "$UNITS_DIR/$unit" "$backup_dir/$unit" || return 1
-    printf '%s\n' "$unit_contents" | run install -m 0644 /dev/stdin "$UNITS_DIR/$unit" || return 1
+    target=$UNITS_DIR/$unit
+    [[ ! -L $target ]] || die "unit path is a symlink: $unit"
+    [[ ! -e $target || -f $target ]] || die "unit path is not a regular file: $unit"
+    if [[ -e $target ]]; then
+      run cp -p -- "$target" "$backup_dir/$unit" || return 1
+    else
+      run rm -f -- "$backup_dir/$unit" || return 1
+    fi
+    printf '%s\n' "$unit_contents" | run install -m 0644 /dev/stdin "$target" || return 1
   fi
   run "$SYSTEMCTL" daemon-reload || return 1
 }
@@ -216,23 +249,25 @@ install_units() {
 restore_units() {
   ((NO_SYSTEMD)) && return 0
   local backup_dir=$STATE/unit-backups
-  local component unit backup
+  local component unit backup target
   for component in gateway mcp; do
     unit=$(unit_for "$component")
     backup=$backup_dir/$unit
+    target=$UNITS_DIR/$unit
     if [[ -f $backup && ! -L $backup ]]; then
-      run install -m 0644 -- "$backup" "$UNITS_DIR/$unit" || return 1
+      run install -m 0644 -- "$backup" "$target" || return 1
     else
-      run rm -f -- "$UNITS_DIR/$unit" || return 1
+      run rm -f -- "$target" || return 1
     fi
   done
   if ((INCLUDE_TERMINAL)); then
     unit=$(unit_for terminal)
     backup=$backup_dir/$unit
+    target=$UNITS_DIR/$unit
     if [[ -f $backup && ! -L $backup ]]; then
-      run install -m 0644 -- "$backup" "$UNITS_DIR/$unit" || return 1
+      run install -m 0644 -- "$backup" "$target" || return 1
     else
-      run rm -f -- "$UNITS_DIR/$unit" || return 1
+      run rm -f -- "$target" || return 1
     fi
   fi
   run "$SYSTEMCTL" daemon-reload || return 1
@@ -271,13 +306,13 @@ atomic_activate() {
 
 restart_and_verify() {
   ((NO_SYSTEMD)) && return 0
-  service_action restart pickleshell-gateway.service || return 1
-  service_action is-active pickleshell-gateway.service || return 1
-  service_action restart pickleshell-tunnel.service || return 1
-  service_action is-active pickleshell-tunnel.service || return 1
+  service_action restart "$(unit_for gateway)" || return 1
+  service_action is-active "$(unit_for gateway)" || return 1
+  service_action restart "$(unit_for mcp)" || return 1
+  service_action is-active "$(unit_for mcp)" || return 1
   if ((INCLUDE_TERMINAL)); then
-    service_action restart pickleshell-terminal.service || return 1
-    service_action is-active pickleshell-terminal.service || return 1
+    service_action restart "$(unit_for terminal)" || return 1
+    service_action is-active "$(unit_for terminal)" || return 1
   fi
 }
 
@@ -295,9 +330,9 @@ restore_previous() {
   fi
   restore_units || die 'could not restore unit files'
   ((NO_SYSTEMD)) && return 0
-  service_action restart pickleshell-gateway.service || true
-  service_action restart pickleshell-tunnel.service || true
-  ((INCLUDE_TERMINAL)) && service_action restart pickleshell-terminal.service || true
+  service_action restart "$(unit_for gateway)" || true
+  service_action restart "$(unit_for mcp)" || true
+  ((INCLUDE_TERMINAL)) && service_action restart "$(unit_for terminal)" || true
 }
 
 rollback() {
