@@ -190,7 +190,9 @@ flowchart TB
     end
 
     subgraph S4["Server 4 — Browser"]
+        A5["Testing Agent"]
         B["Browser"]
+        A5 --> B
     end
 
     P <--> A1
