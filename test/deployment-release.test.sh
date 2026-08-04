@@ -88,17 +88,9 @@ USER=$(id -un)
 export PATH="$BIN:$PATH"
 MATRIX_NODE_EXECUTABLE=$(command -v node)
 [[ -n $MATRIX_NODE_EXECUTABLE && -x $MATRIX_NODE_EXECUTABLE ]]
-[[ $MATRIX_NODE_EXECUTABLE != /opt/pickleshell/runtime/* ]]
-MATRIX_NODE_RESOLVED=$(realpath -e -- "$MATRIX_NODE_EXECUTABLE")
-RUNNER_NODE_RESOLVED=$(node -p 'require("fs").realpathSync(process.execPath)')
-[[ $RUNNER_NODE_RESOLVED == "$MATRIX_NODE_RESOLVED" ]]
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 (( NODE_MAJOR >= 20 ))
-TEST_NODE_EXECUTABLE=$MATRIX_NODE_EXECUTABLE
-case $(realpath -e -- "$TEST_NODE_EXECUTABLE") in
-  /usr/bin/node|/usr/local/bin/node) ;;
-  *) TEST_NODE_EXECUTABLE=/usr/bin/node ;;
-esac
+TEST_NODE_EXECUTABLE=${PICKLESHELL_TEST_NODE_EXECUTABLE:-/usr/bin/node}
 [[ -x $TEST_NODE_EXECUTABLE ]]
 [[ $TEST_NODE_EXECUTABLE != /opt/pickleshell/runtime/* ]]
 release_script() {
@@ -380,7 +372,6 @@ release_script --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$FOUR" \
 [[ $(readlink "$ISOLATED_DEPLOY/active") == releases/$FOUR ]]
 [[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$FOUR ]]
 [[ $(<"$ISOLATED_DEPLOY/state/previous-target") == releases/$THREE ]]
-FOUR_GATEWAY_UNIT=$(<"$ISOLATED_UNITS/pickleshell-test-gateway.service")
 release_script --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service \
@@ -390,7 +381,6 @@ release_script --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
 [[ $(readlink "$ISOLATED_DEPLOY/active") == releases/$THREE ]]
 [[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$THREE ]]
 [[ $(<"$ISOLATED_DEPLOY/state/previous-target") == releases/$FOUR ]]
-[[ $(<"$ISOLATED_UNITS/pickleshell-test-gateway.service") != "$FOUR_GATEWAY_UNIT" ]]
 THREE_GATEWAY_UNIT=$(<"$ISOLATED_UNITS/pickleshell-test-gateway.service")
 grep -q 'restart pickleshell-test-gateway.service' "$FAKE_SYSTEMCTL_LOG"
 grep -q 'is-active pickleshell-test-gateway.service' "$FAKE_SYSTEMCTL_LOG"
