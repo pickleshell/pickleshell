@@ -75,7 +75,7 @@ implemented, while Settings remains the next planned milestone.
 - [x] Pass a clean installation on a separate machine with isolated Gateway,
       Tunnel, Browser, Agent, and Terminal end-to-end smoke tests.
 - [x] Pass Linux Node 20/22/24 CI with a forced node-pty source rebuild and native PTY smoke test.
-- [ ] Pass the separately delegated systemd cgroup integration gate; standard CI explicitly skips it.
+- [x] Pass the separately delegated systemd cgroup integration gate; standard CI explicitly skips it.
 - [ ] Run the complete production smoke test before creating a release tag.
 
 ### Correctness and reliability
