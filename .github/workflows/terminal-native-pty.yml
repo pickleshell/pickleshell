@@ -1,0 +1,44 @@
+name: Terminal native PTY
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native-pty:
+    name: Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22, 24]
+    defaults:
+      run:
+        working-directory: terminal
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: terminal/package-lock.json
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild node-pty from source
+        env:
+          npm_config_build_from_source: 'true'
+        run: npm rebuild node-pty --build-from-source --foreground-scripts
+
+      - name: Build terminal runtime
+        run: npm run build
+
+      - name: Run native PTY smoke test
+        run: npm run test:native-smoke
