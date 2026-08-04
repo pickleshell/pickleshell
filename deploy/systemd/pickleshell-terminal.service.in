@@ -27,6 +27,7 @@ PrivateTmp=true
 TasksMax=128
 MemoryMax=1G
 ReadWritePaths=@TERMINAL_RUNTIME_DIR@
+BindReadOnlyPaths=@TERMINAL_WORKSPACE_ROOT@
 ReadOnlyPaths=@ACTIVE_ROOT@/terminal @TERMINAL_WORKSPACE_ROOT@
 
 [Install]

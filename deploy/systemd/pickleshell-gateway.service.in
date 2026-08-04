@@ -46,7 +46,6 @@ ReadWritePaths=@STATE_ROOT@/state/opencode
 ReadWritePaths=@STATE_ROOT@/agent-home
 ReadWritePaths=@CACHE_ROOT@/opencode
 ReadWritePaths=@CACHE_ROOT@/npm
-ReadWritePaths=@CACHE_ROOT@/ms-playwright
 ReadWritePaths=@WORKSPACE_ROOT@
 ReadOnlyPaths=@APP_ROOT@
 ReadOnlyPaths=@CONFIG_ROOT@/config.json

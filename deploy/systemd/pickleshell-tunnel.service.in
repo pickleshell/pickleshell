@@ -38,6 +38,7 @@ LockPersonality=true
 SystemCallArchitectures=native
 ReadWritePaths=@STATE_ROOT@/mcp-home
 ReadWritePaths=@CACHE_ROOT@/mcp
+ReadWritePaths=@CACHE_ROOT@/ms-playwright
 ReadWritePaths=@MCP_TEMP_DIR@
 ReadOnlyPaths=@APP_ROOT@
 ReadOnlyPaths=@TUNNEL_PROFILE@

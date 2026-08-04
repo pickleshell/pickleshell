@@ -419,6 +419,9 @@ harden_release() {
   while IFS= read -r -d '' path; do
     if [[ -L $path ]]; then
       validate_release_symlink "$path"
+      if [[ $(id -u) -eq 0 ]]; then
+        run chown -h -- root:root "$path"
+      fi
       continue
     fi
     if [[ -d $path ]]; then
@@ -561,6 +564,40 @@ install_units() {
   run "$SYSTEMCTL" daemon-reload || return 1
 }
 
+is_real_systemctl() {
+  [[ ${SYSTEMCTL##*/} == systemctl ]]
+}
+
+prepare_service_dir() {
+  local path=$1 owner=$2 mode=$3
+  run mkdir -p -- "$path" || return 1
+  [[ -d $path && ! -L $path ]] || die "service path is unsafe: $path"
+  if [[ $(id -u) -eq 0 ]]; then
+    run chown -h -- "$owner" "$path" || return 1
+  fi
+  run chmod "$mode" -- "$path" || return 1
+}
+
+prepare_service_paths() {
+  ((NO_SYSTEMD)) && return 0
+  is_real_systemctl || return 0
+  prepare_service_dir "$STATE_ROOT/agent-home" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
+  prepare_service_dir "$STATE_ROOT/config/opencode" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
+  prepare_service_dir "$STATE_ROOT/data/opencode" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
+  prepare_service_dir "$STATE_ROOT/state/opencode" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
+  prepare_service_dir "$CACHE_ROOT/opencode" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
+  prepare_service_dir "$CACHE_ROOT/npm" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
+  prepare_service_dir "$WORKSPACE_ROOT" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
+  prepare_service_dir "$STATE_ROOT/mcp-home" "$MCP_USER:$MCP_GROUP" 0700 || return 1
+  prepare_service_dir "$CACHE_ROOT/mcp" "$MCP_USER:$MCP_GROUP" 0700 || return 1
+  prepare_service_dir "$CACHE_ROOT/ms-playwright" "$MCP_USER:$MCP_GROUP" 0700 || return 1
+  prepare_service_dir "$MCP_TEMP_DIR" "$MCP_USER:$MCP_GROUP" 0700 || return 1
+  prepare_service_dir "$MCP_BIND_SOURCE" "$MCP_USER:$MCP_GROUP" 0700 || return 1
+  prepare_service_dir "$TERMINAL_RUNTIME_DIR" "$TERMINAL_USER:$TERMINAL_GROUP" 0750 || return 1
+  [[ -d $TERMINAL_WORKSPACE_ROOT && ! -L $TERMINAL_WORKSPACE_ROOT ]] || prepare_service_dir "$TERMINAL_WORKSPACE_ROOT" "$TERMINAL_USER:$TERMINAL_GROUP" 0750 || return 1
+  [[ -d $TERMINAL_WORKSPACE_ROOT && ! -L $TERMINAL_WORKSPACE_ROOT ]] || die "service path is unsafe: $TERMINAL_WORKSPACE_ROOT"
+}
+
 restore_units() {
   ((NO_SYSTEMD)) && return 0
   local backup_dir=$STATE/unit-backups
@@ -646,12 +683,11 @@ restore_previous() {
   previous=$(<"$STATE/previous-target")
   if [[ -z $previous ]]; then
     [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || run rm -f -- "$ACTIVE"
+    printf '' > "$STATE/current-target"
+    printf '' > "$STATE/previous-target"
   else
     [[ $previous == releases/* && $previous != *'..'* && -d $ROOT/$previous && ! -L $ROOT/$previous ]] || die 'recorded rollback target is unsafe or missing'
-    local tmp="$ROOT/.active.rollback.$$"
-    rm -f -- "$tmp"
-    ln -s -- "$previous" "$tmp"
-    mv -Tf -- "$tmp" "$ACTIVE"
+    atomic_switch "$previous" ''
   fi
   restore_units || die 'could not restore unit files'
   ((NO_SYSTEMD)) && return 0
@@ -667,6 +703,7 @@ rollback() {
   current=$(<"$STATE/current-target")
   previous=$(<"$STATE/previous-target")
   [[ $current == releases/* && $current != *'..'* ]] || die 'recorded current target is unsafe'
+  [[ -n $previous ]] || die 'no recorded previous release; first activation rollback requires manual backup restore'
   [[ $previous == releases/* && $previous != *'..'* ]] || die 'recorded rollback target is unsafe'
   [[ -d $ROOT/$current && ! -L $ROOT/$current ]] || die 'recorded current target is unsafe or missing'
   [[ -d $ROOT/$previous && ! -L $ROOT/$previous ]] || die 'recorded rollback target is unsafe or missing'
@@ -681,7 +718,7 @@ rollback() {
     die 'unit installation failed during rollback'
   fi
   atomic_switch "$previous" "$current"
-  if ! restart_and_verify; then
+  if ! prepare_service_paths || ! restart_and_verify; then
     log 'rollback service verification failed; restoring previous release'
     restore_units || true
     atomic_switch "$current" "$previous"
@@ -706,7 +743,7 @@ if ! atomic_activate; then
   restore_previous
   die 'activation failed'
 fi
-if ! restart_and_verify; then
+if ! prepare_service_paths || ! restart_and_verify; then
   log 'activation or service verification failed; restoring previous release'
   restore_previous
   die 'activation failed'

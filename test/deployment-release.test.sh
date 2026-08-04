@@ -195,8 +195,12 @@ grep -q 'ExecStart=/usr/local/bin/tunnel-client run --profile-file /etc/picklesh
 grep -q 'RuntimeDirectory=pickleshell-test-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'BindPaths=/run/pickleshell-test-mcp:/run/pickleshell-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'ReadWritePaths=/var/lib/pickleshell-test/mcp-temp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
+grep -q 'ReadWritePaths=/var/cache/pickleshell-test/ms-playwright' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'TasksMax=256' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'Environment=PICKLESHELL_TERMINAL_SOCKET=/run/pickleshell-test-terminal/service.sock' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+grep -q 'ProtectHome=true' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+grep -q 'BindReadOnlyPaths=/srv/pickleshell-test/workspace' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
+grep -q 'ReadOnlyPaths=.* /srv/pickleshell-test/workspace' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
 [[ ! -e "$ISOLATED_UNITS/terminal-chatgpt.service" ]]
 
 FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
@@ -223,9 +227,24 @@ if FAKE_SYSTEMCTL_FAIL=1 "$SCRIPT" --source "$SOURCE" --root "$TMP/first-fail" -
   --terminal-service pickleshell-test-terminal.service --include-terminal \
   --systemctl "$BIN/fake-systemctl" --units-dir "$TMP/first-units" >/dev/null 2>&1; then exit 1; fi
 [[ ! -e $TMP/first-fail/active ]]
+[[ ! -s $TMP/first-fail/state/current-target ]]
+[[ ! -s $TMP/first-fail/state/previous-target ]]
 [[ ! -e $TMP/first-units/pickleshell-test-gateway.service ]]
 [[ ! -e $TMP/first-units/pickleshell-test-tunnel.service ]]
 [[ ! -e $TMP/first-units/pickleshell-test-terminal.service ]]
+
+mkdir -p "$TMP/first-rollback/releases/$THREE" "$TMP/first-rollback/state" "$TMP/first-rollback-units"
+printf '%s\n' "$THREE" > "$TMP/first-rollback/releases/$THREE/.release-sha"
+ln -s "releases/$THREE" "$TMP/first-rollback/active"
+printf 'releases/%s\n' "$THREE" > "$TMP/first-rollback/state/current-target"
+printf '' > "$TMP/first-rollback/state/previous-target"
+if "$SCRIPT" --root "$TMP/first-rollback" --rollback --include-terminal \
+  --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
+  --gateway-service pickleshell-test-gateway.service --mcp-service pickleshell-test-tunnel.service \
+  --terminal-service pickleshell-test-terminal.service \
+  --systemctl "$BIN/fake-systemctl" --units-dir "$TMP/first-rollback-units" >"$TMP/first-rollback.err" 2>&1; then exit 1; fi
+grep -q 'first activation rollback requires manual backup restore' "$TMP/first-rollback.err"
+[[ $(readlink "$TMP/first-rollback/active") == releases/$THREE ]]
 
 if "$SCRIPT" --source "$SOURCE" --root "$DEPLOY" --commit "$THREE" \
   --gateway-user "$USER" --mcp-user "$USER" --terminal-user "$USER" --no-systemd \
