@@ -188,12 +188,13 @@ MCP_TEMP_DIR=/var/lib/pickleshell/mcp-temp
 ```
 
 ```bash
-sudo chown pickleshell:pickleshell /etc/pickleshell/mcp.env
+sudo chown pickleshell-tunnel:pickleshell-tunnel /etc/pickleshell/mcp.env
 sudo chmod 600 /etc/pickleshell/mcp.env
 ```
 
 Store the restricted tunnel control-plane key in
-`/etc/pickleshell/control-plane.key`, owned by `pickleshell` with mode `0600`.
+`/etc/pickleshell/control-plane.key`, owned by the OS user that runs the tunnel
+service (`pickleshell-tunnel` in the shipped unit) with mode `0600`.
 
 Install the Chromium revision that matches the deployed MCP package. Run the
 install with the same `PLAYWRIGHT_BROWSERS_PATH` used by the tunnel service,
@@ -218,7 +219,7 @@ The tunnel unit must expose the same stable `HOME`, `XDG_CACHE_HOME`, and
 Create the tunnel profile using the tunnel ID from the OpenAI Platform:
 
 ```bash
-sudo -u pickleshell -H tunnel-client init \
+sudo -u pickleshell-tunnel -H tunnel-client init \
   --sample sample_mcp_stdio_local \
   --profile pickleshell \
   --tunnel-id "tunnel_..." \
@@ -226,7 +227,7 @@ sudo -u pickleshell -H tunnel-client init \
   --health-listen-addr "127.0.0.1:18093" \
   --control-plane-api-key-ref "file:/etc/pickleshell/control-plane.key"
 
-sudo -u pickleshell -H tunnel-client doctor \
+sudo -u pickleshell-tunnel -H tunnel-client doctor \
   --profile pickleshell \
   --explain
 ```
@@ -244,6 +245,22 @@ curl -fsS http://127.0.0.1:18093/readyz
 ```
 
 Expected responses are `live` and `ready`.
+
+### Multiple instances on one host
+
+The default deployment assumes one PickleShell MCP runtime per host and uses
+`/run/pickleshell-mcp`. An additional isolated test or multi-instance deployment
+must give each instance a separate runtime directory and map it into the default
+MCP path inside that tunnel service's private mount namespace. For example:
+
+```systemd
+RuntimeDirectory=pickleshell-test-mcp
+RuntimeDirectoryMode=0700
+BindPaths=/run/pickleshell-test-mcp:/run/pickleshell-mcp
+```
+
+Do not share the runtime directory between instances. Keep their users, ports,
+configuration, caches, state directories, and systemd units separate as well.
 
 After any unit or drop-in change, back up the affected files, run
 `systemctl daemon-reload`, restart only the changed service, and verify:
