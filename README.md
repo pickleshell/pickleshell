@@ -331,7 +331,13 @@ PickleShell `0.1.2` is the latest release. It adds the native Codex runtime
 adapter, persistent Terminal PTY runtime, immutable release migration, and
 deployment verification gates for Agent, Browser, and Terminal.
 
-This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
+This is a complete, fully functional, and stable release of the integrated
+PickleShell system. Gateway, MCP, Agent, Browser, Terminal, tunnel, and
+immutable deployment workflows are implemented and work together as one
+system. The project is now in controlled pre-release testing: this validation
+stage is the final step before a broader stable release, while the current
+version is already suitable for real-world testing and use with trusted users.
+Interfaces may still change before the stable `1.0` release.
 
 ## Release History
 
