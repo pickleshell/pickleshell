@@ -335,8 +335,6 @@ This is pre-1.0 software. Interfaces may change before a stable `1.0` release.
 
 ## Release History
 
-### Unreleased
-
 ### [v0.1.2](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.2)
 
 - Added the native Codex runtime as a first-class alternative to OpenCode,
