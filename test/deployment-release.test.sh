@@ -93,9 +93,9 @@ NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 TEST_NODE_EXECUTABLE=${PICKLESHELL_TEST_NODE_EXECUTABLE:-$MATRIX_NODE_EXECUTABLE}
 [[ -x $TEST_NODE_EXECUTABLE ]] || { printf 'deployment test: node executable is not executable: %s\n' "$TEST_NODE_EXECUTABLE" >&2; exit 1; }
 LEGACY_NODE_EXECUTABLE=/usr/bin/node
-legacy_node_matches=$(grep -n -- "--node-executable $LEGACY_NODE_EXECUTABLE" "${BASH_SOURCE[0]}" || true)
+legacy_node_matches=$(grep -nE -- "--(terminal-)?node-executable $LEGACY_NODE_EXECUTABLE" "${BASH_SOURCE[0]}" || true)
 if [[ -n $legacy_node_matches ]]; then
-  printf 'deployment test: release invocation bypasses TEST_NODE_EXECUTABLE:\n%s\n' "$legacy_node_matches" >&2
+  printf 'deployment test: release invocation bypasses TEST_NODE_EXECUTABLE for node or terminal node:\n%s\n' "$legacy_node_matches" >&2
   exit 1
 fi
 release_script() {
@@ -178,7 +178,7 @@ git -C "$SOURCE" commit -q -m three
 THREE=$(git -C "$SOURCE" rev-parse HEAD)
 
 PATH="$BIN:$PATH" release_script --profile isolated --source "$SOURCE" --root /opt/pickleshell-test --commit "$THREE" \
-  --node-executable "$TEST_NODE_EXECUTABLE" --tunnel-client-executable /usr/local/bin/tunnel-client --dry-run >/dev/null
+  --node-executable "$TEST_NODE_EXECUTABLE" --terminal-node-executable "$TEST_NODE_EXECUTABLE" --tunnel-client-executable /usr/local/bin/tunnel-client --dry-run >/dev/null
 
 ISOLATED_DEPLOY=$TMP/isolated-deploy
 ISOLATED_UNITS=$TMP/isolated-units
@@ -198,6 +198,7 @@ release_script --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$THREE" \
   --tunnel-profile /etc/pickleshell-test/tunnel-client/pickleshell-test.yaml \
   --terminal-socket /run/pickleshell-test-terminal/service.sock \
   --node-executable "$TEST_NODE_EXECUTABLE" \
+  --terminal-node-executable "$TEST_NODE_EXECUTABLE" \
   --tunnel-client-executable /usr/local/bin/tunnel-client \
   --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS"
 for unit in pickleshell-test-gateway.service pickleshell-test-tunnel.service pickleshell-test-terminal.service; do
@@ -373,6 +374,7 @@ release_script --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$FOUR" \
   --mcp-service pickleshell-test-tunnel.service \
   --terminal-service pickleshell-test-terminal.service --include-terminal \
   --node-executable "$TEST_NODE_EXECUTABLE" \
+  --terminal-node-executable "$TEST_NODE_EXECUTABLE" \
   --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS" >/dev/null
 [[ $(readlink "$ISOLATED_DEPLOY/active") == releases/$FOUR ]]
 [[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$FOUR ]]
