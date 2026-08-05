@@ -63,7 +63,9 @@ FAKE_TAR
 chmod +x "$BIN/tar"
 
 FAKE_CHOWN_LOG=$TMP/chown.log
+FAKE_IDENTITY_LOG=$TMP/identity.log
 export FAKE_CHOWN_LOG
+export FAKE_IDENTITY_LOG
 cat > "$BIN/chown" <<'FAKE_CHOWN'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -105,13 +107,77 @@ release_script() {
 cat > "$BIN/id" <<'FAKE_ID'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-if [[ $1 == -u ]]; then printf '0\n'; exit 0; fi
-case "$1" in
-  pickleshell-test|pickleshell-test-tunnel|pickleshell-test-terminal|release-gateway|release-mcp|release-terminal) exit 0 ;;
+fake_user_id() {
+  case "$1" in
+    pickleshell) printf '1801\n' ;;
+    pickleshell-tunnel) printf '1802\n' ;;
+    pickleshell-terminal) printf '1803\n' ;;
+    pickleshell-test) printf '1811\n' ;;
+    pickleshell-test-tunnel) printf '1812\n' ;;
+    pickleshell-test-terminal) printf '1813\n' ;;
+    release-gateway) printf '1821\n' ;;
+    release-mcp) printf '1822\n' ;;
+    release-terminal) printf '1823\n' ;;
+    *) return 1 ;;
+  esac
+}
+if [[ $# -eq 1 && $1 == -u ]]; then printf '0\n'; exit 0; fi
+if [[ $# -eq 2 && $1 == -u ]] && uid=$(fake_user_id "$2"); then
+  printf 'fake-id user %s %s\n' "$2" "$uid" >> "${FAKE_IDENTITY_LOG:-/dev/null}"
+  printf '%s\n' "$uid"
+  exit 0
+fi
+case "${1:-}" in
+  pickleshell|pickleshell-tunnel|pickleshell-terminal|pickleshell-test|pickleshell-test-tunnel|pickleshell-test-terminal|release-gateway|release-mcp|release-terminal)
+    uid=$(fake_user_id "$1")
+    printf 'fake-id user %s %s\n' "$1" "$uid" >> "${FAKE_IDENTITY_LOG:-/dev/null}"
+    printf 'uid=%s(%s) gid=%s(%s) groups=%s(%s)\n' "$uid" "$1" "$uid" "$1" "$uid" "$1"
+    exit 0
+    ;;
   *) exec /usr/bin/id "$@" ;;
 esac
 FAKE_ID
 chmod +x "$BIN/id"
+
+cat > "$BIN/getent" <<'FAKE_GETENT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+fake_group_id() {
+  case "$1" in
+    pickleshell) printf '1801\n' ;;
+    pickleshell-tunnel) printf '1802\n' ;;
+    pickleshell-terminal) printf '1803\n' ;;
+    pickleshell-test) printf '1811\n' ;;
+    pickleshell-test-tunnel) printf '1812\n' ;;
+    pickleshell-test-terminal) printf '1813\n' ;;
+    release-gateway) printf '1821\n' ;;
+    release-mcp) printf '1822\n' ;;
+    release-terminal) printf '1823\n' ;;
+    *) return 1 ;;
+  esac
+}
+if [[ $# -eq 2 && $1 == group ]] && gid=$(fake_group_id "$2"); then
+  printf 'fake-getent group %s %s\n' "$2" "$gid" >> "${FAKE_IDENTITY_LOG:-/dev/null}"
+  printf '%s:x:%s:\n' "$2" "$gid"
+  exit 0
+fi
+exec /usr/bin/getent "$@"
+FAKE_GETENT
+chmod +x "$BIN/getent"
+
+id pickleshell >/dev/null
+id pickleshell-tunnel >/dev/null
+id pickleshell-terminal >/dev/null
+getent group pickleshell >/dev/null
+getent group pickleshell-tunnel >/dev/null
+getent group pickleshell-terminal >/dev/null
+if id pickleshell-missing >/dev/null 2>&1; then exit 1; fi
+grep -q '^fake-id user pickleshell 1801$' "$FAKE_IDENTITY_LOG"
+grep -q '^fake-id user pickleshell-tunnel 1802$' "$FAKE_IDENTITY_LOG"
+grep -q '^fake-id user pickleshell-terminal 1803$' "$FAKE_IDENTITY_LOG"
+grep -q '^fake-getent group pickleshell 1801$' "$FAKE_IDENTITY_LOG"
+grep -q '^fake-getent group pickleshell-tunnel 1802$' "$FAKE_IDENTITY_LOG"
+grep -q '^fake-getent group pickleshell-terminal 1803$' "$FAKE_IDENTITY_LOG"
 
 cat > "$BIN/runuser" <<'FAKE_RUNUSER'
 #!/usr/bin/env bash
