@@ -48,12 +48,25 @@ jobs:
           matrix_version=$(node -p 'process.versions.node')
           sudo install -d -o root -g root -m 0755 /opt /opt/pickleshell /opt/pickleshell/runtime /opt/pickleshell/runtime/ci-node /opt/pickleshell/runtime/ci-node/bin
           sudo install -o root -g root -m 0755 "$matrix_node" /opt/pickleshell/runtime/ci-node/bin/node
+          if [[ -e /usr/local/bin/tunnel-client ]]; then
+            printf 'CI tunnel-client fixture path already exists: /usr/local/bin/tunnel-client\n' >&2
+            exit 1
+          fi
+          sudo install -d -o root -g root -m 0755 /usr/local /usr/local/bin
+          tunnel_stub=$(mktemp)
+          cat >"$tunnel_stub" <<'STUB'
+          #!/usr/bin/env bash
+          printf 'CI tunnel-client validation stub must not be executed\n' >&2
+          exit 99
+          STUB
+          sudo install -o root -g root -m 0755 "$tunnel_stub" /usr/local/bin/tunnel-client
+          rm -f -- "$tunnel_stub"
           staged_version=$(/opt/pickleshell/runtime/ci-node/bin/node -p 'process.versions.node')
           if [[ $staged_version != "$matrix_version" ]]; then
             printf 'staged Node version mismatch: matrix=%s staged=%s\n' "$matrix_version" "$staged_version" >&2
             exit 1
           fi
-          for path in /opt /opt/pickleshell /opt/pickleshell/runtime /opt/pickleshell/runtime/ci-node /opt/pickleshell/runtime/ci-node/bin /opt/pickleshell/runtime/ci-node/bin/node; do
+          for path in /opt /opt/pickleshell /opt/pickleshell/runtime /opt/pickleshell/runtime/ci-node /opt/pickleshell/runtime/ci-node/bin /opt/pickleshell/runtime/ci-node/bin/node /usr/local /usr/local/bin /usr/local/bin/tunnel-client; do
             [[ $(stat -c '%u' -- "$path") == 0 ]] || { printf 'trusted CI Node path is not root-owned: %s\n' "$path" >&2; exit 1; }
             mode=$(stat -c '%a' -- "$path")
             (( (8#$mode & 022) == 0 )) || { printf 'trusted CI Node path is group/other writable: %s mode=%s\n' "$path" "$mode" >&2; exit 1; }
@@ -92,6 +105,8 @@ jobs:
       - name: Cgroup integration gate
         run: |
           echo 'SKIP: privileged cgroup integration requires a separately delegated systemd contour; standard GitHub runners do not run it'
-      - name: Clean trusted CI Node
+      - name: Clean trusted CI fixtures
         if: always()
-        run: sudo rm -rf -- /opt/pickleshell/runtime/ci-node
+        run: |
+          sudo rm -f -- /usr/local/bin/tunnel-client
+          sudo rm -rf -- /opt/pickleshell/runtime/ci-node
