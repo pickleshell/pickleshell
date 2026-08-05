@@ -9,6 +9,114 @@ PickleShell is a Linux-only monorepo:
 - `mcp-server/` is TypeScript/ESM and owns the public MCP schema, Base64 file
   validation, temporary decoding, and Gateway HTTP client.
 
+## Operational installation route
+
+This repository is the v0.1.2 PickleShell Workstation release. It contains
+these independently supervised components:
+
+- Gateway and Agent runtimes: OpenCode (default) and native Codex;
+- MCP server and the official outbound `tunnel-client`;
+- Playwright Browser MCP runtime;
+- persistent Terminal PTY service with systemd/cgroup-v2 lifecycle cleanup;
+- immutable release staging, activation, readiness checks, and rollback.
+
+Do not treat this file as a replacement for the deployment procedures. Read
+the following sources in this order before installing a clean machine:
+
+1. `README.md` for the product shape and requirements;
+2. `docs/deployment.md` for users, directories, credentials, systemd, Browser,
+   Terminal, tunnel, immutable releases, upgrades, and rollback;
+3. `docs/models.md` for the model allowlist and runtime-specific model rules;
+4. `docs/chatgpt.md` for Secure MCP Tunnel, plugin setup, refresh, and smoke
+   tests;
+5. `docs/terminal-pty-design.md` for the Terminal contract and cgroup policy;
+6. `deploy/release.sh` and the current systemd templates for the exact
+   installer arguments, service names, paths, and safety checks.
+
+Required installation order on a fresh Linux host:
+
+1. Confirm Linux, Node.js 20+, systemd/cgroup-v2, `setfacl`/`getfacl`, the
+   official `tunnel-client`, and outbound HTTPS to `api.openai.com:443`.
+2. Clone a clean checkout, fetch the intended full commit, and verify the
+   worktree is clean; never deploy an uncommitted tree.
+3. Create the dedicated Gateway, MCP/tunnel, and Terminal users/directories;
+   keep service homes, caches, workspaces, sockets, and credentials separate.
+4. Install Node dependencies and build Gateway, MCP, and Terminal with the
+   deployed Node executable. Install OpenCode and Codex for their intended OS
+   users, authenticate them without printing credentials, and install the
+   Playwright Chromium revision matching the deployed package.
+5. Create `/etc/pickleshell` configuration and operator-owned credentials with
+   mode `0600`; configure the smallest workspace and model allowlists needed.
+6. Activate the exact commit with `deploy/release.sh`, then install/reload only
+   the rendered units and start Gateway, Terminal, and MCP/tunnel as selected.
+7. Create and validate the tunnel profile, start `tunnel-client`, and verify
+   local `healthz`/`readyz` before opening the ChatGPT plugin.
+8. Run the release, Agent, Codex, Browser, Terminal, and MCP tunnel smoke tests
+   below. If activation or readiness fails, use the recorded `active` and
+   `state/previous-target` rollback instead of editing release trees manually.
+
+The immutable deployment entry point is, from a clean checkout:
+
+```bash
+sudo deploy/release.sh \
+  --source /path/to/clean/checkout \
+  --root /opt/pickleshell \
+  --commit <full-git-sha> \
+  --gateway-user <gateway-user> \
+  --mcp-user <mcp-user> \
+  --terminal-user <terminal-user> \
+  --include-terminal
+```
+
+The installer stages `releases/<full-sha>` and atomically updates `active`.
+`--include-terminal` is required to change the shipped Terminal unit; omit it
+for a separately managed Terminal profile. Use `--rollback` only when a
+previous target exists. Use the `isolated` profile and dedicated
+test prefixes for rehearsals; never pass production paths to an isolated test.
+
+Runtime selection is explicit and has no fallback:
+
+- `runtime: "opencode"` uses the supported default OpenCode adapter and its
+  configured/default model;
+- `runtime: "codex"` uses the native Codex adapter and Codex-compatible model
+  IDs only;
+- allowlists and model validation are independent per runtime;
+- an unavailable, forbidden, or incompatible runtime/model is rejected with a
+  structured error before a request/slot is created; it never falls back.
+
+`chat_id` selects a configured workspace. `request_id` identifies one async
+execution. `session_id` identifies the conversation context: OpenCode usually
+returns `ses_...`, while Codex returns its thread/session identifier. New
+requests without `session_id` create a new context and are tracked by
+`request_id`; continuation must use the `session_id` returned by
+`session-output`.
+
+Deployment is successful only when all of these are true:
+
+- the exact commit is active, services are `active`, `NRestarts` is stable, and
+  Gateway `/health` plus tunnel `/healthz` and `/readyz` pass;
+- an Agent `PONG` works through the deployed MCP path, OpenCode remains the
+  default, and an explicit Codex request completes with a real session ID and
+  resume works without fallback;
+- Browser navigate/snapshot/screenshot succeeds with the deployed Chromium;
+- Terminal spawn/write/output/resize/signal/close succeeds, including PTY
+  reconnect, TTL cleanup, and delegated cgroup integration;
+- the ChatGPT plugin exposes the current tools and the async
+  `send-chat -> session-status -> session-output` flow passes, including file
+  transfer and cancellation where configured;
+- `npm test`, `npm run build`, `npm run audit`, `bash test/deployment-release.test.sh`,
+  and `git diff --check` pass. Run the cgroup integration test when the host
+  supports delegated cgroup-v2.
+
+Clean-install lessons from the clean-install gate are part of the contract: a fresh host
+must provide the three service identities, systemd/cgroup-v2 delegation,
+`setfacl` and `getfacl`, a writable cache for the exact Playwright revision, and
+credentials owned by the service user. Terminal keeps `ProtectHome=true` and
+ordinary `NoNewPrivileges=true`; workspace access is granted by the release
+installer's ACL/bind setup, not by giving the Terminal account sudo. A clean
+install must not reuse another host's homes, tunnel profile, browser cache, or
+credentials.
+
 ## Identifier terminology
 
 | Identifier | Meaning |
