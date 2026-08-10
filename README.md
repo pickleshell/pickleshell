@@ -258,7 +258,8 @@ flowchart LR
 
 Destination resolution: `files[].dest_dir` > `destination_dir` > `.inbox/<request-id>/`.
 
-> **Important limitation:** the current ChatGPT custom MCP integration does not
+> [!WARNING]
+> **Warning:** the current ChatGPT custom MCP integration does not
 > expose ChatGPT attachments or Library files to custom tools as redeemable
 > opaque references or short-lived URLs. PickleShell therefore receives file
 > contents inline as Base64 in the `send-chat` tool arguments. This increases
