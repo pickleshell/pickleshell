@@ -94,6 +94,20 @@ implemented, while Settings remains the next planned milestone.
 - [ ] Classify agent failures, provider failures, timeouts, and cancellations
       without exposing secrets or raw credentials.
 - [ ] Define and test retention/cleanup behavior for completed request buffers.
+- [ ] Target the next patch release for the confirmed production file-transfer
+      isolation bug: MCP/tunnel stages files under `/run/pickleshell-mcp` as
+      `pickleshell-tunnel` with restrictive permissions, while Gateway runs as
+      `pickleshell` and receives temp source paths but hits `EACCES` before the
+      destination copy. Implement a secure cross-service handoff using a
+      dedicated shared group/ACL or equivalent, without world-readable
+      permissions; update systemd/deployment templates and clean-install
+      behavior; add regression/integration coverage with distinct service users
+      and a live transfer matrix for explicit destinations and default
+      `.inbox`; preserve cleanup, symlink protections, and least privilege.
+- [ ] Continue investigating practical file-transfer paths that avoid embedding
+      Base64 payloads in ChatGPT MCP arguments. Document the current manual
+      fallback and revisit the design if OpenAI adds native file references or
+      binary MCP input; OpenAI has been notified about this platform limitation.
 
 ### Deferred features
 
