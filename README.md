@@ -258,6 +258,15 @@ flowchart LR
 
 Destination resolution: `files[].dest_dir` > `destination_dir` > `.inbox/<request-id>/`.
 
+> **Important limitation:** the current ChatGPT MCP interface has no practical
+> direct binary or Library-file reference channel for custom tools. PickleShell
+> therefore receives attachments as Base64 text in the tool call, which can
+> consume substantial context and input tokens, especially for images and
+> larger files. There is currently no simple alternative that avoids this
+> limitation. For anything beyond a very small attachment, transfer the file
+> manually to the workspace; use MCP file transfer only for small files when
+> the additional token cost is acceptable.
+
 The Gateway writes through directory file descriptors with `O_NOFOLLOW`, rejects
 symbolic links as destinations, and publishes results atomically.
 
