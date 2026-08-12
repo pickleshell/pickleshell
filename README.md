@@ -156,7 +156,7 @@ The three mandatory core services all run locally on your machine:
 
 | Service | Status | Notes |
 | --- | --- | --- |
-| **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface and has been verified through the reference test tunnel. |
+| **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface. Codex defaults to the exec transport; the experimental MCP transport is selected internally with `codex.transport` and requires the Codex `0.143.0` `codex`/`codex-reply` MCP tool surface. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
 | **Terminal** | Implemented, E2E verified across reference profiles | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. The clean external release-installation gate remains open. |
 
@@ -237,6 +237,11 @@ through `session-output`.
 **Session locking:** concurrent `send-chat` requests to the same explicit
 `session_id` receive a `409 session_busy` response. Independent sessions run in
 parallel without interference.
+
+For Codex MCP transport, new sessions call the Codex MCP `codex` tool and
+continuations call `codex-reply` with the returned thread id. Cancelled or timed
+out MCP calls recycle the affected worker; there is no automatic fallback to
+exec when `mcp` is explicitly configured.
 
 ## File Transfer
 

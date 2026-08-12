@@ -9,6 +9,9 @@
   "allowed_runtimes": [
     "opencode"
   ],
+  "codex": {
+    "transport": "exec"
+  },
   "allowed_models": [
     "opencode/big-pickle",
     "opencode/deepseek-v4-flash-free",

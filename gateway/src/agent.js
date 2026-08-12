@@ -102,7 +102,14 @@ function validateRuntimeModel(runtimeName, model) {
   return adapter.validateModel(model);
 }
 
-function runAgentRequest({ runtime, request_id, chatId, message, workspace, timeoutSec, session_id, model, fileSummary, onProgress }) {
+function isRuntimeTransportAvailable(runtimeName, transport) {
+  const adapter = getRuntime(runtimeName);
+  if (!adapter || !isRuntimeAvailable(runtimeName)) return false;
+  if (typeof adapter.isTransportAvailable !== 'function') return true;
+  return adapter.isTransportAvailable(transport);
+}
+
+function runAgentRequest({ runtime, request_id, chatId, message, workspace, timeoutSec, session_id, model, fileSummary, onProgress, transport }) {
   const runtimeName = runtime || RUNTIME_OPENCODE;
   const requestId = request_id || generateRequestId();
   const startedMs = Date.now();
@@ -140,6 +147,24 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
         throw error;
       }
     }
+
+    if (typeof adapter.runRequest === 'function') {
+      const custom = adapter.runRequest({
+        runtime: runtimeName,
+        transport,
+        request_id: requestId,
+        chatId,
+        message,
+        workspace,
+        timeoutSec,
+        session_id,
+        model,
+        fileSummary,
+        onProgress,
+      });
+      if (custom) return custom;
+    }
+
     const prompt = adapter.buildPrompt(message, fileSummary);
     const args = adapter.buildArgs(prompt, workspace, session_id, model);
 
@@ -259,6 +284,7 @@ module.exports = {
   classifyOutcome,
   generateRequestId,
   validateRuntimeModel,
+  isRuntimeTransportAvailable,
   runAgentRequest,
   sendMessage,
 };

@@ -127,6 +127,9 @@ async function main() {
 
     assert(config.normalizeRuntime('  OpenCode ') === 'opencode', 'normalizeRuntime trims and lowercases');
     assert(config.normalizeRuntime('Codex') === 'codex', 'normalizeRuntime recognizes codex');
+    assert(config.normalizeCodexTransport(undefined) === 'exec', 'Codex transport defaults to exec');
+    assert(config.normalizeCodexTransport(' MCP ') === 'mcp', 'Codex transport names are normalized');
+    assert(config.normalizeCodexTransport('bogus') === null, 'unknown Codex transport is invalid');
   }
 
   // ==============================================
@@ -216,7 +219,34 @@ async function main() {
   }
 
   // ==============================================
-  // 7. Chat endpoint rejects non-openCode runtimes
+  // 7. Codex transport selection
+  // ==============================================
+  {
+    const config = loadConfig({
+      codex: { transport: 'mcp' },
+      chats: {
+        codexChat: { workspace: tempDir, runtime: 'codex' },
+        execChat: { workspace: tempDir, runtime: 'codex', codex: { transport: 'exec' } },
+        badChat: { workspace: tempDir, runtime: 'codex', codex: { transport: 'bogus' } },
+      },
+      allowed_runtimes: ['opencode', 'codex'],
+    });
+
+    assert(config.resolveCodexTransport('codexChat').transport === 'mcp', 'global codex.transport resolves');
+    assert(config.resolveCodexTransport('execChat').transport === 'exec', 'per-chat codex.transport overrides global');
+    assert(config.resolveCodexTransport('badChat').status === 'invalid', 'invalid per-chat codex.transport is rejected');
+  }
+
+  {
+    const config = loadConfig({
+      codex: null,
+      chats: { codexChat: { workspace: tempDir, runtime: 'codex' } },
+    });
+    assert(config.resolveCodexTransport('codexChat').status === 'invalid', 'non-object global codex config is rejected');
+  }
+
+  // ==============================================
+  // 8. Chat endpoint rejects non-openCode runtimes
   // ==============================================
   const codexAdapter = registry.getRuntime('codex');
   registry.registerRuntime('codex', { name: 'codex-unavailable', isAvailable: () => false });

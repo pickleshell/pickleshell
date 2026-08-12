@@ -17,6 +17,14 @@ names may be mapped by the adapter before execution, so the ID accepted by the
 Gateway is the stable control-plane value, not necessarily the final provider
 wire value.
 
+Codex also has an internal transport selector while the public runtime remains
+`codex`. `codex.transport` accepts `exec` or `mcp` and defaults to `exec`;
+`chats.<chat_id>.codex.transport` can override the global value. The
+experimental `mcp` transport is version-sensitive and currently requires the
+Codex `0.143.0` MCP surface with exactly `codex` and `codex-reply`. Invalid,
+unavailable, or incompatible transport selection is rejected without automatic
+fallback to exec.
+
 Provider availability also depends on local authentication and account access.
 A model can be present in the allowlist and still fail at runtime when the
 corresponding provider credentials, subscription, regional access, or backend

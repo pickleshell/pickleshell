@@ -79,7 +79,9 @@ Runtime selection is explicit and has no fallback:
 - `runtime: "opencode"` uses the supported default OpenCode adapter and its
   configured/default model;
 - `runtime: "codex"` uses the native Codex adapter and Codex-compatible model
-  IDs only;
+  IDs only. Its internal `codex.transport` selector defaults to `exec`; `mcp`
+  is experimental and requires the Codex `0.143.0` `codex`/`codex-reply` MCP
+  tool surface;
 - allowlists and model validation are independent per runtime;
 - an unavailable, forbidden, or incompatible runtime/model is rejected with a
   structured error before a request/slot is created; it never falls back.

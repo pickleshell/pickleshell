@@ -123,6 +123,8 @@ the chat runtime and then `default_runtime`. OpenCode remains the default. The
 deprecated `agent` field is accepted as a compatibility alias. `model` must be
 allowed by the operator and compatible with the selected runtime; Codex model
 IDs are unqualified (for example, `gpt-5.3-codex`) rather than provider-prefixed.
+Codex `exec`/`mcp` transport selection is internal Gateway configuration and
+does not add a public MCP tool or request field.
 
 File limits: 20 files per request, 2 MiB per file, 10 MiB total.
 

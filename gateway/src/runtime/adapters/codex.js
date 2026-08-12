@@ -1,233 +1,79 @@
-// Native Codex CLI runtime adapter.
-//
-// Codex is deliberately kept behind the same runtime-neutral adapter
-// contract as OpenCode. The supervisor owns process groups, timeout and
-// cancellation; this module owns Codex argv, CODEX_HOME policy and JSONL
-// normalization.
+// Native Codex runtime adapter selector.
 
-const path = require('path');
-const { spawnSync } = require('child_process');
-const { createAgentEvent } = require('../normalize');
+const execAdapter = require('./codex-exec');
+const mcpAdapter = require('./codex-mcp');
+const { buildMetadata } = require('../normalize');
 
-const CODEX_COMMAND = process.env.CODEX_COMMAND || 'codex';
+const TRANSPORT_EXEC = 'exec';
+const TRANSPORT_MCP = 'mcp';
 
-const ALLOWED_ENV_KEYS = new Set([
-  'PATH', 'HOME', 'LANG', 'LC_ALL',
-  'TMPDIR', 'TMP', 'TEMP',
-  'TZ', 'USER', 'LOGNAME',
-  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
-  'http_proxy', 'https_proxy', 'no_proxy',
-  'SSL_CERT_FILE', 'SSL_CERT_DIR',
-]);
+function normalizeTransport(value) {
+  if (value === undefined || value === null) return TRANSPORT_EXEC;
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized === TRANSPORT_EXEC || normalized === TRANSPORT_MCP ? normalized : null;
+}
 
-const SYSTEM_INSTRUCTION = `You are a PickleShell Gateway worker.
-
-You receive high-level text instructions from an external architect.
-You work only inside the workspace assigned to the current chat_id.
-Do not read secrets, private keys, .env files, credentials, or unrelated directories.
-Do not modify production services.
-Do not run destructive actions unless the instruction contains the exact phrase APPROVE_DESTRUCTIVE_ACTION.
-
-File handling:
-- Files listed in the message as delivered to the workspace are already at their final destination.
-- Do not move files from .inbox/ or any temporary directory.
-- Do not modify the .inbox/ directory.
-
-When creating or editing files, return:
-- changed file paths
-- short summary
-- git diff if the workspace is a git repository
-If you cannot safely complete the request, explain why.`;
-
-function buildChildEnv(sourceEnv = process.env) {
-  const childEnv = {};
-  for (const key of ALLOWED_ENV_KEYS) {
-    if (sourceEnv[key] !== undefined) childEnv[key] = sourceEnv[key];
-  }
-
-  // Codex stores auth/config under CODEX_HOME. Set it explicitly so the
-  // runtime does not silently inherit a different user's default location.
-  childEnv.CODEX_HOME = sourceEnv.CODEX_HOME || path.join(sourceEnv.HOME || '/tmp', '.codex');
-  return childEnv;
+function getTransportAdapter(transport) {
+  const normalized = normalizeTransport(transport);
+  if (!normalized) return null;
+  if (normalized === TRANSPORT_MCP) return mcpAdapter;
+  return execAdapter;
 }
 
 function isAvailable() {
-  try {
-    const result = spawnSync(CODEX_COMMAND, ['--version'], {
-      env: buildChildEnv(),
-      stdio: 'ignore',
-    });
-    return result.status === 0;
-  } catch (_) {
-    return false;
-  }
+  return execAdapter.isAvailable() || mcpAdapter.isAvailable();
 }
 
-function buildPrompt(message, fileSummary) {
-  const filePrompt = fileSummary
-    ? require('../../file-transfer').buildFileSummaryPrompt(fileSummary)
-    : '';
-  return `${SYSTEM_INSTRUCTION}\n\nUser instruction: ${message}${filePrompt}`;
+function isTransportAvailable(transport) {
+  const normalized = normalizeTransport(transport);
+  if (!normalized) return false;
+  return getTransportAdapter(normalized).isAvailable();
 }
 
-function buildArgs(prompt, workspace, sessionId, model) {
-  const args = [
-    'exec',
-    '--json',
-    '--cd', workspace,
-    '--skip-git-repo-check',
-    '--dangerously-bypass-approvals-and-sandbox',
-  ];
-  if (model) args.push('--model', model);
-
-  if (sessionId) {
-    args.push('resume', sessionId, prompt);
-  } else {
-    args.push(prompt);
-  }
-  return args;
-}
-
-function validateModel(model) {
-  if (model && model.includes('/')) {
+function runRequest(options) {
+  const adapter = getTransportAdapter(options.transport);
+  if (!adapter) {
+    const now = new Date().toISOString();
     return {
-      class: 'unsupported_model',
-      message: 'Codex model must be an unqualified Codex CLI model id, without a provider namespace',
+      promise: Promise.resolve({
+        ok: false,
+        runtime: 'codex',
+        request_id: options.request_id || null,
+        session_id: options.session_id || null,
+        state: 'error',
+        reply: null,
+        events: [],
+        metadata: buildMetadata([], 'codex_transport_invalid'),
+        error: {
+          class: 'codex_transport_invalid',
+          message: 'Invalid Codex transport configured',
+          exit_code: null,
+          signal: null,
+        },
+        started_at: now,
+        completed_at: now,
+        duration_ms: 0,
+        sessionId: options.session_id || null,
+        cancelled: false,
+      }),
+      cancel: () => false,
     };
   }
+  if (adapter.runRequest) return adapter.runRequest(options);
   return null;
 }
 
-function parseLine(line) {
-  return JSON.parse(line);
-}
-
-function commandText(value) {
-  if (Array.isArray(value)) return value.join(' ');
-  return typeof value === 'string' ? value : '';
-}
-
-function errorMessage(event) {
-  return event.message || event.error?.message || event.item?.message || 'Codex returned an error';
-}
-
-function normalizeEvent(event) {
-  if (!event || typeof event !== 'object') return [];
-
-  if (event.type === 'error' || event.type === 'turn.failed') {
-    return [createAgentEvent('error', {
-      details: errorMessage(event),
-      error_class: 'agent_error',
-    })];
-  }
-
-  if (event.type !== 'item.started' && event.type !== 'item.completed') return [];
-
-  const item = event.item || {};
-  const status = event.type === 'item.completed' ? 'done' : 'running';
-
-  if (item.type === 'agent_message') {
-    return item.text
-      ? [createAgentEvent('text', { text: item.text })]
-      : [];
-  }
-
-  if (item.type === 'command_execution') {
-    const command = commandText(item.command);
-    return [createAgentEvent('tool', {
-      tool: 'bash',
-      status,
-      title: command,
-      input: command ? { command } : null,
-      output: item.aggregated_output || item.output || '',
-    })];
-  }
-
-  if (item.type === 'file_change') {
-    return (item.changes || []).map((change) => createAgentEvent('tool', {
-      tool: 'file_edit',
-      status,
-      title: change.path || 'file change',
-      input: change.path ? { filePath: change.path } : null,
-      output: change.diff || change.kind || '',
-    }));
-  }
-
-  if (item.type === 'error') {
-    return [createAgentEvent('error', {
-      details: errorMessage(event),
-      error_class: 'agent_error',
-    })];
-  }
-
-  return [];
-}
-
-function parseJsonOutput(stdout) {
-  const events = stdout.split('\n').filter((line) => line.trim()).map(parseLine);
-  const text = events
-    .flatMap((event) => normalizeEvent(event))
-    .filter((event) => event.type === 'text')
-    .map((event) => event.text)
-    .join('\n');
-  const thread = events.find((event) => event.type === 'thread.started');
-  return { text, sessionId: thread?.thread_id || null };
-}
-
-function createStreamHandler({ onProgress }) {
-  let sessionIdFound = null;
-  let agentError = null;
-  const textParts = [];
-  const events = [];
-
-  return {
-    handleLine(line) {
-      const event = parseLine(line);
-      if (event.type === 'thread.started' && event.thread_id && !sessionIdFound) {
-        sessionIdFound = event.thread_id;
-      }
-
-      if (event.type === 'error' || event.type === 'turn.failed' || event.item?.type === 'error') {
-        agentError = errorMessage(event);
-      }
-
-      for (const normalized of normalizeEvent(event)) {
-        events.push(normalized);
-        if (normalized.type === 'text' && normalized.text) textParts.push(normalized.text);
-        if (onProgress) {
-          try { onProgress(normalized); } catch (err) {
-            console.error(`[CODEX] onProgress consumer failed: ${err.message}`);
-          }
-        }
-      }
-    },
-    getSessionId() {
-      return sessionIdFound;
-    },
-    getError() {
-      return agentError;
-    },
-    getReply(fallback) {
-      return textParts.join('\n') || fallback;
-    },
-    getEvents() {
-      return events;
-    },
-  };
-}
-
 module.exports = {
+  ...execAdapter,
   name: 'codex',
-  command: CODEX_COMMAND,
-  ALLOWED_ENV_KEYS,
-  SYSTEM_INSTRUCTION,
-  buildChildEnv,
+  normalizeTransport,
   isAvailable,
-  buildPrompt,
-  buildArgs,
-  validateModel,
-  parseLine,
-  parseJsonOutput,
-  normalizeEvent,
-  createStreamHandler,
+  isTransportAvailable,
+  getTransportAdapter,
+  runRequest,
+  transports: {
+    exec: execAdapter,
+    mcp: mcpAdapter,
+  },
 };

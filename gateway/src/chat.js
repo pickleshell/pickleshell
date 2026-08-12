@@ -130,6 +130,28 @@ const chatHandler = async (req, res) => {
       });
     }
 
+    let codexTransport = null;
+    if (runtime.runtime === 'codex') {
+      const resolvedTransport = config.resolveCodexTransport(chat_id);
+      if (resolvedTransport.status !== 'ok') {
+        return res.status(400).json({
+          ok: false,
+          chat_id,
+          error: 'codex_transport_invalid',
+          details: 'Invalid Codex transport configured for chat_id',
+        });
+      }
+      codexTransport = resolvedTransport.transport;
+      if (!agent.isRuntimeTransportAvailable(runtime.runtime, codexTransport)) {
+        return res.status(503).json({
+          ok: false,
+          chat_id,
+          error: 'runtime_unavailable',
+          details: `Codex transport "${codexTransport}" is unavailable or incompatible`,
+        });
+      }
+    }
+
     // Validate model compatibility before acquiring a slot. This prevents a
     // known runtime/model mismatch from returning busy and creating a request
     // buffer that can only fail asynchronously later.
@@ -291,6 +313,7 @@ const chatHandler = async (req, res) => {
       timeoutSec,
       session_id,
       model: resolvedModel,
+      transport: codexTransport,
       fileSummary,
       onProgress: (event) => concurrency.updateProgress(slotKey, event),
     });

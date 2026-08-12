@@ -59,6 +59,8 @@ const getTerminalPolicy = (chatId) => {
 // --- Runtime configuration (preparatory for Codex) ---
 
 const DEFAULT_RUNTIME = 'opencode';
+const DEFAULT_CODEX_TRANSPORT = 'exec';
+const KNOWN_CODEX_TRANSPORTS = ['exec', 'mcp'];
 
 // Recognized runtime names (validity). Availability is NOT maintained here:
 // it is derived from the adapters registered in runtime/registry.js, the
@@ -71,6 +73,13 @@ const normalizeRuntime = (value) => {
   if (typeof value !== 'string') return null;
   const normalized = value.trim().toLowerCase();
   return KNOWN_RUNTIMES.includes(normalized) ? normalized : null;
+};
+
+const normalizeCodexTransport = (value) => {
+  if (value === undefined) return DEFAULT_CODEX_TRANSPORT;
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return KNOWN_CODEX_TRANSPORTS.includes(normalized) ? normalized : null;
 };
 
 const getConfiguredDefaultRuntime = () => {
@@ -135,6 +144,33 @@ const resolveRuntime = (chatId, requestedRuntime) => {
   return { runtime, status: 'ok' };
 };
 
+const getGlobalCodexConfig = () => {
+  const config = loadConfig();
+  return config.codex === undefined ? {} : config.codex;
+};
+
+const getChatCodexConfig = (chatId) => {
+  const chatConfig = getChatConfig(chatId);
+  return chatConfig?.codex === undefined ? {} : chatConfig.codex;
+};
+
+const resolveCodexTransport = (chatId) => {
+  const globalCodex = getGlobalCodexConfig();
+  const chatCodex = getChatCodexConfig(chatId);
+  if (
+    (globalCodex === null || typeof globalCodex !== 'object' || Array.isArray(globalCodex)) ||
+    (chatCodex === null || typeof chatCodex !== 'object' || Array.isArray(chatCodex))
+  ) {
+    return { transport: null, status: 'invalid' };
+  }
+  const raw = chatCodex.transport !== undefined
+    ? chatCodex.transport
+    : globalCodex.transport;
+  const transport = normalizeCodexTransport(raw);
+  if (!transport) return { transport: null, status: 'invalid' };
+  return { transport, status: 'ok' };
+};
+
 const getAllowedModels = () => {
   const config = loadConfig();
   return config.allowed_models || [];
@@ -176,10 +212,12 @@ module.exports = {
   isModelAllowed,
   resolveModel,
   normalizeRuntime,
+  normalizeCodexTransport,
   getDefaultRuntime,
   getAllowedRuntimes,
   isRuntimeAllowed,
   isRuntimeAvailable,
   getChatRuntime,
-  resolveRuntime
+  resolveRuntime,
+  resolveCodexTransport
 };
