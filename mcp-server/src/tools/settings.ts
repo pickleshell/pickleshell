@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { GatewayError, type GatewayClient } from "../gateway-client.js";
 import type { GatewaySettings, MutableSettingName } from "../types.js";
@@ -35,11 +36,13 @@ function gatewayError(error: unknown): CallToolResult {
   return result({ ok: false, status: 503, error: "settings_unavailable", details: "Settings service is unavailable" }, true);
 }
 
-export function registerSettings(mcp: any, client: GatewayClient) {
-  mcp.tool(
+export function registerSettings(mcp: McpServer, client: GatewayClient) {
+  mcp.registerTool(
     "settings",
-    SETTINGS_TOOL_DESCRIPTION,
-    settingsSchema,
+    {
+      description: SETTINGS_TOOL_DESCRIPTION,
+      inputSchema: settingsSchema,
+    },
     async (rawArgs: unknown): Promise<CallToolResult> => {
       const parsed = settingsSchema.safeParse(rawArgs);
       if (!parsed.success) return result({ ok: false, error: "invalid_request", details: parsed.error.flatten() }, true);

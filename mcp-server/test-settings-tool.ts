@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { GatewayError } from "./src/gateway-client.js";
 import { registerSettings, settingsSchema, SETTINGS_TOOL_DESCRIPTION } from "./src/tools/settings.js";
 import { sendChatSchema, registerSendChat } from "./src/tools/send-chat.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 let passed = 0;
 function check(value: boolean, message: string) { assert.equal(value, true, message); passed++; }
@@ -14,7 +17,7 @@ const client: any = {
 };
 let handler: any;
 let registeredDescription = "";
-registerSettings({ tool(_name: string, description: string, _schema: unknown, callback: any) { registeredDescription = description; handler = callback; } }, client);
+registerSettings({ registerTool(_name: string, config: { description?: string }, callback: any) { registeredDescription = config.description ?? ""; handler = callback; } } as unknown as McpServer, client);
 check(registeredDescription === SETTINGS_TOOL_DESCRIPTION && registeredDescription.includes("Omit chat_id") && registeredDescription.includes("chat_id for that configured chat's overrides"), "settings description documents both scopes and precedence");
 check(settingsSchema.safeParse({ action: "describe" }).success, "global describe omits chat_id");
 check(settingsSchema.safeParse({ action: "get", chat_id: "chat" }).success, "chat_id is optional");
@@ -32,7 +35,7 @@ check(Array.isArray(calls[3][4]) && calls[3][4].length === 4, "empty reset means
 
 const errorClient: any = { async getSettings() { throw new GatewayError(409, { error: "revision_conflict", details: "conflict" }); } };
 let errorHandler: any;
-registerSettings({ tool(_n: string, _d: string, _s: unknown, callback: any) { errorHandler = callback; } }, errorClient);
+registerSettings({ registerTool(_n: string, _config: unknown, callback: any) { errorHandler = callback; } } as unknown as McpServer, errorClient);
 const errorResult = await errorHandler({ action: "get", chat_id: "chat" });
 check(errorResult.isError === true && parse(errorResult).status === 409 && parse(errorResult).error === "revision_conflict", "Gateway status and structured error preserved");
 
@@ -44,7 +47,7 @@ let sendHandler: any;
 const forwarded: any[] = [];
 registerSendChat({ tool(_n: string, _d: string, _s: unknown, callback: any) { sendHandler = callback; } }, {
   async chat(request: any) { forwarded.push(request); return { ok: true, chat_id: request.chat_id, request_id: "req_test", session_id: null, state: "busy", next_action: "session-status", retry_after_ms: 1 }; },
-} as any);
+} as unknown as import("./src/gateway-client.js").GatewayClient);
 await sendHandler({ chat_id: "chat", message: "hello", agent_timeout_sec: 10, codex_transport: "mcp" });
 check(forwarded[0].agent_timeout_sec === 10 && forwarded[0].codex_transport === "mcp", "send-chat forwards explicit settings");
 
@@ -57,5 +60,27 @@ await gateway.getSettings();
 await gateway.getSettings("chat id");
 globalThis.fetch = originalFetch;
 check(fetched[0] === "http://gateway/settings" && fetched[1] === "http://gateway/settings/chat%20id", "global and chat URLs are correct and encoded");
+
+const protocolCalls: string[] = [];
+const protocolServer = new McpServer({ name: "settings-regression", version: "1.0.0" });
+registerSettings(protocolServer, {
+  async getSettings(chatId?: string) {
+    protocolCalls.push(chatId ?? "global");
+    return { ok: true, chat_id: chatId, revision: 7 };
+  },
+  async updateSettings() { throw new Error("not used"); },
+} as unknown as import("./src/gateway-client.js").GatewayClient);
+const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+const protocolClient = new Client({ name: "settings-regression-client", version: "1.0.0" }, { capabilities: {} });
+await protocolServer.connect(serverTransport);
+await protocolClient.connect(clientTransport);
+const listed = await protocolClient.listTools();
+const settingsTools = listed.tools.filter((tool) => tool.name === "settings");
+check(settingsTools.length === 1, "MCP tools/list exposes settings exactly once");
+check(settingsTools[0].inputSchema.type === "object" && settingsTools[0].inputSchema.required?.includes("action") === true, "MCP settings input schema is valid");
+const described = await protocolClient.callTool({ name: "settings", arguments: { action: "describe" } });
+check(JSON.parse(String(described.content[0].text)).ok === true && protocolCalls[0] === "global", "MCP describe reaches the mock Gateway");
+await protocolClient.close();
+await protocolServer.close();
 
 console.log(`MCP scoped settings tool tests: ${passed} passed`);
