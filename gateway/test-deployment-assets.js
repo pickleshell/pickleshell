@@ -34,10 +34,22 @@ for (const line of [
   "Environment=XDG_CACHE_HOME=/var/cache/pickleshell/opencode",
   "Environment=CODEX_HOME=/var/lib/pickleshell/agent-home/.codex",
   "Environment=OPENCODE_CONFIG_DIR=/var/lib/pickleshell/config/opencode",
+  "Environment=SETTINGS_PATH=/var/lib/pickleshell-settings/settings.json",
+  "StateDirectory=pickleshell-settings",
+  "StateDirectoryMode=0700",
   "Environment=NPM_CONFIG_CACHE=/var/cache/pickleshell/npm",
   "NoNewPrivileges=true",
 ]) {
   assertIncludes(gatewayService, line, "gateway systemd template");
+}
+const gatewayTemplate = read("deploy/systemd/pickleshell-gateway.service.in");
+for (const line of [
+  "Environment=SETTINGS_PATH=/var/lib/pickleshell-settings/settings.json",
+  "StateDirectory=pickleshell-settings",
+  "StateDirectoryMode=0700",
+  "ReadWritePaths=/var/lib/pickleshell-settings",
+]) {
+  assertIncludes(gatewayTemplate, line, "gateway deployment template");
 }
 
 const tunnelService = read("mcp-server/systemd/pickleshell-tunnel.service");

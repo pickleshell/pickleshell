@@ -22,6 +22,8 @@ export interface ChatRequest {
   /** @deprecated Use runtime. */
   agent?: "opencode" | "codex";
   model?: string;
+  agent_timeout_sec?: number;
+  codex_transport?: "exec" | "mcp";
   destination_dir?: string;
   files?: FileItem[];
   file_paths?: FileTransfer[];
@@ -89,6 +91,34 @@ export interface GatewayConfig {
   url: string;
   api_key: string;
   timeout_ms: number;
+}
+
+export type MutableSettingName = "runtime" | "model" | "agent_timeout_sec" | "codex_transport";
+export interface GatewaySettings {
+  runtime?: "opencode" | "codex";
+  model?: string | null;
+  agent_timeout_sec?: number;
+  codex_transport?: "exec" | "mcp";
+}
+export interface SettingDefinition {
+  value: unknown;
+  label: string;
+  description: string;
+  source: "chat_setting" | "static_config" | "default";
+  allowed?: string[];
+  nullable?: boolean;
+  minimum?: number;
+  maximum?: number;
+}
+export interface SettingsResponse {
+  ok: boolean;
+  revision: number;
+  persisted: GatewaySettings;
+  effective: Partial<Required<GatewaySettings>>;
+  sources: Record<MutableSettingName, "global_setting" | "static_config" | "default" | "mixed_static_config">;
+  baseline?: Partial<Record<MutableSettingName, { global_static: unknown; chat_static_values: unknown[] }>>;
+  definitions: Record<MutableSettingName, SettingDefinition>;
+  settings: Record<MutableSettingName, SettingDefinition>;
 }
 
 export interface TerminalSpawnRequest {

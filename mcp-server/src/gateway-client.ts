@@ -1,12 +1,16 @@
-import type { ChatRequest, ChatResponse, GatewayConfig, SessionStatusResponse } from "./types.js";
+import type { ChatRequest, ChatResponse, GatewayConfig, SessionStatusResponse, SettingsResponse, GatewaySettings, MutableSettingName } from "./types.js";
 
 export interface GatewayErrorPayload {
+  ok?: boolean;
+  chat_id?: string;
+  revision?: number;
   error?: string;
   notification?: string;
   current_task?: string;
   elapsed_s?: number;
   progress?: unknown;
   details?: string;
+  [key: string]: unknown;
 }
 
 export class GatewayError extends Error {
@@ -24,6 +28,57 @@ export class GatewayClient {
 
   constructor(config: GatewayConfig) {
     this.config = config;
+  }
+
+  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeout_ms);
+    try {
+      const response = await fetch(`${this.config.url}${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${this.config.api_key}`,
+          ...(init.body ? { "Content-Type": "application/json" } : {}),
+          ...(init.headers ?? {}),
+        },
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new GatewayError(response.status, payload);
+      return payload;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async getSettings(chatId?: string): Promise<SettingsResponse> {
+    const path = chatId === undefined ? "/settings" : `/settings/${encodeURIComponent(chatId)}`;
+    return await this.request(path) as SettingsResponse;
+  }
+
+  async updateSettings(
+    chatId: string | undefined,
+    action: "set" | "reset",
+    settings?: GatewaySettings,
+    names?: MutableSettingName[],
+    expected_revision?: number,
+  ): Promise<SettingsResponse> {
+    const body = action === "set"
+      ? { action, settings, ...(expected_revision === undefined ? {} : { expected_revision }) }
+      : { action, names: names ?? [], ...(expected_revision === undefined ? {} : { expected_revision }) };
+    const path = chatId === undefined ? "/settings" : `/settings/${encodeURIComponent(chatId)}`;
+    return await this.request(path, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }) as SettingsResponse;
+  }
+
+  async setSettings(settings: GatewaySettings, expected_revision?: number): Promise<SettingsResponse> {
+    return this.updateSettings(undefined, "set", settings, undefined, expected_revision);
+  }
+
+  async resetSettings(names?: MutableSettingName[], expected_revision?: number): Promise<SettingsResponse> {
+    return this.updateSettings(undefined, "reset", undefined, names, expected_revision);
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {

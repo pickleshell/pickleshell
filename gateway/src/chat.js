@@ -2,7 +2,7 @@ const config = require('./config');
 const agent = require('./agent');
 const fileTransfer = require('./file-transfer');
 const concurrency = require('./concurrency');
-const { timeoutSec } = require('./timeout');
+const settings = require('./settings');
 const crypto = require('crypto');
 
 // Map the internal AgentResult.state onto the public execution-state
@@ -24,6 +24,8 @@ const chatHandler = async (req, res) => {
       agent: legacyAgent,
       session_id,
       model,
+      agent_timeout_sec: requestedTimeout,
+      codex_transport: requestedTransport,
       file_paths,
       destination_dir,
       idempotency_key,
@@ -89,108 +91,26 @@ const chatHandler = async (req, res) => {
       });
     }
 
-    // Resolve chat_id to workspace
     const chatConfig = config.getChatConfig(chat_id);
-    if (!chatConfig) {
-      return res.status(404).json({
-        ok: false,
-        error: 'unknown_chat_id',
-        details: `No workspace configured for chat_id: ${chat_id}`
-      });
-    }
-
-    // Reject execution when the configured runtime is invalid, not allowed,
-    // or not yet implemented. Never silently run OpenCode when Codex was
-    // explicitly configured.
+    const requestOverrides = {};
     const requestedRuntimeValue = requestedRuntime !== undefined ? requestedRuntime : legacyAgent;
-    const runtime = config.resolveRuntime(chat_id, requestedRuntimeValue);
-    if (runtime.status !== 'ok') {
-      const runtimeError = {
-        invalid: {
-          status: 400,
-          error: 'runtime_invalid',
-          details: `Invalid runtime configured for chat_id: ${chat_id}`,
-        },
-        not_allowed: {
-          status: 403,
-          error: 'runtime_not_allowed',
-          details: `Runtime "${runtime.runtime}" is not allowed for chat_id: ${chat_id}`,
-        },
-        unavailable: {
-          status: 503,
-          error: 'runtime_unavailable',
-          details: `Runtime "${runtime.runtime}" is configured but not yet available in this gateway build`,
-        },
-      }[runtime.status];
-      return res.status(runtimeError.status).json({
-        ok: false,
-        chat_id,
-        error: runtimeError.error,
-        details: runtimeError.details,
-      });
-    }
-
-    let codexTransport = null;
-    if (runtime.runtime === 'codex') {
-      const resolvedTransport = config.resolveCodexTransport(chat_id);
-      if (resolvedTransport.status !== 'ok') {
-        return res.status(400).json({
-          ok: false,
-          chat_id,
-          error: 'codex_transport_invalid',
-          details: 'Invalid Codex transport configured for chat_id',
-        });
+    if (requestedRuntimeValue !== undefined) requestOverrides.runtime = requestedRuntimeValue;
+    if (model !== undefined) requestOverrides.model = model;
+    if (requestedTimeout !== undefined) requestOverrides.agent_timeout_sec = requestedTimeout;
+    if (requestedTransport !== undefined) requestOverrides.codex_transport = requestedTransport;
+    let resolved;
+    try {
+      resolved = settings.resolve(chat_id, requestOverrides);
+    } catch (error) {
+      if (error instanceof settings.SettingsError) {
+        return res.status(error.status).json({ ok: false, chat_id, error: error.code, details: error.message });
       }
-      codexTransport = resolvedTransport.transport;
-      if (!agent.isRuntimeTransportAvailable(runtime.runtime, codexTransport)) {
-        return res.status(503).json({
-          ok: false,
-          chat_id,
-          error: 'runtime_unavailable',
-          details: `Codex transport "${codexTransport}" is unavailable or incompatible`,
-        });
-      }
+      throw error;
     }
-
-    // Validate model compatibility before acquiring a slot. This prevents a
-    // known runtime/model mismatch from returning busy and creating a request
-    // buffer that can only fail asynchronously later.
-    const hasExplicitModel = model !== undefined && model !== null;
-    const requestedModelError = hasExplicitModel
-      ? agent.validateRuntimeModel(runtime.runtime, model)
-      : null;
-    if (requestedModelError) {
-      return res.status(400).json({
-        ok: false,
-        chat_id,
-        error: 'runtime_model_invalid',
-        details: requestedModelError.message,
-      });
-    }
-
-    // Validate model against the operator allowlist.
-    // Codex owns its default model. Do not inject the gateway's OpenCode
-    // default_model when the request omitted model.
-    const resolvedModel = runtime.runtime === 'codex' && !hasExplicitModel
-      ? null
-      : config.resolveModel(model);
-    if (hasExplicitModel && !resolvedModel) {
-      return res.status(403).json({
-        ok: false,
-        error: 'forbidden_model',
-        details: 'Requested model is not allowed'
-      });
-    }
-
-    const effectiveModelError = agent.validateRuntimeModel(runtime.runtime, resolvedModel);
-    if (effectiveModelError) {
-      return res.status(400).json({
-        ok: false,
-        chat_id,
-        error: 'runtime_model_invalid',
-        details: effectiveModelError.message,
-      });
-    }
+    const runtime = { runtime: resolved.values.runtime };
+    const codexTransport = resolved.values.codex_transport;
+    const resolvedModel = resolved.values.model;
+    const timeoutSec = resolved.values.agent_timeout_sec;
 
     // Validate destination_dir if provided
     if (destination_dir) {
@@ -245,7 +165,7 @@ const chatHandler = async (req, res) => {
     }
 
     // One active request per session
-    const acquireResult = concurrency.acquire(chat_id, session_id, idempotency_key);
+    const acquireResult = concurrency.acquire(chat_id, session_id, idempotency_key, timeoutSec * 1000);
     if (!acquireResult.ok) {
       const progress = concurrency.getProgressBySession(chat_id, session_id);
       return res.status(409).json({

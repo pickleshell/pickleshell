@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node test-agent-command.js && node test-env-isolation.js && node test-deployment-assets.js && node test-runtime.js && node test-codex.js && node test-codex-mcp.js && node test-config.js && node test-auth.js && node test-file-transfer.js && node test-concurrency.js && node test-terminal-client.js && node test-e2e.js",
+    "test": "node test-agent-command.js && node test-env-isolation.js && node test-deployment-assets.js && node test-runtime.js && node test-codex.js && node test-codex-mcp.js && node test-config.js && node test-settings.js && node test-settings-http.js && node test-auth.js && node test-file-transfer.js && node test-concurrency.js && node test-terminal-client.js && node test-e2e.js",
     "test:smoke": "node test.js"
   },
   "dependencies": {

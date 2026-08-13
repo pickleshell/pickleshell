@@ -8,7 +8,7 @@
     "build": "rm -rf dist && tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "tsx test-file-utils.ts && tsx test-session-busy.ts && tsx test-send-chat-response.ts && tsx test-client-config-schema.ts && tsx test-terminal-tools.ts"
+    "test": "tsx test-file-utils.ts && tsx test-session-busy.ts && tsx test-send-chat-response.ts && tsx test-client-config-schema.ts && tsx test-settings-tool.ts && tsx test-terminal-tools.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.22.0",

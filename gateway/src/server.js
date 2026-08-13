@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const auth = require('./auth');
 const chatHandler = require('./chat');
+const settings = require('./settings');
 
 const app = express();
 const PORT = process.env.PORT || 18092;
@@ -89,6 +90,48 @@ function terminalHandler(operation) {
 for (const [operation, definition] of Object.entries(TERMINAL_OPERATIONS)) {
   app[definition.method.toLowerCase()](definition.path, auth, terminalHandler(operation));
 }
+
+function settingsError(res, error, chatId) {
+  if (error instanceof settings.SettingsError) {
+    return res.status(error.status).json({ ok: false, ...(chatId ? { chat_id: chatId } : {}), error: error.code, details: error.message });
+  }
+  console.error('Settings error:', error.message);
+  return res.status(503).json({ ok: false, error: 'settings_unavailable', details: 'Settings are unavailable' });
+}
+
+app.get('/settings', auth, (req, res) => {
+  try { return res.json(settings.describe()); } catch (error) { return settingsError(res, error, null); }
+});
+app.get('/settings/:chat_id', auth, (req, res) => {
+  try { return res.json(settings.describe(req.params.chat_id)); } catch (error) { return settingsError(res, error, req.params.chat_id); }
+});
+
+app.post('/settings', auth, async (req, res) => {
+  const body = req.body || {};
+  try {
+    const unknown = Object.keys(body).filter(name => !['action', 'settings', 'names', 'expected_revision'].includes(name));
+    if (unknown.length) throw new settings.SettingsError('invalid_request', `Unknown settings request field: ${unknown[0]}`, 400);
+    if (body.action === 'set') {
+      return res.json(await settings.update(undefined, 'set', body.settings, body.expected_revision));
+    }
+    if (body.action === 'reset') {
+      const names = Array.isArray(body.names) && body.names.length > 0 ? body.names : settings.NAMES;
+      return res.json(await settings.update(undefined, 'reset', names, body.expected_revision));
+    }
+    throw new settings.SettingsError('invalid_request', 'action must be set or reset', 400);
+  } catch (error) { return settingsError(res, error, null); }
+});
+
+app.post('/settings/:chat_id', auth, async (req, res) => {
+  const body = req.body || {};
+  try {
+    const unknown = Object.keys(body).filter(name => !['action', 'settings', 'names', 'expected_revision'].includes(name));
+    if (unknown.length) throw new settings.SettingsError('invalid_request', `Unknown settings request field: ${unknown[0]}`, 400);
+    const names = body.action === 'reset' && (!Array.isArray(body.names) || body.names.length === 0) ? settings.NAMES : body.names;
+    if (body.action !== 'set' && body.action !== 'reset') throw new settings.SettingsError('invalid_request', 'action must be set or reset', 400);
+    return res.json(await settings.update(req.params.chat_id, body.action, body.action === 'set' ? body.settings : names, body.expected_revision));
+  } catch (error) { return settingsError(res, error, req.params.chat_id); }
+});
 
 // Rate limiting
 const limiter = rateLimit({

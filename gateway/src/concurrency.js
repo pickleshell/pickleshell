@@ -1,4 +1,4 @@
-const { staleTimeoutMs } = require('./timeout');
+const { agentTimeoutMs: defaultAgentTimeoutMs, staleTimeoutForAgentMs } = require('./timeout');
 const crypto = require('crypto');
 
 const slots = new Map();
@@ -83,7 +83,7 @@ function reapStale() {
     if (now - result.completedAt > COMPLETED_TTL_MS) completedByIdempotencyKey.delete(key);
   }
   for (const [key, entry] of slots) {
-    if (now - entry.started > staleTimeoutMs) {
+    if (now - entry.started > entry.staleAfterMs) {
       if (!entry.cancelling) {
         console.warn(`[CONCURRENCY] Reaping stale slot ${key} (held ${Math.round((now - entry.started) / 1000)}s)`);
         entry.cancelling = true;
@@ -99,8 +99,11 @@ function reapStale() {
   }
 }
 
-function acquire(chatId, sessionId, idempotencyKey) {
+function acquire(chatId, sessionId, idempotencyKey, requestAgentTimeoutMs = defaultAgentTimeoutMs) {
   reapStale();
+  const agentTimeoutMs = Number.isFinite(requestAgentTimeoutMs) && requestAgentTimeoutMs > 0
+    ? requestAgentTimeoutMs
+    : defaultAgentTimeoutMs;
 
   const sessionKey = getSessionKey(chatId, sessionId);
   const activeSlotKey = sessionKey ? activeSessions.get(sessionKey) : null;
@@ -143,6 +146,8 @@ function acquire(chatId, sessionId, idempotencyKey) {
       error_class: null,
     },
     started: Date.now(),
+    agentTimeoutMs,
+    staleAfterMs: staleTimeoutForAgentMs(agentTimeoutMs),
     createdAt,
     startedAt: null,
     cancelFn: null,

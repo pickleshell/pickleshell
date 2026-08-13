@@ -57,6 +57,8 @@ export const sendChatSchema = {
       "Optional model override from the operator-controlled gateway allowlist. " +
         "Examples: opencode/big-pickle, opencode-go/gpt-5.6-luna, opencode-go/qwen3.7-plus"
     ),
+  agent_timeout_sec: z.number().int().min(1).max(86400).optional().describe("Optional per-request agent timeout in seconds (1-86400)"),
+  codex_transport: z.enum(["exec", "mcp"]).optional().describe("Optional Codex transport override"),
   destination_dir: z
     .string()
     .optional()
@@ -106,6 +108,8 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
       runtime?: "opencode" | "codex";
       agent?: "opencode" | "codex";
       model?: string;
+      agent_timeout_sec?: number;
+      codex_transport?: "exec" | "mcp";
       destination_dir?: string;
       files?: Array<{
         name: string;
@@ -157,6 +161,8 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
             session_id: args.session_id,
             runtime: args.runtime ?? args.agent,
             model: args.model,
+            agent_timeout_sec: args.agent_timeout_sec,
+            codex_transport: args.codex_transport,
             destination_dir: args.destination_dir,
             file_paths: fileTransfers,
             idempotency_key: args.idempotency_key,

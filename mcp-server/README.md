@@ -2,7 +2,7 @@
 
 MCP stdio adapter for the PickleShell Gateway. Exposes two tool families:
 
-- **Local Agent** — `send-chat`, `session-status`, `session-output`, `cancel-request`
+- **Local Agent** — `send-chat`, `settings`, `session-status`, `session-output`, `cancel-request`
 - **Playwright Browser** — 52 browser automation tools (`browser_navigate`,
   `browser_click`, `browser_snapshot`, `browser_fill`, `browser_screenshot`,
   etc.)
@@ -25,6 +25,14 @@ PLAYWRIGHT_BROWSERS_PATH=/var/cache/pickleshell/ms-playwright
 ```
 
 The MCP timeout must exceed the Gateway agent timeout.
+
+The `settings` tool manages instance-global defaults or an optional per-chat
+override for `runtime`, `model`, `agent_timeout_sec`, and `codex_transport`. Its
+resolution precedence is explicit `send-chat` request > persisted chat override
+> persisted global setting > static chat-specific config > static global config
+> built-in default. Operator model/runtime allowlists and runtime
+capabilities remain immutable hard boundaries. `exec` is the default Codex
+transport; `mcp` must be explicitly selected.
 
 The legacy `LOCALAGENT_GATEWAY_URL`, `LOCALAGENT_API_KEY`, and
 `LOCALAGENT_TIMEOUT_MS` names remain accepted as deprecated compatibility

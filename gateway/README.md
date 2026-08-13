@@ -43,6 +43,22 @@ on the host is rejected at request time. Selecting an invalid or unavailable
 Codex transport is also rejected. The Gateway never silently runs OpenCode or
 Codex exec when another runtime or Codex transport was explicitly configured.
 
+### Global and per-chat mutable settings
+
+The authenticated Gateway exposes `GET/POST /settings` for instance-global
+defaults and `GET/POST /settings/:chat_id` for overrides for one configured chat.
+Both scopes contain only `runtime`, `model`,
+`agent_timeout_sec` (1..86400), and `codex_transport` (`exec` or `mcp`). The
+separate settings store uses `SETTINGS_PATH`; development defaults it beside
+`CONFIG_PATH`, while the deployed unit uses the dedicated
+`/var/lib/pickleshell-settings/settings.json` directory.
+Resolution precedence is explicit request > persisted chat override > persisted
+global setting > static chat-specific config > static global config > built-in
+default. Runtime availability, operator
+allowlists, model compatibility, and transport capabilities remain immutable
+hard boundaries. Settings responses never include workspace paths, credentials,
+terminal/socket policy, executables, or other security configuration.
+
 The default Codex transport uses `codex exec --json`. The experimental MCP
 transport uses `codex mcp-server` over newline-delimited JSON-RPC and currently
 requires the Codex `0.143.0` MCP tool surface: `codex` for initial turns and

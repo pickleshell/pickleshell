@@ -123,8 +123,10 @@ the chat runtime and then `default_runtime`. OpenCode remains the default. The
 deprecated `agent` field is accepted as a compatibility alias. `model` must be
 allowed by the operator and compatible with the selected runtime; Codex model
 IDs are unqualified (for example, `gpt-5.3-codex`) rather than provider-prefixed.
-Codex `exec`/`mcp` transport selection is internal Gateway configuration and
-does not add a public MCP tool or request field.
+`agent_timeout_sec` may override the effective timeout from 1 through 86400
+seconds. `codex_transport` may override Codex transport with `exec` or `mcp`.
+Codex `exec` remains the default unless configuration or a request explicitly
+selects `mcp`.
 
 File limits: 20 files per request, 2 MiB per file, 10 MiB total.
 
@@ -157,6 +159,28 @@ Destination resolution: `files[].dest_dir` > `destination_dir` > `.inbox/<reques
   "retry_after_ms": 2000
 }
 ```
+
+## MCP tool: `settings`
+
+Manage instance-global settings or overrides for one configured chat. Omit
+`chat_id` for global scope; provide it for chat scope. Actions are `describe` or
+`get`, `set`, and `reset`. Mutable names are `runtime`, `model`,
+`agent_timeout_sec` (1..86400 integer seconds), and `codex_transport` (`exec` or
+`mcp`). `set` is partial. `reset` accepts `names`; omitted or empty names reset
+all four. `expected_revision` provides compare-and-swap protection.
+
+Definitions use stable user-facing metadata: `runtime` is **Agent** (OpenCode or
+Codex), `model` is **Model** (the operator-allowlisted model used by the selected
+runtime), `codex_transport` is **Agent mode** (Codex exec or Codex MCP), and
+`agent_timeout_sec` is **Agent timeout** (seconds, allowed range 1..86400).
+
+Resolution precedence is explicit request > persisted chat override > persisted
+global setting > static chat-specific config > static global config > built-in
+default. Operator allowlists, runtime capability,
+model compatibility, and transport availability are immutable hard boundaries;
+settings cannot expand them. Responses contain definitions, persisted values,
+effective values, sources, and the monotonic revision, but never workspace,
+credential, terminal, socket, executable, or other static security fields.
 
 ## MCP tool: `session-status`
 
@@ -224,19 +248,31 @@ or `not_found`.
 Requires Bearer token authentication. Returns service identity, uptime,
 configured chat IDs, active work, and concurrency policy.
 
+### GET /settings and GET /settings/:chat_id
+
+Returns persisted overrides, scope revisions, definitions, and effective values.
+Global scope reports global/static baselines; chat scope reports the effective
+values through all layers.
+
+### POST /settings and POST /settings/:chat_id
+
+Accepts `{ "action": "set", "settings": {...}, "expected_revision"? }` or
+`{ "action": "reset", "names": [...], "expected_revision"? }`. The Gateway
+persists settings separately from immutable `config.json` using atomic writes.
+
 ### Error responses
 
 | Status | Error |
 |---|---|
-| 400 | `invalid_request`, `invalid_json`, `file_transfer_error`, `runtime_invalid`, `runtime_model_invalid` |
+| 400 | `invalid_request`, `invalid_json`, `file_transfer_error`, `runtime_invalid`, `runtime_model_invalid`, `codex_transport_invalid` |
 | 401 | `unauthorized` |
 | 403 | `forbidden_model`, `runtime_not_allowed` |
 | 404 | `unknown_chat_id` |
-| 409 | `session_busy` |
+| 409 | `session_busy`, `revision_conflict` |
 | 413 | `payload_too_large` |
 | 429 | `rate_limit` |
 | 502 | `agent_error` |
-| 503 | `runtime_unavailable` |
+| 503 | `runtime_unavailable`, `settings_unavailable` |
 | 504 | `agent_timeout` |
 
 ## Playwright Browser Tools

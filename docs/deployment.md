@@ -153,6 +153,7 @@ PICKLESHELL_API_KEY=lag_v1_<random-secret>
 HOST=127.0.0.1
 PORT=18092
 CONFIG_PATH=/etc/pickleshell/config.json
+SETTINGS_PATH=/var/lib/pickleshell-settings/settings.json
 MESSAGE_MAX_CHARS=300000
 JSON_BODY_LIMIT=5mb
 AGENT_TIMEOUT_SEC=300
@@ -161,6 +162,11 @@ RATE_LIMIT_MAX=100
 
 Edit `config.json` with real workspace paths and the smallest required model
 allowlist.
+
+The Gateway unit provisions `/var/lib/pickleshell-settings` as a mode `0700` systemd
+state directory owned by the Gateway service and grants the service write
+access there for the separate `settings.json` store. The store is never written
+to `config.json`; do not grant other services access to it.
 
 OpenCode and Codex resolve credentials from the Gateway service environment,
 not from an interactive shell. Keep the unit-level `HOME`, `XDG_CONFIG_HOME`,

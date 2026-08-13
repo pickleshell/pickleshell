@@ -221,3 +221,9 @@ module.exports = {
   resolveRuntime,
   resolveCodexTransport
 };
+
+// These helpers are intentionally read-only views used by the mutable
+// Gateway settings layer; settings are never written into this config.
+module.exports.getConfiguredDefaultRuntime = getConfiguredDefaultRuntime;
+module.exports.getGlobalCodexConfig = getGlobalCodexConfig;
+module.exports.KNOWN_RUNTIMES = KNOWN_RUNTIMES;

@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+StateDirectory=pickleshell-settings
+StateDirectoryMode=0700
 User=@GATEWAY_USER@
 Group=@GATEWAY_GROUP@
 WorkingDirectory=@ACTIVE_ROOT@/gateway
@@ -17,6 +19,7 @@ Environment=XDG_STATE_HOME=@STATE_ROOT@/state
 Environment=XDG_CACHE_HOME=@CACHE_ROOT@/opencode
 Environment=CODEX_HOME=@STATE_ROOT@/agent-home/.codex
 Environment=OPENCODE_CONFIG_DIR=@STATE_ROOT@/config/opencode
+Environment=SETTINGS_PATH=/var/lib/pickleshell-settings/settings.json
 Environment=NPM_CONFIG_CACHE=@CACHE_ROOT@/npm
 EnvironmentFile=@CONFIG_ROOT@/gateway.env
 ExecStart=@NODE_EXECUTABLE@ src/server.js
@@ -41,6 +44,7 @@ RestrictNamespaces=true
 LockPersonality=true
 SystemCallArchitectures=native
 ReadWritePaths=@STATE_ROOT@/config/opencode
+ReadWritePaths=/var/lib/pickleshell-settings
 ReadWritePaths=@STATE_ROOT@/data/opencode
 ReadWritePaths=@STATE_ROOT@/state/opencode
 ReadWritePaths=@STATE_ROOT@/agent-home

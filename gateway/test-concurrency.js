@@ -671,4 +671,31 @@ concurrency.release(ib4.slotKey);
 concurrency.complete(ib5.slotKey, { reply: 'b', trace: [], session_id: 'sess-multikey-b' });
 concurrency.release(ib5.slotKey);
 
+// Slot-specific stale thresholds use the request timeout plus exactly 30s.
+const realNow = Date.now;
+let nowMs = realNow();
+Date.now = () => nowMs;
+const shortTimeout = concurrency.acquire('stale-chat', 'short-timeout', undefined, 1000);
+const longTimeout = concurrency.acquire('stale-chat', 'long-timeout', undefined, 5000);
+let shortCancelled = 0;
+let longCancelled = 0;
+concurrency.setCancelFn(shortTimeout.slotKey, () => { shortCancelled++; });
+concurrency.setCancelFn(longTimeout.slotKey, () => { longCancelled++; });
+nowMs += 1000 + 30000;
+concurrency.status();
+assert(shortCancelled === 0 && longCancelled === 0, 'exact +30s grace boundary is not stale');
+nowMs += 1;
+concurrency.status();
+assert(shortCancelled === 1 && longCancelled === 0, 'short request timeout reaps independently');
+assert(concurrency.status().active_count >= 2, 'stale cancellation does not release pending process slot');
+nowMs += 3000;
+concurrency.status();
+assert(longCancelled === 0, 'long request is not reaped at short threshold');
+nowMs += 1000;
+concurrency.status();
+assert(longCancelled === 1, 'long request reaps at its own timeout plus grace');
+concurrency.release(shortTimeout.slotKey);
+concurrency.release(longTimeout.slotKey);
+Date.now = realNow;
+
 console.log(`idempotency behavior tests: ${passed} passed`);

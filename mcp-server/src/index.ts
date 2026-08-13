@@ -18,6 +18,7 @@ import { registerTerminalOutput } from "./tools/terminal-output.js";
 import { registerTerminalResize } from "./tools/terminal-resize.js";
 import { registerTerminalSignal } from "./tools/terminal-signal.js";
 import { registerTerminalClose } from "./tools/terminal-close.js";
+import { registerSettings } from "./tools/settings.js";
 
 const config = loadConfig();
 const client = new GatewayClient(config);
@@ -36,6 +37,7 @@ registerTerminalOutput(mcp, client);
 registerTerminalResize(mcp, client);
 registerTerminalSignal(mcp, client);
 registerTerminalClose(mcp, client);
+registerSettings(mcp, client);
 
 function jsonSchemaToZodShape(schema: Record<string, unknown>): Record<string, z.ZodType> {
   if (!schema || typeof schema !== "object") return {};

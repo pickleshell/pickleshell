@@ -14,14 +14,14 @@ The first production release keeps the protocol small and explicit:
 - states: `new_session`, `busy`, `completed`, `ready`, `unknown`, `cancelling`;
 - authenticated Gateway, bounded timeouts, safe errors, and bounded result buffers.
 
-Do not add settings or summary modes to v1. Full trace is intentional: it is
-valuable for file edits, tests, and diagnostics.
+Full trace is intentional: it is valuable for file edits, tests, and
+diagnostics. Settings remain limited to their documented four mutable names.
 
 ## Basic product scope
 
 PickleShell has three mandatory core services: **Agent**, **Browser**, and
 **Terminal**. The Agent protocol shipped with v1; the Browser and Terminal are
-implemented, while Settings remains the next planned milestone.
+implemented, and the scoped Settings API is implemented with the Agent path.
 
 - **Agent:** retain `send-chat` → `session-status` → `session-output` →
   `cancel-request`. OpenCode is the supported default; Codex is implemented as
@@ -37,16 +37,11 @@ implemented, while Settings remains the next planned milestone.
     explicit deployment-time selection of an existing Linux service user,
     delegated cgroup-v2 lifecycle cleanup, and exposes the six-tool MCP contract.
     The immutable release-installation and production smoke gates are complete.
-- **Settings:** planned. `settings-get` and `settings-update` manage
-  policy-controlled mutable defaults such as the agent backend
-  (OpenCode/Codex), the model allowlist, file-transfer limits (files per
-  request, size per file, total payload), output mode full/summary, Browser and
-  Terminal enablement, timeout/output limits, risky-capability permissions, and
-  possible autonomy modes `observe`/`workspace-write`/`operator`. Attempts to
-  change forbidden or immutable settings are rejected or leave values
-  unchanged. Never return secrets; return only configured state. Before
-  implementation, define scope (global, workspace, session, or request),
-  persistence, defaults, validation, restart behavior, and secret redaction.
+- **Settings:** implemented for `runtime`, `model`, `agent_timeout_sec`, and
+  `codex_transport` through global defaults and optional per-chat overrides.
+  Operator allowlists and runtime capabilities remain immutable; descriptions
+  are redacted and never expose secrets or workspace paths. Future mutable
+  settings require a separate contract.
 - **Product framing:** a universal local runtime for ChatGPT — Agent, Browser,
   and Terminal on any connected machine.
 
