@@ -1,6 +1,6 @@
 {
   "name": "@pickleshell/terminal",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Private PTY runtime for PickleShell",
   "main": "src/server.js",
   "scripts": {

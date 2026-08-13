@@ -5,7 +5,7 @@
 
 <p align="center"><strong>Give ChatGPT a local machine to work with</strong></p>
 
-[![Release](https://img.shields.io/badge/release-v0.1.2-f5a623)](#release-history)
+[![Release](https://img.shields.io/badge/release-v0.1.4-f5a623)](#release-history)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](#development)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#requirements)
@@ -78,7 +78,7 @@ carry out a complex task directly from ChatGPT.
 
 > [!WARNING]
 > **The `main` branch may contain unreleased changes.** The latest stable
-> release is `v0.1.2`; use it only with trusted users and a dedicated service
+> release is `v0.1.4`; use it only with trusted users and a dedicated service
 > account. Read
 > [SECURITY.md](SECURITY.md) before deployment.
 
@@ -343,9 +343,8 @@ Include the relevant setup details and steps to reproduce the problem.
 
 ## Project Status
 
-PickleShell `0.1.2` is the latest release. It adds the native Codex runtime
-adapter, persistent Terminal PTY runtime, immutable release migration, and
-deployment verification gates for Agent, Browser, and Terminal.
+PickleShell `0.1.4` is the latest release. It adds the public settings tool,
+scoped persisted runtime settings, and optional supervised Codex MCP transport.
 
 This is a complete, fully functional, and stable release of the integrated
 PickleShell system. Gateway, MCP, Agent, Browser, Terminal, tunnel, and
@@ -356,6 +355,17 @@ version is already suitable for real-world testing and use with trusted users.
 Interfaces may still change before the stable `1.0` release.
 
 ## Release History
+
+### [v0.1.4](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.4)
+
+- Added optional, supervised Codex MCP transport through `codex mcp-server`,
+  with new-thread and continuation support and no automatic fallback; this is
+  limited to the Codex CLI `0.143.0` MCP tool surface.
+- Added the public `settings` tool with `describe`, `get`, `set`, and `reset`.
+- Added persisted global and per-chat scopes for `runtime`, `model`,
+  `agent_timeout_sec`, and `codex_transport`. Resolution precedence is explicit
+  request > persisted chat override > persisted global setting > static config >
+  default; operator security policy remains immutable.
 
 ### [v0.1.2](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.2)
 

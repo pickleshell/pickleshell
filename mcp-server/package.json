@@ -1,6 +1,6 @@
 {
   "name": "@pickleshell/mcp-server",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "MCP stdio adapter for the PickleShell Gateway",
   "type": "module",
   "main": "dist/index.js",

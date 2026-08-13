@@ -134,7 +134,7 @@ class JsonRpcWorker {
     const init = await this.request('initialize', {
       protocolVersion: '2025-06-18',
       capabilities: {},
-      clientInfo: { name: 'pickleshell-gateway', version: '0.1.2' },
+      clientInfo: { name: 'pickleshell-gateway', version: '0.1.4' },
     }, { retryableStartup: true });
     if (!init?.capabilities?.tools) {
       throw new TransportError('mcp_incompatible', 'Codex MCP server does not advertise tools capability', {

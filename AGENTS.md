@@ -11,7 +11,7 @@ PickleShell is a Linux-only monorepo:
 
 ## Operational installation route
 
-This repository is the v0.1.2 PickleShell Workstation release. It contains
+This repository is the v0.1.4 PickleShell Workstation release. It contains
 these independently supervised components:
 
 - Gateway and Agent runtimes: OpenCode (default) and native Codex;
