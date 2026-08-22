@@ -302,6 +302,11 @@ It verifies both default `.inbox` and explicit destinations, confirms that
 Gateway can read a known staged file, and confirms it cannot list or modify the
 MCP staging root.
 
+The `chatgpt` deployment profile keeps its tunnel control-plane credential in
+`/etc/pickleshell/tunnel-client/control-plane.key`, owned by `root` and readable
+only by the dedicated `pickleshell-chatgpt-tunnel` group. Do not point that
+profile back to a key under `/home/chatgpt`.
+
 ```bash
 sudo chown pickleshell-tunnel:pickleshell-tunnel /etc/pickleshell/mcp.env
 sudo chmod 600 /etc/pickleshell/mcp.env
