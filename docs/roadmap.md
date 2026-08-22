@@ -89,16 +89,15 @@ implemented, and the scoped Settings API is implemented with the Agent path.
 - [ ] Classify agent failures, provider failures, timeouts, and cancellations
       without exposing secrets or raw credentials.
 - [ ] Define and test retention/cleanup behavior for completed request buffers.
-- [ ] Target the next patch release for the confirmed production file-transfer
-      isolation bug: MCP/tunnel stages files under `/run/pickleshell-mcp` as
-      `pickleshell-tunnel` with restrictive permissions, while Gateway runs as
-      `pickleshell` and receives temp source paths but hits `EACCES` before the
-      destination copy. Implement a secure cross-service handoff using a
-      dedicated shared group/ACL or equivalent, without world-readable
-      permissions; update systemd/deployment templates and clean-install
-      behavior; add regression/integration coverage with distinct service users
-      and a live transfer matrix for explicit destinations and default
-      `.inbox`; preserve cleanup, symlink protections, and least privilege.
+- [x] Fix the production file-transfer isolation bug: MCP/tunnel stages files
+      in `MCP_TEMP_DIR` as `pickleshell-tunnel`, while Gateway runs as
+      `pickleshell`. The release installs a `0710` staging root owned by the
+      MCP user/group; Gateway receives that group only through
+      `SupplementaryGroups`. Per-request directories are `0710` and staged
+      files are `0640`, giving Gateway known-path traverse/read access without
+      directory listing or write permission. Preserve cleanup, symlink
+      protections, and least privilege; validate the live transfer matrix for
+      explicit destinations and default `.inbox` at deployment.
 - [ ] Continue investigating practical file-transfer paths that avoid embedding
       Base64 payloads in ChatGPT MCP arguments. Document the current manual
       fallback and revisit the design if OpenAI adds native file references or
@@ -112,6 +111,123 @@ separate design is approved:
 - configurable progress verbosity;
 - request queues;
 - richer progress event normalization.
+
+## Path to a 10/10 agent platform
+
+These are long-term production-hardening milestones. They extend the current
+trusted single-operator model without implying that PickleShell already provides
+multi-tenant or hostile-agent containment. Promote an item into a release only
+after its design, migration, rollback, and end-to-end verification are defined.
+
+### Short-lived workload identity
+
+- Replace long-lived inter-host SSH keys with short-lived SSH certificates or
+  an equivalent workload-identity exchange.
+- Bind issued credentials to the intended service identity, destination,
+  principals, permitted operations, and a narrow lifetime.
+- Keep signing authority outside Agent, Browser, Terminal, Gateway, and
+  workspace processes; never expose it through MCP tools.
+- Test expiry, clock skew, renewal, issuer unavailability, host-key validation,
+  and emergency revocation without falling back to a broader credential.
+
+### Capability policy per chat and session
+
+- Evaluate authorization using `chat_id`, `session_id`, tool, workspace, path,
+  destination host, runtime, model, and operation class. Default to deny when a
+  required policy attribute is absent or unknown.
+- Produce an immutable effective-policy snapshot for every request so later
+  configuration changes cannot silently broaden an in-flight task.
+- Keep workspace, model, host, file-transfer, Terminal, Browser, and privileged
+  operation capabilities independently restrictable.
+- Add negative end-to-end tests proving that one chat or session cannot reuse
+  another chat's workspace, credentials, terminal, browser state, or remote-host
+  capability.
+
+### Tamper-evident end-to-end audit trail
+
+- Correlate the ChatGPT/MCP request, tunnel, `chat_id`, `request_id`,
+  `session_id`, Gateway action, Agent/Browser/Terminal operation, handoff, and
+  remote execution under one trace identifier.
+- Record actor, effective policy, decision, timestamps, destination, outcome,
+  and redacted command metadata without recording secrets or unrestricted file
+  contents.
+- Make audit records append-only and tamper-evident through hash chaining,
+  signatures, or an external write-once sink with explicit retention policy.
+- Verify dropped, duplicated, reordered, and replayed events and make audit
+  pipeline failure observable without leaking credentials into fallback logs.
+
+### Approval gates for dangerous operations
+
+- Define explicit operation classes that require operator approval, including
+  destructive filesystem actions, privilege escalation, credential changes,
+  production deployment, external publication, and policy modification.
+- Use single-use approval grants bound to the exact request, arguments,
+  destination, approver, and expiration. A textual model claim that approval
+  exists is never sufficient.
+- Fail closed when approval is absent, expired, mismatched, or cannot be
+  verified, and include the decision in the audit trail.
+- Test argument substitution, path changes, retries, cancellation, and replay
+  after approval consumption.
+
+### Signed task and result handoffs
+
+- Define versioned task/result envelopes containing task ID, request/session
+  correlation, source and destination identities, timestamps, content hashes,
+  schema version, and declared attachments.
+- Sign envelopes with workload identities, verify them before processing, and
+  reject unknown signers, altered content, expired tasks, and reused delivery
+  identifiers.
+- Publish handoffs atomically into a controlled inbox and record a durable
+  acknowledgement so retries cannot execute the same task twice.
+- Preserve human-readable Markdown payloads while keeping integrity and replay
+  metadata machine-verifiable.
+
+### Credential inventory, rotation, and revocation
+
+- Maintain an operator-visible inventory of tunnel keys, Gateway keys, SSH
+  identities, provider credentials, signing keys, owners, scopes, creation
+  dates, maximum ages, and last-use timestamps.
+- Automate rotation with a bounded overlap window and prove that the old
+  credential stops working after cutover.
+- Provide an emergency revocation procedure that does not require access
+  through the credential being revoked.
+- Test partial rollout, rollback, stale service processes, and recovery without
+  printing secret material.
+
+### Clean external installation and upgrade gate
+
+- Provision an empty disposable Linux host from published artifacts and public
+  documentation, without reusing developer homes, caches, credentials, or
+  unpublished repository state.
+- Exercise ChatGPT plugin registration through the Secure MCP Tunnel and run
+  Agent, Browser, Terminal, file-transfer, cancellation, continuation, and
+  remote-handoff smoke tests.
+- Test immutable upgrade, schema refresh, credential migration, failed
+  activation, deterministic rollback, and uninstall/cleanup.
+- Treat this external gate as mandatory for a production tag; archive the exact
+  release digest and sanitized evidence.
+
+### Continuous security and threat-model verification
+
+- Maintain explicit trust-boundary and data-flow models for the tunnel, MCP
+  server, Gateway, runtime adapters, Browser, Terminal, file transfer, and
+  inter-host handoff.
+- Add adversarial tests for authentication bypass, confused-deputy behavior,
+  cross-chat access, request replay, symlink and path races, terminal escape,
+  cgroup/process cleanup, output exhaustion, malicious archives, and secret
+  disclosure through errors or traces.
+- Run dependency, release-provenance, artifact-integrity, and secret-scanning
+  checks in CI; pin and verify externally downloaded runtime artifacts.
+- Require independent review of changes that modify authentication,
+  authorization, process isolation, file publication, credential handling, or
+  the public MCP schema.
+
+### 10/10 completion gate
+
+This milestone is complete only when every section above has an implemented
+contract, negative tests, operational documentation, recovery procedure, and
+evidence from the clean external installation gate. Passing happy-path demos or
+documenting a residual risk is not sufficient to mark an item complete.
 
 ### Possible Terminal improvements
 

@@ -1,4 +1,4 @@
-import { mkdir, rm, open } from "fs/promises";
+import { chmod, mkdir, rm, open } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import type { FileItem } from "./types.js";
@@ -153,7 +153,12 @@ export async function decodeFilesToTemp(
   const opener = openFn || ((p: string, f: string, m?: number) => open(p, f, m));
   const baseDir = process.env.MCP_TEMP_DIR || join(process.env.HOME || "/tmp", ".mcp-temp");
   const dir = join(baseDir, `mcp-files-${randomUUID()}`);
-  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // The Gateway receives this directory through a supplementary group. It may
+  // traverse the random directory and read staged files, but cannot list,
+  // create, replace, or remove them. Explicit chmod is required because the
+  // tunnel service deliberately runs with UMask=0077.
+  await mkdir(dir, { recursive: true, mode: 0o710 });
+  await chmod(dir, 0o710);
 
   try {
     for (const file of files) {
@@ -164,6 +169,7 @@ export async function decodeFilesToTemp(
       } finally {
         await fd.close();
       }
+      await chmod(join(dir, file.name), 0o640);
     }
   } catch (err) {
     await rm(dir, { recursive: true, force: true }).catch(() => {});

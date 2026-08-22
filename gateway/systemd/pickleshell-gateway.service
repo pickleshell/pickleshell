@@ -9,6 +9,7 @@ StateDirectory=pickleshell-settings
 StateDirectoryMode=0700
 User=pickleshell
 Group=pickleshell
+SupplementaryGroups=pickleshell-tunnel
 WorkingDirectory=/opt/pickleshell/active/gateway
 Environment=NODE_ENV=production
 Environment=PATH=/opt/pickleshell/runtime/node-v20.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -53,6 +54,7 @@ ReadWritePaths=/var/cache/pickleshell/npm
 ReadWritePaths=/var/cache/pickleshell/ms-playwright
 ReadWritePaths=/srv/pickleshell/workspace
 ReadOnlyPaths=/opt/pickleshell
+ReadOnlyPaths=/var/lib/pickleshell/mcp-temp
 ReadOnlyPaths=/etc/pickleshell/config.json
 ReadOnlyPaths=/etc/pickleshell/opencode.jsonc
 InaccessiblePaths=-/etc/pickleshell/control-plane.key

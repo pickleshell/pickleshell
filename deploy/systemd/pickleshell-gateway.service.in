@@ -9,6 +9,7 @@ StateDirectory=pickleshell-settings
 StateDirectoryMode=0700
 User=@GATEWAY_USER@
 Group=@GATEWAY_GROUP@
+SupplementaryGroups=@MCP_GROUP@
 WorkingDirectory=@ACTIVE_ROOT@/gateway
 Environment=NODE_ENV=production
 Environment=PATH=@NODE_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -52,6 +53,7 @@ ReadWritePaths=@CACHE_ROOT@/opencode
 ReadWritePaths=@CACHE_ROOT@/npm
 ReadWritePaths=@WORKSPACE_ROOT@
 ReadOnlyPaths=@APP_ROOT@
+ReadOnlyPaths=@MCP_TEMP_DIR@
 ReadOnlyPaths=@CONFIG_ROOT@/config.json
 ReadOnlyPaths=@CONFIG_ROOT@/opencode.jsonc
 InaccessiblePaths=-@CONFIG_ROOT@/control-plane.key

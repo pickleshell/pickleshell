@@ -147,7 +147,9 @@ async function runTests() {
   const contentB = await readFile(`${tmpDir}/b.txt`, "utf8");
   assert(contentB === "beta", "b.txt content correct");
   const aStat = await stat(`${tmpDir}/a.txt`);
-  assert((aStat.mode & 0o777) === 0o600, "file mode is 0600");
+  assert((aStat.mode & 0o777) === 0o640, "file mode grants the Gateway group read-only access");
+  const dirStat = await stat(tmpDir);
+  assert((dirStat.mode & 0o777) === 0o710, "staging directory grants the Gateway group traverse-only access");
 
   // Test 15: cleanupTempDir
   console.log("\n15. cleanupTempDir");

@@ -602,7 +602,10 @@ prepare_service_paths() {
   prepare_service_dir "$STATE_ROOT/mcp-home" "$MCP_USER:$MCP_GROUP" 0700 || return 1
   prepare_service_dir "$CACHE_ROOT/mcp" "$MCP_USER:$MCP_GROUP" 0700 || return 1
   prepare_service_dir "$CACHE_ROOT/ms-playwright" "$MCP_USER:$MCP_GROUP" 0700 || return 1
-  prepare_service_dir "$MCP_TEMP_DIR" "$MCP_USER:$MCP_GROUP" 0700 || return 1
+  # MCP owns the staging directory. Gateway gets the MCP group only as a
+  # supplementary group, with traverse/read access to random request dirs and
+  # staged files but no ability to list, create, replace, or remove them.
+  prepare_service_dir "$MCP_TEMP_DIR" "$MCP_USER:$MCP_GROUP" 0710 || return 1
   prepare_service_dir "$MCP_BIND_SOURCE" "$MCP_USER:$MCP_GROUP" 0700 || return 1
   prepare_service_dir "$TERMINAL_RUNTIME_DIR" "$TERMINAL_USER:$TERMINAL_GROUP" 0750 || return 1
   prepare_service_dir "$TERMINAL_RUNTIME_DIR/workspace" "$TERMINAL_USER:$TERMINAL_GROUP" 0750 || return 1

@@ -39,6 +39,8 @@ for (const line of [
   "StateDirectoryMode=0700",
   "Environment=NPM_CONFIG_CACHE=/var/cache/pickleshell/npm",
   "NoNewPrivileges=true",
+  "SupplementaryGroups=pickleshell-tunnel",
+  "ReadOnlyPaths=/var/lib/pickleshell/mcp-temp",
 ]) {
   assertIncludes(gatewayService, line, "gateway systemd template");
 }
@@ -48,6 +50,8 @@ for (const line of [
   "StateDirectory=pickleshell-settings",
   "StateDirectoryMode=0700",
   "ReadWritePaths=/var/lib/pickleshell-settings",
+  "SupplementaryGroups=@MCP_GROUP@",
+  "ReadOnlyPaths=@MCP_TEMP_DIR@",
 ]) {
   assertIncludes(gatewayTemplate, line, "gateway deployment template");
 }

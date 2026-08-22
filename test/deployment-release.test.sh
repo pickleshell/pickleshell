@@ -277,6 +277,8 @@ grep -q 'ExecStart=/usr/local/bin/tunnel-client run --profile-file /etc/picklesh
 grep -q 'RuntimeDirectory=pickleshell-test-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'BindPaths=/run/pickleshell-test-mcp:/run/pickleshell-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'ReadWritePaths=/var/lib/pickleshell-test/mcp-temp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
+grep -q 'SupplementaryGroups='"$USER" "$ISOLATED_UNITS/pickleshell-test-gateway.service"
+grep -q 'ReadOnlyPaths=/var/lib/pickleshell-test/mcp-temp' "$ISOLATED_UNITS/pickleshell-test-gateway.service"
 grep -q 'ReadWritePaths=/var/cache/pickleshell-test/ms-playwright' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'TasksMax=256' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'Environment=PICKLESHELL_TERMINAL_SOCKET=/run/pickleshell-test-terminal/service.sock' "$ISOLATED_UNITS/pickleshell-test-terminal.service"
@@ -325,6 +327,7 @@ chmod +x "$ACL_BIN/getfacl"
   prepare_service_paths
 )
 [[ -d $TMP/prep/run-terminal/workspace ]]
+[[ $(stat -c '%a' "$TMP/prep/state/mcp-temp") == 710 ]]
 grep -q '^setfacl -R -P -m u:release-terminal:rwX -- .*/home/workspace$' "$ACL_LOG"
 grep -q '^setfacl -m d:u:release-terminal:rwX -- .*/home/workspace$' "$ACL_LOG"
 grep -q '^setfacl -m d:u:release-terminal:rwX -- .*/home/workspace/existing$' "$ACL_LOG"

@@ -282,6 +282,26 @@ PICKLESHELL_TIMEOUT_MS=420000
 MCP_TEMP_DIR=/var/lib/pickleshell/mcp-temp
 ```
 
+File transfer uses this directory as a one-way handoff between the MCP/tunnel
+service and Gateway. The release installer owns it as
+`pickleshell-tunnel:pickleshell-tunnel` with mode `0710`; Gateway receives that
+group only as a systemd supplementary group. Each request directory is `0710`
+and each staged file is `0640`, so Gateway can traverse and read a known staged
+path but cannot list, create, replace, or delete MCP staging files. Do not
+change these modes to world-readable or grant Gateway write access.
+
+On a host with the deployed service accounts, run the optional real-identity
+handoff test after an installation or unit change:
+
+```bash
+sudo env PICKLESHELL_RUN_FILE_HANDOFF_INTEGRATION=1 \
+  npm --prefix /opt/pickleshell/active run test:file-handoff-integration
+```
+
+It verifies both default `.inbox` and explicit destinations, confirms that
+Gateway can read a known staged file, and confirms it cannot list or modify the
+MCP staging root.
+
 ```bash
 sudo chown pickleshell-tunnel:pickleshell-tunnel /etc/pickleshell/mcp.env
 sudo chmod 600 /etc/pickleshell/mcp.env
