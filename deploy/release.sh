@@ -34,6 +34,7 @@ TERMINAL_GROUP='pickleshell-terminal'
 GATEWAY_SERVICE='pickleshell-gateway.service'
 MCP_SERVICE='pickleshell-tunnel.service'
 TERMINAL_SERVICE='pickleshell-terminal.service'
+SETTINGS_ROOT='/var/lib/pickleshell-settings'
 CONFIG_ROOT='/etc/pickleshell'
 STATE_ROOT='/var/lib/pickleshell'
 CACHE_ROOT='/var/cache/pickleshell'
@@ -90,6 +91,7 @@ while (($#)); do
           WORKSPACE_ROOT=/home/chatgpt/workspace; TERMINAL_WORKSPACE_ROOT=/home/chatgpt/workspace
           MCP_RUNTIME_DIR=/run/pickleshell-chatgpt-mcp; MCP_BIND_SOURCE=/run/pickleshell-chatgpt-mcp
           MCP_TEMP_DIR=/var/lib/pickleshell-chatgpt/mcp-temp
+          SETTINGS_ROOT=/var/lib/pickleshell-chatgpt-settings
           TUNNEL_PROFILE=/etc/pickleshell/tunnel-client/chatgpt.yaml
           ;;
         *) usage >&2; die 'profile must be production, isolated, or chatgpt' ;;
@@ -204,6 +206,7 @@ validate_path "$MCP_BIND_TARGET" mcp-bind-target
 validate_path "$MCP_TEMP_DIR" mcp-temp-dir
 validate_path "$TERMINAL_RUNTIME_DIR" terminal-runtime-dir
 validate_path "$TERMINAL_SOCKET" terminal-socket
+validate_path "$SETTINGS_ROOT" settings-root
 GATEWAY_ENV_FILE=${GATEWAY_ENV_FILE:-$CONFIG_ROOT/gateway.env}
 MCP_ENV_FILE=${MCP_ENV_FILE:-$CONFIG_ROOT/mcp.env}
 if [[ $PROFILE == chatgpt ]]; then
@@ -496,7 +499,7 @@ render_unit() {
     TERMINAL_WORKSPACE_ROOT TERMINAL_WORKSPACE_BIND_TARGET \
     NODE_BIN_DIR NODE_EXECUTABLE TERMINAL_NODE_EXECUTABLE TUNNEL_CLIENT_EXECUTABLE GATEWAY_USER GATEWAY_GROUP \
     MCP_USER MCP_GROUP TERMINAL_USER TERMINAL_GROUP GATEWAY_SERVICE MCP_RUNTIME_NAME \
-    MCP_BIND_SOURCE MCP_BIND_TARGET MCP_TEMP_DIR TUNNEL_PROFILE GATEWAY_ENV_FILE MCP_ENV_FILE \
+    MCP_BIND_SOURCE MCP_BIND_TARGET MCP_TEMP_DIR TUNNEL_PROFILE GATEWAY_ENV_FILE MCP_ENV_FILE SETTINGS_ROOT \
     TERMINAL_RUNTIME_NAME TERMINAL_RUNTIME_DIR TERMINAL_SOCKET; do
     case "$token" in
       APP_ROOT) value=$ROOT; ACTIVE_ROOT="$ROOT/active" ;;
@@ -525,6 +528,7 @@ render_unit() {
       TUNNEL_PROFILE) value=$TUNNEL_PROFILE ;;
       GATEWAY_ENV_FILE) value=$GATEWAY_ENV_FILE ;;
       MCP_ENV_FILE) value=$MCP_ENV_FILE ;;
+      SETTINGS_ROOT) value=$SETTINGS_ROOT ;;
       TERMINAL_RUNTIME_NAME) value=${TERMINAL_RUNTIME_DIR#/run/} ;;
       TERMINAL_RUNTIME_DIR) value=$TERMINAL_RUNTIME_DIR ;;
       TERMINAL_SOCKET) value=$TERMINAL_SOCKET ;;
@@ -617,6 +621,7 @@ prepare_terminal_workspace_acl() {
 prepare_service_paths() {
   ((NO_SYSTEMD)) && return 0
   is_real_systemctl || return 0
+  prepare_service_dir "$SETTINGS_ROOT" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
   prepare_service_dir "$STATE_ROOT/agent-home" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
   prepare_service_dir "$STATE_ROOT/config/opencode" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
   prepare_service_dir "$STATE_ROOT/data/opencode" "$GATEWAY_USER:$GATEWAY_GROUP" 0700 || return 1
