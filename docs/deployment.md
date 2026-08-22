@@ -295,7 +295,7 @@ handoff test after an installation or unit change:
 
 ```bash
 sudo env PICKLESHELL_RUN_FILE_HANDOFF_INTEGRATION=1 \
-  npm --prefix /opt/pickleshell/active run test:file-handoff-integration
+  bash /path/to/clean/checkout/test/file-transfer-handoff.test.sh
 ```
 
 It verifies both default `.inbox` and explicit destinations, confirms that
