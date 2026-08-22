@@ -6,7 +6,7 @@ set -Eeuo pipefail
 usage() {
   printf '%s\n' \
     'Usage: release.sh --source REPOSITORY --root ABSOLUTE_ROOT --commit SHA' \
-    '                   [--profile production|isolated]' \
+    '                   [--profile production|isolated|chatgpt]' \
     '                   [--config-root PATH] [--state-root PATH] [--cache-root PATH]' \
     '                   [--workspace-root PATH] [--mcp-runtime-dir PATH] [--terminal-runtime-dir PATH]' \
     '                   [--terminal-socket PATH] [--node-executable PATH] [--terminal-node-executable PATH]' \
@@ -49,6 +49,8 @@ NODE_EXECUTABLE='/opt/pickleshell/runtime/node-v20.20.2/bin/node'
 TERMINAL_NODE_EXECUTABLE='/usr/bin/node'
 TUNNEL_CLIENT_EXECUTABLE='/usr/local/bin/tunnel-client'
 TUNNEL_PROFILE='/etc/pickleshell/tunnel-client/pickleshell.yaml'
+GATEWAY_ENV_FILE=''
+MCP_ENV_FILE=''
 INCLUDE_TERMINAL=0
 NO_SYSTEMD=0
 DRY_RUN=0
@@ -79,7 +81,18 @@ while (($#)); do
           TUNNEL_CLIENT_EXECUTABLE=/usr/local/bin/tunnel-client
           TUNNEL_PROFILE=/etc/pickleshell-test/tunnel-client/pickleshell-test.yaml
           ;;
-        *) usage >&2; die 'profile must be production or isolated' ;;
+        chatgpt)
+          ROOT=${ROOT:-/opt/pickleshell}
+          GATEWAY_USER=chatgpt; MCP_USER=pickleshell-chatgpt-tunnel; TERMINAL_USER=pickleshell-terminal
+          GATEWAY_GROUP=chatgpt; MCP_GROUP=pickleshell-chatgpt-tunnel; TERMINAL_GROUP=pickleshell-terminal
+          GATEWAY_SERVICE=pickleshell-gateway-chatgpt.service; MCP_SERVICE=pickleshell-tunnel-chatgpt.service
+          STATE_ROOT=/var/lib/pickleshell-chatgpt; CACHE_ROOT=/var/cache/pickleshell-chatgpt
+          WORKSPACE_ROOT=/home/chatgpt/workspace; TERMINAL_WORKSPACE_ROOT=/home/chatgpt/workspace
+          MCP_RUNTIME_DIR=/run/pickleshell-chatgpt-mcp; MCP_BIND_SOURCE=/run/pickleshell-chatgpt-mcp
+          MCP_TEMP_DIR=/var/lib/pickleshell-chatgpt/mcp-temp
+          TUNNEL_PROFILE=/etc/pickleshell/tunnel-client/chatgpt.yaml
+          ;;
+        *) usage >&2; die 'profile must be production, isolated, or chatgpt' ;;
       esac
       shift 2 ;;
     --source) SOURCE=${2:-}; shift 2 ;;
@@ -106,6 +119,8 @@ while (($#)); do
     --terminal-node-executable) TERMINAL_NODE_EXECUTABLE=${2:-}; shift 2 ;;
     --tunnel-client-executable) TUNNEL_CLIENT_EXECUTABLE=${2:-}; shift 2 ;;
     --tunnel-profile) TUNNEL_PROFILE=${2:-}; shift 2 ;;
+    --gateway-env-file) GATEWAY_ENV_FILE=${2:-}; shift 2 ;;
+    --mcp-env-file) MCP_ENV_FILE=${2:-}; shift 2 ;;
     --gateway-service) GATEWAY_SERVICE=${2:-}; shift 2 ;;
     --mcp-service|--tunnel-service) MCP_SERVICE=${2:-}; shift 2 ;;
     --terminal-service) TERMINAL_SERVICE=${2:-}; shift 2 ;;
@@ -189,6 +204,14 @@ validate_path "$MCP_BIND_TARGET" mcp-bind-target
 validate_path "$MCP_TEMP_DIR" mcp-temp-dir
 validate_path "$TERMINAL_RUNTIME_DIR" terminal-runtime-dir
 validate_path "$TERMINAL_SOCKET" terminal-socket
+GATEWAY_ENV_FILE=${GATEWAY_ENV_FILE:-$CONFIG_ROOT/gateway.env}
+MCP_ENV_FILE=${MCP_ENV_FILE:-$CONFIG_ROOT/mcp.env}
+if [[ $PROFILE == chatgpt ]]; then
+  GATEWAY_ENV_FILE=/etc/pickleshell/gateway-chatgpt.env
+  MCP_ENV_FILE=/etc/pickleshell/mcp-chatgpt.env
+fi
+validate_path "$GATEWAY_ENV_FILE" gateway-env-file
+validate_path "$MCP_ENV_FILE" mcp-env-file
 validate_executable "$NODE_EXECUTABLE" node-executable
 validate_executable "$TERMINAL_NODE_EXECUTABLE" terminal-node-executable
 validate_executable "$TUNNEL_CLIENT_EXECUTABLE" tunnel-client-executable
@@ -473,7 +496,7 @@ render_unit() {
     TERMINAL_WORKSPACE_ROOT TERMINAL_WORKSPACE_BIND_TARGET \
     NODE_BIN_DIR NODE_EXECUTABLE TERMINAL_NODE_EXECUTABLE TUNNEL_CLIENT_EXECUTABLE GATEWAY_USER GATEWAY_GROUP \
     MCP_USER MCP_GROUP TERMINAL_USER TERMINAL_GROUP GATEWAY_SERVICE MCP_RUNTIME_NAME \
-    MCP_BIND_SOURCE MCP_BIND_TARGET MCP_TEMP_DIR TUNNEL_PROFILE \
+    MCP_BIND_SOURCE MCP_BIND_TARGET MCP_TEMP_DIR TUNNEL_PROFILE GATEWAY_ENV_FILE MCP_ENV_FILE \
     TERMINAL_RUNTIME_NAME TERMINAL_RUNTIME_DIR TERMINAL_SOCKET; do
     case "$token" in
       APP_ROOT) value=$ROOT; ACTIVE_ROOT="$ROOT/active" ;;
@@ -500,6 +523,8 @@ render_unit() {
       MCP_BIND_TARGET) value=$MCP_BIND_TARGET ;;
       MCP_TEMP_DIR) value=$MCP_TEMP_DIR ;;
       TUNNEL_PROFILE) value=$TUNNEL_PROFILE ;;
+      GATEWAY_ENV_FILE) value=$GATEWAY_ENV_FILE ;;
+      MCP_ENV_FILE) value=$MCP_ENV_FILE ;;
       TERMINAL_RUNTIME_NAME) value=${TERMINAL_RUNTIME_DIR#/run/} ;;
       TERMINAL_RUNTIME_DIR) value=$TERMINAL_RUNTIME_DIR ;;
       TERMINAL_SOCKET) value=$TERMINAL_SOCKET ;;

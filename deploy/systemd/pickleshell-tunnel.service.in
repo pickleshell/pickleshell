@@ -8,11 +8,11 @@ Type=simple
 User=@MCP_USER@
 Group=@MCP_GROUP@
 WorkingDirectory=@ACTIVE_ROOT@/mcp-server
+EnvironmentFile=@MCP_ENV_FILE@
 Environment=PATH=@NODE_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=@STATE_ROOT@/mcp-home
 Environment=XDG_CACHE_HOME=@CACHE_ROOT@/mcp
 Environment=PLAYWRIGHT_BROWSERS_PATH=@CACHE_ROOT@/ms-playwright
-EnvironmentFile=@CONFIG_ROOT@/mcp.env
 Environment=MCP_TEMP_DIR=@MCP_TEMP_DIR@
 ExecStart=@TUNNEL_CLIENT_EXECUTABLE@ run --profile-file @TUNNEL_PROFILE@
 Restart=always
@@ -46,7 +46,7 @@ ReadOnlyPaths=@CONFIG_ROOT@/control-plane.key
 InaccessiblePaths=-@CONFIG_ROOT@/gateway.env
 InaccessiblePaths=-@CONFIG_ROOT@/opencode.jsonc
 InaccessiblePaths=-@CONFIG_ROOT@/config.json
-InaccessiblePaths=-@CONFIG_ROOT@/mcp.env
+InaccessiblePaths=-@MCP_ENV_FILE@
 ProtectProc=invisible
 ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

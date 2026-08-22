@@ -11,6 +11,7 @@ User=@GATEWAY_USER@
 Group=@GATEWAY_GROUP@
 SupplementaryGroups=@MCP_GROUP@
 WorkingDirectory=@ACTIVE_ROOT@/gateway
+EnvironmentFile=@GATEWAY_ENV_FILE@
 Environment=NODE_ENV=production
 Environment=PATH=@NODE_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=@STATE_ROOT@/agent-home
@@ -22,7 +23,6 @@ Environment=CODEX_HOME=@STATE_ROOT@/agent-home/.codex
 Environment=OPENCODE_CONFIG_DIR=@STATE_ROOT@/config/opencode
 Environment=SETTINGS_PATH=/var/lib/pickleshell-settings/settings.json
 Environment=NPM_CONFIG_CACHE=@CACHE_ROOT@/npm
-EnvironmentFile=@CONFIG_ROOT@/gateway.env
 ExecStart=@NODE_EXECUTABLE@ src/server.js
 Restart=on-failure
 RestartSec=5
@@ -58,7 +58,7 @@ ReadOnlyPaths=@CONFIG_ROOT@/config.json
 ReadOnlyPaths=@CONFIG_ROOT@/opencode.jsonc
 InaccessiblePaths=-@CONFIG_ROOT@/control-plane.key
 InaccessiblePaths=-@CONFIG_ROOT@/mcp.env
-InaccessiblePaths=-@CONFIG_ROOT@/gateway.env
+InaccessiblePaths=-@GATEWAY_ENV_FILE@
 ProtectProc=invisible
 ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
