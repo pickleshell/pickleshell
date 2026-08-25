@@ -61,13 +61,6 @@ walk you through the setup step by step using
 the development workflow, architecture, security invariants, and change
 boundaries.
 
-> [!WARNING]
-> **PickleShell is intended for professional use.** Use it only if you
-> understand its purpose, the systems, data, and workflows it can affect, its
-> security boundaries, and the purpose and impact of the tasks you delegate to it.
-> Before installing, consult an AI agent to understand what PickleShell is, what it
-> is for, and whether it solves the problem you want to solve.
-
 ## Use Case
 
 Create three PickleShell tunnels to three different machines, then give the
