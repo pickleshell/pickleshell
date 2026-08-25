@@ -83,13 +83,13 @@ launches. The same pattern is useful today for everything from saving a
 technical specification to asking the Agent on a selected machine to
 carry out a complex task directly from ChatGPT.
 
+## Quick Start
+
 > [!WARNING]
 > **The `main` branch may contain unreleased changes.** The latest stable
 > release is `v0.1.4`; use it only with trusted users and a dedicated service
 > account. Read
 > [SECURITY.md](SECURITY.md) before deployment.
-
-## Quick Start
 
 1. Follow the [Deployment guide](docs/deployment.md) to install the Gateway and
    tunnel-client on a Linux host.
