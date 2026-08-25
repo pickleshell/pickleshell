@@ -132,7 +132,7 @@ flowchart TD
     end
 
     E --> SVC
-    OC --> WS["Configured workspace"]
+    SVC --> WS["Configured workspace"]
 
     classDef cloud fill:#e9f3ff,stroke:#1677c8,color:#102a43
     classDef bridge fill:#fff4d6,stroke:#d48806,color:#3d2b00
