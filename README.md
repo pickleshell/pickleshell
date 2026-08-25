@@ -3,6 +3,13 @@
   PickleShell
 </h1>
 
+> [!WARNING]
+> **PickleShell is intended for professional use.** Use it only if you
+> understand the host system it controls, its security boundaries, and the
+> purpose and impact of the tasks you delegate to it.
+> Before installing, consult an AI agent to understand what PickleShell is, what it
+> is for, and whether it solves the problem you want to solve.
+
 <p align="center"><strong>Give ChatGPT a local machine to work with</strong></p>
 
 [![Release](https://img.shields.io/badge/release-v0.1.4-f5a623)](#release-history)
