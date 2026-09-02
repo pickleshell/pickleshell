@@ -1,0 +1,4 @@
+data/
+smoke-result*.json
+.env
+.env.*
