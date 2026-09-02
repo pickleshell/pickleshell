@@ -76,6 +76,33 @@ curl --fail --silent --show-error \
 embedding, and retrieval independently of LLM extraction. It does not by itself
 prove that the selected LLM can extract a fact faithfully.
 
+## HTTP API
+
+All user-scoped operations require `user_id`. ID-based operations return 404
+when the memory does not exist or belongs to another user.
+
+| Method | Path | Operation |
+| --- | --- | --- |
+| `POST` | `/memories` | Add a memory, optionally with extraction |
+| `POST` | `/search` | Semantic search for one user |
+| `GET` | `/memories?user_id=...&limit=...` | List memories for one user |
+| `GET` | `/memories/{id}?user_id=...` | Get one scoped memory |
+| `PUT` | `/memories/{id}` | Update text; JSON body contains `user_id` and `text` |
+| `GET` | `/memories/{id}/history?user_id=...` | Get Mem0 change history |
+| `DELETE` | `/memories/{id}?user_id=...` | Delete one scoped memory |
+
+The service delegates directly to Mem0 2.0.19 `get_all`, `get`, `update`,
+`history`, and `delete`; response bodies preserve the library's documented
+shapes. History is scoped through the current memory, so it is available before
+deletion but not exposed after the memory has been deleted.
+
+Run the deterministic scoped-CRUD test against the built image with:
+
+```bash
+docker run --rm --network host \
+  -v "$PWD/test_app.py:/test_app.py:ro" mem0-bos-mem0 python /test_app.py
+```
+
 ## Measured BOS results
 
 Measurements below are single observed runs, not availability guarantees:

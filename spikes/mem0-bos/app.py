@@ -1,10 +1,10 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path, Query
 from mem0 import Memory
 from mem0.memory import main as mem0_memory_main
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 DATA_DIR = os.environ.get("MEM0_DATA_DIR", "/data")
@@ -98,15 +98,27 @@ app = FastAPI(title="PickleShell Mem0 BOS spike", lifespan=lifespan)
 
 
 class AddRequest(BaseModel):
-    text: str
-    user_id: str
+    text: str = Field(min_length=1, max_length=32000)
+    user_id: str = Field(min_length=1, max_length=200)
     infer: bool = True
 
 
 class SearchRequest(BaseModel):
-    query: str
-    user_id: str
-    limit: int = 5
+    query: str = Field(min_length=1, max_length=8000)
+    user_id: str = Field(min_length=1, max_length=200)
+    limit: int = Field(default=5, ge=1, le=100)
+
+
+class UpdateRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=32000)
+
+
+def scoped_memory(memory_id: str, user_id: str):
+    memory = app.state.memory.get(memory_id)
+    if not memory or memory.get("user_id") != user_id:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return memory
 
 
 @app.get("/health")
@@ -140,5 +152,63 @@ def search_memory(request: SearchRequest):
             filters={"user_id": request.user_id},
             limit=request.limit,
         )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/memories")
+def list_memories(
+    user_id: str = Query(min_length=1, max_length=200),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    try:
+        return app.state.memory.get_all(filters={"user_id": user_id}, top_k=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/memories/{memory_id}")
+def get_memory(
+    memory_id: str = Path(min_length=1, max_length=200),
+    user_id: str = Query(min_length=1, max_length=200),
+):
+    return scoped_memory(memory_id, user_id)
+
+
+@app.put("/memories/{memory_id}")
+def update_memory(
+    request: UpdateRequest,
+    memory_id: str = Path(min_length=1, max_length=200),
+):
+    scoped_memory(memory_id, request.user_id)
+    try:
+        result = app.state.memory.update(memory_id, text=request.text)
+        return {**result, "memory": scoped_memory(memory_id, request.user_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.delete("/memories/{memory_id}")
+def delete_memory(
+    memory_id: str = Path(min_length=1, max_length=200),
+    user_id: str = Query(min_length=1, max_length=200),
+):
+    scoped_memory(memory_id, user_id)
+    try:
+        return app.state.memory.delete(memory_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/memories/{memory_id}/history")
+def memory_history(
+    memory_id: str = Path(min_length=1, max_length=200),
+    user_id: str = Query(min_length=1, max_length=200),
+):
+    scoped_memory(memory_id, user_id)
+    try:
+        return {"results": app.state.memory.history(memory_id)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
