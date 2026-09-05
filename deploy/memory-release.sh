@@ -81,6 +81,26 @@ render_artifacts() {
   printf '#!/usr/bin/env bash\nexec %q %q %q\n' "$NODE_EXECUTABLE" "$release/pickleshell-memory-mcp/src/readiness.js" "$WRAPPER_DIR/pickleshell-memory-mcp" | install -m 0755 /dev/stdin "$WRAPPER_DIR/pickleshell-memory-ready" || return
 }
 restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
+cleanup_failed_first_activation() {
+  local failures=() path
+  "$SYSTEMCTL" stop "$SERVICE" >/dev/null 2>&1 || failures+=(service-stop)
+  for path in \
+    "$UNITS_DIR/$SERVICE" \
+    "$WRAPPER_DIR/backend-wrapper" \
+    "$WRAPPER_DIR/pickleshell-memory-mcp" \
+    "$WRAPPER_DIR/pickleshell-memory-ready" \
+    "$LOGROTATE_DIR/pickleshell-memory" \
+    "$ACTIVE"; do
+    rm -f -- "$path" >/dev/null 2>&1 || failures+=(artifact-removal)
+  done
+  printf '' > "$DEPLOY_STATE/current-target" 2>/dev/null || failures+=(state-clear)
+  printf '' > "$DEPLOY_STATE/previous-target" 2>/dev/null || failures+=(state-clear)
+  "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || failures+=(daemon-reload)
+  if ((${#failures[@]})); then
+    FIRST_ACTIVATION_CLEANUP_FAILURES=$(IFS=,; printf '%s' "${failures[*]}")
+    return 1
+  fi
+}
 if ((ROLLBACK)); then
   current=$(<"$DEPLOY_STATE/current-target") || die 'current target is missing'; previous=$(<"$DEPLOY_STATE/previous-target") || die 'previous target is missing'
   [[ -n $previous && $(active_target) == "$current" && -d $ROOT/$previous ]] || die 'rollback target is unavailable or inconsistent'
@@ -110,9 +130,9 @@ if ! restart_verify; then
     restart_verify || die 'activation readiness failed; previous deployment recovery verification failed'
     die 'activation readiness failed; previous deployment restored and verified'
   fi
-  rm -f -- "$ACTIVE" || die 'activation readiness failed; first-activation state recovery failed'
-  printf '' > "$DEPLOY_STATE/current-target" || die 'activation readiness failed; first-activation state recovery failed'
-  printf '' > "$DEPLOY_STATE/previous-target" || die 'activation readiness failed; first-activation state recovery failed'
-  die 'activation readiness failed'
+  if ! cleanup_failed_first_activation; then
+    die "activation readiness failed; first-activation cleanup failed (${FIRST_ACTIVATION_CLEANUP_FAILURES:-unknown})"
+  fi
+  die 'activation readiness failed; first activation cleaned up'
 fi
 printf 'memory-release: active release: releases/%s\n' "$RESOLVED"

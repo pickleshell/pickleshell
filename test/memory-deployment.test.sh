@@ -90,12 +90,18 @@ chmod 0640 "$PREFIX/config/backend.env" "$PREFIX/config/mcp.env"
 cat > "$PREFIX/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+printf '%s\n' "$*" >> "${FAKE_SYSTEMD_ROOT:?}/systemctl.calls"
 case "$1" in
   daemon-reload|is-active) exit 0 ;;
+  stop)
+    pidfile=${FAKE_SYSTEMD_ROOT:?}/backend.pid
+    if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; wait "$(<"$pidfile")" 2>/dev/null || true; fi
+    exit 0
+    ;;
   restart)
     pidfile=${FAKE_SYSTEMD_ROOT:?}/backend.pid
     if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; wait "$(<"$pidfile")" 2>/dev/null || true; fi
-    if [[ $2 == pickleshell-memory-isolated.service ]]; then
+    if [[ $2 == pickleshell-memory-isolated.service || $2 == pickleshell-memory-first-failure.service ]]; then
       set -a
       source "${FAKE_SYSTEMD_ROOT}/config/backend.env"
       set +a
@@ -133,6 +139,53 @@ install_release() {
     --service pickleshell-memory-isolated.service \
     --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin"
 }
+
+FIRST_FAILURE="$TMP/first-failure"
+mkdir -p -- "$FIRST_FAILURE"/{app,bin,config,log,logrotate,state,units}
+cp -- "$PREFIX/bin/backend.js" "$PREFIX/bin/systemctl" "$FIRST_FAILURE/bin/"
+chmod 0755 "$FIRST_FAILURE/bin/backend.js" "$FIRST_FAILURE/bin/systemctl"
+FIRST_PORT=$((40001 + RANDOM % 10000))
+printf 'FAKE_BACKEND_PORT=%s\n' "$FIRST_PORT" > "$FIRST_FAILURE/config/backend.env"
+printf '%s\n' \
+  'PICKLESHELL_MEMORY_ROLE=agent' \
+  'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
+  'PICKLESHELL_MEMORY_SCOPE=fixture-scope' \
+  'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:1' \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$FIRST_FAILURE/log/audit.jsonl" > "$FIRST_FAILURE/config/mcp.env"
+chmod 0640 "$FIRST_FAILURE/config/backend.env" "$FIRST_FAILURE/config/mcp.env"
+if FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
+  --profile isolated --source "$FIXTURE" --root "$FIRST_FAILURE/app" --commit "$SHA1" \
+  --config-root "$FIRST_FAILURE/config" --state-root "$FIRST_FAILURE/state" --log-root "$FIRST_FAILURE/log" \
+  --units-dir "$FIRST_FAILURE/units" --logrotate-dir "$FIRST_FAILURE/logrotate" \
+  --backend-executable "$FIRST_FAILURE/bin/backend.js" --node-executable "$(command -v node)" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" \
+  --service pickleshell-memory-first-failure.service \
+  --systemctl "$FIRST_FAILURE/bin/systemctl" --wrapper-dir "$FIRST_FAILURE/bin" \
+  >"$TMP/first-failure.out" 2>&1; then
+  echo 'failed first activation unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'activation readiness failed; first activation cleaned up' "$TMP/first-failure.out"
+! grep -q 'memory-release: active release\|memory-release: rolled back' "$TMP/first-failure.out"
+test -f "$FIRST_FAILURE/backend.pid" || { cat "$TMP/first-failure.out" >&2; exit 1; }
+FIRST_FAILURE_PID=$(<"$FIRST_FAILURE/backend.pid")
+! kill -0 "$FIRST_FAILURE_PID" 2>/dev/null
+test ! -e "$FIRST_FAILURE/app/active"
+test -z "$(<"$FIRST_FAILURE/app/state/current-target")"
+test -z "$(<"$FIRST_FAILURE/app/state/previous-target")"
+for artifact in \
+  "$FIRST_FAILURE/units/pickleshell-memory-first-failure.service" \
+  "$FIRST_FAILURE/bin/backend-wrapper" \
+  "$FIRST_FAILURE/bin/pickleshell-memory-mcp" \
+  "$FIRST_FAILURE/bin/pickleshell-memory-ready" \
+  "$FIRST_FAILURE/logrotate/pickleshell-memory"; do
+  test ! -e "$artifact"
+done
+test -f "$FIRST_FAILURE/config/backend.env"
+test -f "$FIRST_FAILURE/config/mcp.env"
+test -f "$FIRST_FAILURE/log/audit.jsonl"
+test "$(grep -c '^daemon-reload$' "$FIRST_FAILURE/systemctl.calls")" -eq 2
+grep -q '^stop pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
 
 install_release "$SHA1"
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
