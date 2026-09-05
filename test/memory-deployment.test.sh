@@ -64,6 +64,17 @@ esac
 EOF
 chmod 0755 "$PREFIX/bin/systemctl"
 
+cat > "$PREFIX/bin/logrotate" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+config=$1
+log=$(awk 'NR == 1 { print $1 }' "$config")
+read -r _ mode owner group < <(awk '$1 == "create" { print }' "$config")
+mv -- "$log" "$log.1"
+install -m "$mode" -o "$owner" -g "$group" /dev/null "$log"
+EOF
+chmod 0755 "$PREFIX/bin/logrotate"
+
 install_release() {
   FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
     --profile isolated --source "$FIXTURE" --root "$PREFIX/app" --commit "$1" \
@@ -78,16 +89,23 @@ install_release "$SHA1"
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
 test "$(stat -c %a "$PREFIX/config/backend.env")" = 640
 test "$(stat -c %a "$PREFIX/config/mcp.env")" = 640
-test "$(stat -c %a "$PREFIX/log/audit.jsonl")" = 640
+test "$(stat -c %a "$PREFIX/log/audit.jsonl")" = 660
 test "$(stat -c %a "$PREFIX/log")" = 750
 test -f "$PREFIX/units/pickleshell-memory-backend.service"
 test -x "$PREFIX/bin/pickleshell-memory-mcp"
 test -x "$PREFIX/bin/pickleshell-memory-ready"
 test -f "$PREFIX/logrotate/pickleshell-memory"
 grep -q 'rotate 14' "$PREFIX/logrotate/pickleshell-memory"
+grep -q 'create 0660 ' "$PREFIX/logrotate/pickleshell-memory"
 grep -q "$PREFIX/config/backend.env" "$PREFIX/units/pickleshell-memory-backend.service"
 ! find "$PREFIX/app" "$PREFIX/units" "$PREFIX/bin" -type f -exec grep -l 'pickleshell-gateway\|gateway/' {} + | grep -q .
+audit_lines=$(wc -l < "$PREFIX/log/audit.jsonl")
 "$PREFIX/bin/pickleshell-memory-ready"
+test "$(wc -l < "$PREFIX/log/audit.jsonl")" -gt "$audit_lines"
+grep -q '"tool":"memory_capabilities"' "$PREFIX/log/audit.jsonl"
+"$PREFIX/bin/logrotate" "$PREFIX/logrotate/pickleshell-memory"
+test "$(stat -c %a "$PREFIX/log/audit.jsonl")" = 660
+test "$(stat -c %a "$PREFIX/log")" = 750
 
 printf 'v2\n' > "$FIXTURE/VERSION"
 git -C "$FIXTURE" add VERSION

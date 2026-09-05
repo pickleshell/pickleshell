@@ -39,7 +39,7 @@ mkdir -p -- "$ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WR
 chmod 0750 "$STATE_ROOT" "$LOG_ROOT"
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT" "$LOG_ROOT"; fi
 [[ ! -e $AUDIT_LOG || ( -f $AUDIT_LOG && ! -L $AUDIT_LOG ) ]] || die 'audit log path is unsafe'
-if [[ ! -e $AUDIT_LOG ]]; then install -m 0640 /dev/null "$AUDIT_LOG"; else chmod 0640 "$AUDIT_LOG"; fi
+if [[ ! -e $AUDIT_LOG ]]; then install -m 0660 /dev/null "$AUDIT_LOG"; else chmod 0660 "$AUDIT_LOG"; fi
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$AUDIT_LOG"; fi
 RELEASES="$ROOT/releases"; ACTIVE="$ROOT/active"; DEPLOY_STATE="$ROOT/state"; mkdir -p -- "$RELEASES" "$DEPLOY_STATE"
 active_target() { [[ -L $ACTIVE ]] || return 1; local target; target=$(readlink -- "$ACTIVE"); [[ $target == releases/* && $target != *..* && -d $ROOT/$target && ! -L $ROOT/$target ]] || die 'active target is unsafe'; printf %s "$target"; }

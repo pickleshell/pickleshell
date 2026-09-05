@@ -411,8 +411,12 @@ The optional memory sidecar and Memory MCP are deployed independently with
 `deploy/memory-release.sh`; they are not inputs to Gateway, tunnel, Browser, or
 Terminal startup/readiness. Follow the complete configuration, credential,
 audit-retention, readiness, upgrade, and rollback contract in
-`pickleshell-memory-mcp/README.md`. Never add memory dependencies to the core
-release units. Validate changes without privileges or host writes with:
+`pickleshell-memory-mcp/README.md`. Every identity launching the installed MCP
+wrapper must belong to the configured dedicated memory group, which grants
+read access to `mcp.env` and group-write access to the managed `0660` audit
+file inside its restricted `0750` log directory. Never grant those permissions
+outside the dedicated group or add memory dependencies to the core release
+units. Validate changes without privileges or host writes with:
 
 ```bash
 npm run test:memory-deployment

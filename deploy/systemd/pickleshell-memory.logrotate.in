@@ -8,5 +8,5 @@
     delaycompress
     copytruncate
     su @SERVICE_USER@ @SERVICE_GROUP@
-    create 0640 @SERVICE_USER@ @SERVICE_GROUP@
+    create 0660 @SERVICE_USER@ @SERVICE_GROUP@
 }

@@ -62,7 +62,11 @@ files must be regular, non-symlink files owned by the invoking operator, group
 `backend.env`; put the MCP variables below and any backend bearer token in
 `mcp.env`. Secrets are never passed on a command line. The backend executable
 is a credential-free, fixed path and receives its configuration through the
-service environment.
+service environment. Every OS identity whose MCP client launches the installed
+`pickleshell-memory-mcp` wrapper must be a member of the configured memory
+service group. That dedicated group is the shared boundary for reading
+`mcp.env` and writing the managed audit log; do not grant access to other
+groups or users.
 
 The installer stages only this package and its memory deployment assets under
 `releases/<sha>`, atomically switches `active`, installs a hardened backend
@@ -72,7 +76,9 @@ call. On failure the activation is rejected. To switch back to the recorded
 previous release, repeat the path/identity options with `--rollback`.
 
 The audit contract is `/var/log/pickleshell-memory/audit.jsonl`, owned by the
-memory service identity and mode `0640`, in a `0750` directory. The installed
+memory service identity and group-writable mode `0660`, in a `0750` directory.
+The configured memory group gives wrapper-launching identities access without
+broadening the directory or audit file to other users. The installed
 logrotate policy rotates daily, retains 14 rotations for at most 30 days,
 compresses old logs, and recreates the file with the same least-privilege
 ownership. Review retention against local policy before activation.
