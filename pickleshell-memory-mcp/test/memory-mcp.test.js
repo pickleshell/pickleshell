@@ -387,17 +387,69 @@ test("audit failure after a successful mutation returns a non-retryable uncertai
   }
 });
 
-test("discovery reports effective policy and transparent backend health", async () => {
+test("discovery reports effective policy and bounded public backend health", async () => {
   const config = loadConfig(baseEnv);
   const events = [];
   const service = new MemoryService(config, {
-    discover: async () => ({ status: "ok", llm_provider: "ollama", custom_metadata: { version: "2.0.19" } }),
+    discover: async () => ({ status: "ok", provider: "mem0", version: "2.0.19", internal: "private" }),
   }, { record: (event) => events.push(event) });
   const result = await service.capabilities();
   const capabilities = JSON.parse(result.content[0].text);
   assert.equal(capabilities.role, "agent");
   assert.equal(capabilities.scope, "agent-codex");
   assert.equal(capabilities.semantics, "transparent");
-  assert.deepEqual(capabilities.backend.custom_metadata, { version: "2.0.19" });
+  assert.deepEqual(capabilities.backend, { status: "ok", provider: "mem0", version: "2.0.19" });
   assert.equal(events[0].tool, "memory_capabilities");
+});
+
+test("capability discovery exposes only bounded public health metadata for every role", async () => {
+  const backendHealth = {
+    status: "ok",
+    provider: "mem0",
+    version: "2.0.19",
+    authorization: "Bearer private-authorization",
+    token: "private-token",
+    access_token: "private-access-token",
+    database_url: "postgresql://private-database",
+    nested: { password: "private-password", endpoint: "https://private.example" },
+    unknown: "private-unknown-field",
+    oversized_status: "x".repeat(65),
+  };
+
+  for (const role of ["agent", "admin"]) {
+    const config = loadConfig({
+      ...baseEnv,
+      PICKLESHELL_MEMORY_ROLE: role,
+      PICKLESHELL_MEMORY_SCOPE: role === "agent" ? "agent-codex" : undefined,
+    });
+    const service = new MemoryService(config, new BackendClient(config, async () => new Response(
+      JSON.stringify(backendHealth), { status: 200, headers: { "content-type": "application/json" } },
+    )), { record() {} });
+
+    const result = await service.capabilities();
+    const payload = JSON.parse(result.content[0].text);
+
+    assert.deepEqual(payload.backend, { status: "ok", provider: "mem0", version: "2.0.19" }, role);
+    assert.deepEqual(Object.keys(payload.backend), ["status", "provider", "version"], role);
+    assert.ok(JSON.stringify(payload.backend).length <= 200, `${role}: public health output must remain bounded`);
+    for (const secret of ["private-authorization", "private-token", "private-access-token",
+      "private-database", "private-password", "private.example", "private-unknown-field"]) {
+      assert.equal(JSON.stringify(payload).includes(secret), false, `${role}: ${secret} leaked`);
+    }
+  }
+});
+
+test("public backend health drops invalid and oversized allowlisted values deterministically", async () => {
+  const config = loadConfig(baseEnv);
+  const service = new MemoryService(config, {
+    discover: async () => ({
+      version: "v".repeat(65),
+      provider: { name: "nested-provider" },
+      status: "ok",
+    }),
+  }, { record() {} });
+
+  const payload = JSON.parse((await service.capabilities()).content[0].text);
+  assert.deepEqual(payload.backend, { status: "ok" });
+  assert.deepEqual(Object.keys(payload.backend), ["status"]);
 });

@@ -1,6 +1,8 @@
 import { authorize, OPERATIONS } from "./policy.js";
 
 const MUTATIONS = new Set(["memory_add", "memory_update", "memory_delete"]);
+const PUBLIC_HEALTH_FIELDS = ["status", "provider", "version"];
+const MAX_PUBLIC_HEALTH_VALUE_LENGTH = 64;
 
 export class MemoryService {
   constructor(config, backend, auditor) { Object.assign(this, { config, backend, auditor }); }
@@ -52,7 +54,7 @@ export class MemoryService {
       transport: "stdio", authentication: "operator-launched-process+optional-backend-bearer",
       backend_protocol: "mem0-http-v1", role: this.config.role,
       scope: this.config.role === "agent" ? this.config.scope : "explicit-per-call",
-      semantics: "transparent", operations: Object.keys(OPERATIONS), backend: health,
+      semantics: "transparent", operations: Object.keys(OPERATIONS), backend: publicBackendHealth(health),
     }) }] };
   }
 
@@ -75,4 +77,14 @@ export class MemoryService {
     this.auditor.record({ actor: this.config.actor, role: this.config.role, scope, tool, decision, outcome,
       duration_ms: Date.now() - started, ...(error ? { error } : {}) });
   }
+}
+
+function publicBackendHealth(health) {
+  const result = {};
+  if (!health || typeof health !== "object" || Array.isArray(health)) return result;
+  for (const field of PUBLIC_HEALTH_FIELDS) {
+    const value = health[field];
+    if (typeof value === "string" && value.length <= MAX_PUBLIC_HEALTH_VALUE_LENGTH) result[field] = value;
+  }
+  return result;
 }

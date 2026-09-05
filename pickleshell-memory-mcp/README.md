@@ -106,7 +106,10 @@ configuration. Never put backend tokens in Git or command arguments.
 
 CRUD/search/history tools map transparently to Mem0. `memory_capabilities`
 reports the effective role, scope behavior, supported operations, protocol,
-and backend health metadata without credentials.
+and the same bounded public backend health object for agent and admin roles.
+That object allowlists only string-valued `status`, `provider`, and `version`
+fields of at most 64 characters, in that order. Unknown fields, nested values,
+oversized values, credentials, tokens, and connection details are dropped.
 
 Tool failures return `isError: true` with only `error`, HTTP-like `status`, and
 `retryable`. Backend response bodies are not copied into errors or audit logs.
