@@ -10,8 +10,8 @@ process.env.CONFIG_PATH = configPath;
 process.env.SETTINGS_PATH = settingsPath;
 require('./src/agent');
 
-function load(chats = { alpha: { workspace: dir }, beta: { workspace: dir, runtime: 'opencode', model: 'opencode/static' } }) {
-  fs.writeFileSync(configPath, JSON.stringify({ chats, allowed_models: ['opencode/global', 'opencode/static'] }));
+function load(chats = { alpha: { workspace: dir }, beta: { workspace: dir, runtime: 'opencode', model: 'opencode/static' } }, extraConfig = {}) {
+  fs.writeFileSync(configPath, JSON.stringify({ chats, allowed_models: ['opencode/global', 'opencode/static'], ...extraConfig }));
   delete require.cache[require.resolve('./src/config')];
   delete require.cache[require.resolve('./src/settings')];
   return require('./src/settings');
@@ -43,6 +43,14 @@ function check(value, message) { assert.ok(value, message); }
   check(JSON.stringify(chatMetadata) === JSON.stringify(settings.describe().definitions), 'chat and global definitions share metadata');
   check(settings.resolve('alpha', { model: 'opencode/static' }).values.model === 'opencode/static', 'explicit request override wins once');
   check(settings.resolve('alpha').values.model === 'opencode/global', 'explicit override does not persist');
+  settings = load(
+    { 'pickleshell-main': { workspace: dir, runtime: 'opencode', model: 'opencode/static' } },
+    { default_model: 'opencode/global', allowed_runtimes: ['opencode', 'codex'] }
+  );
+  const switched = settings.resolve('pickleshell-main', { runtime: 'codex' });
+  check(switched.values.runtime === 'codex' && switched.values.model === null && switched.sources.model === 'default', 'runtime request does not inherit the previous runtime model');
+  check(settings.resolve('pickleshell-main', { runtime: 'opencode' }).values.model === 'opencode/global', 'same runtime request keeps the inherited model');
+  settings = load();
   await assert.rejects(settings.update(undefined, 'set', { agent_timeout_sec: 13 }, 0), e => e.code === 'revision_conflict');
 
   const reset = await settings.update(undefined, 'reset', ['model', 'agent_timeout_sec'], 1);
@@ -73,5 +81,5 @@ function check(value, message) { assert.ok(value, message); }
   check(cas.filter(result => result.status === 'fulfilled').length === 1 && settings.readStore().file_revision === 1, 'concurrent CAS has one winner');
   check(!JSON.stringify(settings.describe()).match(/workspace|credential|terminal|socket|root|executable|bind|tunnel|browser|systemd|security/), 'global response has no sensitive/static path fields');
   check(!fs.readdirSync(dir).some(name => name.endsWith('.tmp')), 'no temporary files remain');
-  console.log('PASS: scoped settings tests (28 assertions)');
+  console.log('PASS: scoped settings tests (30 assertions)');
 })().catch(error => { console.error(error); process.exitCode = 1; });

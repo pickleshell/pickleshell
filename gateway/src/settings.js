@@ -139,6 +139,10 @@ function defaultValue(name) {
   return null;
 }
 
+function defaultModelForRuntime(runtime) {
+  return config.normalizeRuntime(runtime) === 'opencode' ? config.getDefaultModel() : null;
+}
+
 function rawEffective(chatId, document, overrides = {}) {
   const chatScope = document.chats[chatId]?.settings || {};
   const values = {};
@@ -152,6 +156,22 @@ function rawEffective(chatId, document, overrides = {}) {
       const value = staticValue(chatId, name);
       values[name] = value === undefined ? defaultValue(name) : value;
       sources[name] = value === undefined ? 'default' : 'static_config';
+    }
+  }
+  // A model inherited from a lower-precedence scope belongs to that scope's
+  // runtime. When a request changes the runtime without also choosing a model,
+  // use the new adapter's default instead of forwarding the old adapter's
+  // model (for Codex, null means the Codex CLI default).
+  if (Object.prototype.hasOwnProperty.call(overrides, 'runtime') &&
+      !Object.prototype.hasOwnProperty.call(overrides, 'model')) {
+    const inheritedRuntime = Object.prototype.hasOwnProperty.call(chatScope, 'runtime')
+      ? chatScope.runtime
+      : (Object.prototype.hasOwnProperty.call(document.global.settings, 'runtime')
+        ? document.global.settings.runtime
+        : staticValue(chatId, 'runtime'));
+    if (config.normalizeRuntime(values.runtime) !== config.normalizeRuntime(inheritedRuntime || defaultValue('runtime'))) {
+      values.model = defaultModelForRuntime(values.runtime);
+      sources.model = 'default';
     }
   }
   if (values.runtime === 'codex' && !Object.prototype.hasOwnProperty.call(overrides, 'model') &&

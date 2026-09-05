@@ -8,7 +8,9 @@ when a deployment does not need every provider.
 The allowlist is an operator control, not a provider capability list. A client
 may request a model with `send-chat.model`, but the Gateway rejects IDs that are
 not allowed. If no model override is supplied, the Gateway uses the chat config
-model and then the configured `default_model`.
+model and then the configured `default_model`. When a request explicitly
+changes `runtime`, an inherited model from the previous runtime is ignored and
+the new runtime's default is used instead.
 
 Runtime selection is separate from model selection. `runtime` chooses the local
 agent adapter, such as `opencode` or `codex`; `model` chooses an allowed provider

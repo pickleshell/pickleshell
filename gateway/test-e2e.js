@@ -206,15 +206,16 @@ async function main() {
     console.log('\n=== e2e: explicit agent selection ===');
     const { output } = await runScenario({
       chatId: 'e2e-explicit-agent',
-      chats: { 'e2e-explicit-agent': opencodeChat },
+      chats: { 'e2e-explicit-agent': { ...opencodeChat, model: 'opencode/big-pickle' } },
       allowedRuntimes: ['opencode', 'codex'],
+      allowedModels: ['opencode/big-pickle'],
       runtime: 'codex',
       message: 'hello',
       sessionId: 'e2e-sess-explicit-agent',
     });
     assert(output.state === 'completed', 'explicit agent: lifecycle state is completed');
     assert(output.output.runtime === 'codex', 'explicit agent: request selects Codex over config');
-    assert(output.output.execution_state === 'done', 'explicit agent: canonical outcome is preserved');
+    assert(output.output.execution_state === 'done', 'explicit agent: does not forward the configured OpenCode model to Codex');
   }
 
   // A Codex-incompatible provider-qualified model must be rejected before
