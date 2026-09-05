@@ -14,6 +14,9 @@ cp -- "$REPO/deploy/systemd/pickleshell-memory-backend.service.in" "$FIXTURE/dep
 cp -- "$REPO/deploy/systemd/pickleshell-memory-mcp.sh.in" "$FIXTURE/deploy/systemd/"
 cp -- "$REPO/deploy/systemd/pickleshell-memory-backend.sh.in" "$FIXTURE/deploy/systemd/"
 cp -- "$REPO/deploy/systemd/pickleshell-memory.logrotate.in" "$FIXTURE/deploy/systemd/"
+for artifact in "$FIXTURE"/deploy/systemd/*.in; do
+  printf '\n# release-marker: v1\n' >> "$artifact"
+done
 
 git -C "$FIXTURE" init -q
 git -C "$FIXTURE" config user.email fixture@example.invalid
@@ -107,8 +110,42 @@ grep -q '"tool":"memory_capabilities"' "$PREFIX/log/audit.jsonl"
 test "$(stat -c %a "$PREFIX/log/audit.jsonl")" = 660
 test "$(stat -c %a "$PREFIX/log")" = 750
 
+declare -A V1_HASHES
+for artifact in \
+  "$PREFIX/units/pickleshell-memory-backend.service" \
+  "$PREFIX/bin/backend-wrapper" \
+  "$PREFIX/bin/pickleshell-memory-mcp" \
+  "$PREFIX/bin/pickleshell-memory-ready" \
+  "$PREFIX/logrotate/pickleshell-memory"; do
+  V1_HASHES["$artifact"]=$(sha256sum "$artifact" | cut -d' ' -f1)
+done
+V1_PID=$(<"$PREFIX/backend.pid")
+
+sed -i 's/release-marker: v1/release-marker: failed-upgrade/g' "$FIXTURE"/deploy/systemd/*.in
+sed -i '1a process.exit(23); // deterministic failed-upgrade readiness' "$FIXTURE/pickleshell-memory-mcp/src/readiness.js"
+git -C "$FIXTURE" add deploy/systemd pickleshell-memory-mcp/src/readiness.js
+git -C "$FIXTURE" commit -qm failed-upgrade
+FAILED_SHA=$(git -C "$FIXTURE" rev-parse HEAD)
+if install_release "$FAILED_SHA" >"$TMP/failed-upgrade.out" 2>&1; then
+  echo 'failed upgrade unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'activation readiness failed; previous deployment restored and verified' "$TMP/failed-upgrade.out"
+test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
+test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA1"
+test -z "$(<"$PREFIX/app/state/previous-target")"
+for artifact in "${!V1_HASHES[@]}"; do
+  test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "${V1_HASHES[$artifact]}"
+done
+V1_RECOVERED_PID=$(<"$PREFIX/backend.pid")
+test "$V1_RECOVERED_PID" != "$V1_PID"
+kill -0 "$V1_RECOVERED_PID"
+"$PREFIX/bin/pickleshell-memory-ready"
+
 printf 'v2\n' > "$FIXTURE/VERSION"
-git -C "$FIXTURE" add VERSION
+sed -i '/deterministic failed-upgrade readiness/d' "$FIXTURE/pickleshell-memory-mcp/src/readiness.js"
+sed -i 's/release-marker: failed-upgrade/release-marker: v2/g' "$FIXTURE"/deploy/systemd/*.in
+git -C "$FIXTURE" add VERSION deploy/systemd pickleshell-memory-mcp/src/readiness.js
 git -C "$FIXTURE" commit -qm v2
 SHA2=$(git -C "$FIXTURE" rev-parse HEAD)
 install_release "$SHA2"

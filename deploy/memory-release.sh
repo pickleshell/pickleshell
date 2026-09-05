@@ -43,7 +43,13 @@ if [[ ! -e $AUDIT_LOG ]]; then install -m 0660 /dev/null "$AUDIT_LOG"; else chmo
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$AUDIT_LOG"; fi
 RELEASES="$ROOT/releases"; ACTIVE="$ROOT/active"; DEPLOY_STATE="$ROOT/state"; mkdir -p -- "$RELEASES" "$DEPLOY_STATE"
 active_target() { [[ -L $ACTIVE ]] || return 1; local target; target=$(readlink -- "$ACTIVE"); [[ $target == releases/* && $target != *..* && -d $ROOT/$target && ! -L $ROOT/$target ]] || die 'active target is unsafe'; printf %s "$target"; }
-switch() { local target=$1 previous=$2 tmp="$ROOT/.active.new.$$"; printf '%s\n' "$previous" > "$DEPLOY_STATE/previous-target"; printf '%s\n' "$target" > "$DEPLOY_STATE/current-target"; ln -s "$target" "$tmp"; mv -Tf "$tmp" "$ACTIVE"; }
+switch() {
+  local target=$1 previous=$2 tmp="$ROOT/.active.new.$$"
+  printf '%s\n' "$previous" > "$DEPLOY_STATE/previous-target" || return
+  printf '%s\n' "$target" > "$DEPLOY_STATE/current-target" || return
+  ln -s "$target" "$tmp" || return
+  mv -Tf "$tmp" "$ACTIVE"
+}
 render_artifacts() {
   local release=$1 contents token value template target
   for spec in \
@@ -51,17 +57,17 @@ render_artifacts() {
     "pickleshell-memory-backend.sh.in:$WRAPPER_DIR/backend-wrapper:0755" \
     "pickleshell-memory-mcp.sh.in:$WRAPPER_DIR/pickleshell-memory-mcp:0755" \
     "pickleshell-memory.logrotate.in:$LOGROTATE_DIR/pickleshell-memory:0644"; do
-    template="$release/deploy/systemd/${spec%%:*}"; target=${spec#*:}; mode=${target##*:}; target=${target%:*}; contents=$(<"$template")
+    template="$release/deploy/systemd/${spec%%:*}"; target=${spec#*:}; mode=${target##*:}; target=${target%:*}; contents=$(<"$template") || return
     for token in ACTIVE_ROOT CONFIG_ROOT STATE_ROOT LOG_ROOT BACKEND_ENV_FILE MCP_ENV_FILE AUDIT_LOG SERVICE_USER SERVICE_GROUP BACKEND_EXECUTABLE NODE_EXECUTABLE BACKEND_WRAPPER; do
       case $token in ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; esac
       contents=${contents//"@$token@"/"$value"}
     done
     [[ $contents != *'@'* ]] || die 'unresolved deployment placeholder'
-    printf '%s\n' "$contents" | install -m "$mode" /dev/stdin "$target"
+    printf '%s\n' "$contents" | install -m "$mode" /dev/stdin "$target" || return
   done
-  printf '#!/usr/bin/env bash\nexec %q %q %q\n' "$NODE_EXECUTABLE" "$release/pickleshell-memory-mcp/src/readiness.js" "$WRAPPER_DIR/pickleshell-memory-mcp" | install -m 0755 /dev/stdin "$WRAPPER_DIR/pickleshell-memory-ready"
+  printf '#!/usr/bin/env bash\nexec %q %q %q\n' "$NODE_EXECUTABLE" "$release/pickleshell-memory-mcp/src/readiness.js" "$WRAPPER_DIR/pickleshell-memory-mcp" | install -m 0755 /dev/stdin "$WRAPPER_DIR/pickleshell-memory-ready" || return
 }
-restart_verify() { "$SYSTEMCTL" daemon-reload; "$SYSTEMCTL" restart "$SERVICE"; "$SYSTEMCTL" is-active "$SERVICE" >/dev/null; "$WRAPPER_DIR/pickleshell-memory-ready"; }
+restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
 if ((ROLLBACK)); then
   current=$(<"$DEPLOY_STATE/current-target") || die 'current target is missing'; previous=$(<"$DEPLOY_STATE/previous-target") || die 'previous target is missing'
   [[ -n $previous && $(active_target) == "$current" && -d $ROOT/$previous ]] || die 'rollback target is unavailable or inconsistent'
@@ -81,10 +87,19 @@ while IFS= read -r -d '' link; do
   [[ $resolved_link == "$STAGING/pickleshell-memory-mcp"/* ]] || die 'release symlink escapes the memory package'
 done < <(find -P "$STAGING" -type l -print0)
 find -P "$STAGING" -type d -exec chmod 0555 {} +; find -P "$STAGING" -type f -exec chmod 0444 {} +
-mv -T "$STAGING" "$RELEASE"; STAGING=''; previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
+mv -T "$STAGING" "$RELEASE"; STAGING=''; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
+if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then prior_previous=$(<"$DEPLOY_STATE/previous-target"); fi
 render_artifacts "$RELEASE"; switch "releases/$RESOLVED" "$previous"
 if ! restart_verify; then
-  if [[ -n $previous ]]; then switch "$previous" ''; else rm -f -- "$ACTIVE"; printf '' > "$DEPLOY_STATE/current-target"; fi
+  if [[ -n $previous ]]; then
+    switch "$previous" "$prior_previous" || die 'activation readiness failed; previous deployment state recovery failed'
+    render_artifacts "$ROOT/$previous" || die 'activation readiness failed; previous deployment artifact recovery failed'
+    restart_verify || die 'activation readiness failed; previous deployment recovery verification failed'
+    die 'activation readiness failed; previous deployment restored and verified'
+  fi
+  rm -f -- "$ACTIVE" || die 'activation readiness failed; first-activation state recovery failed'
+  printf '' > "$DEPLOY_STATE/current-target" || die 'activation readiness failed; first-activation state recovery failed'
+  printf '' > "$DEPLOY_STATE/previous-target" || die 'activation readiness failed; first-activation state recovery failed'
   die 'activation readiness failed'
 fi
 printf 'memory-release: active release: releases/%s\n' "$RESOLVED"
