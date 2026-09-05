@@ -572,6 +572,62 @@ for artifact in \
 done
 V2_PID=$(<"$PREFIX/backend.pid")
 RESTARTS_BEFORE=$(grep -c '^restart pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls")
+
+assert_unsafe_previous_target_rejected() {
+  local name=$1 target=$2 setup=${3:-none} fake_sha fake_path calls_before artifact
+  fake_sha=${target#releases/}; fake_path="$PREFIX/app/$target"
+  case $setup in
+    symlink-release)
+      mkdir -p -- "$PREFIX/rollback-victim"
+      ln -s "$PREFIX/rollback-victim" "$fake_path"
+      ;;
+    missing-marker) mkdir -- "$fake_path" ;;
+    mismatched-marker)
+      mkdir -- "$fake_path"; printf '%040d\n' 9 > "$fake_path/.release-sha"
+      ;;
+    symlink-marker)
+      mkdir -- "$fake_path"; printf '%s\n' "$fake_sha" > "$PREFIX/rollback-marker-victim"
+      ln -s "$PREFIX/rollback-marker-victim" "$fake_path/.release-sha"
+      ;;
+  esac
+  printf '%s\n' "$target" > "$PREFIX/app/state/previous-target"
+  calls_before=$(wc -l < "$PREFIX/systemctl.calls")
+  if FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
+    --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
+    --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
+    --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
+    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
+    --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin" --rollback > "$TMP/unsafe-rollback-$name.out" 2>&1; then
+    echo "unsafe rollback target $name unexpectedly succeeded" >&2
+    exit 1
+  fi
+  if ! grep -q 'managed release target is unsafe: previous' "$TMP/unsafe-rollback-$name.out"; then
+    echo "unsafe rollback target $name was not rejected by managed-release validation" >&2
+    exit 1
+  fi
+  test "$(wc -l < "$PREFIX/systemctl.calls")" -eq "$calls_before"
+  test "$(readlink "$PREFIX/app/active")" = "releases/$SHA2"
+  test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA2"
+  test "$(<"$PREFIX/app/state/previous-target")" = "$target"
+  test "$(<"$PREFIX/backend.pid")" = "$V2_PID"; kill -0 "$V2_PID"
+  for artifact in "${!V2_HASHES[@]}"; do
+    test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "${V2_HASHES[$artifact]}"
+  done
+  case $setup in
+    symlink-release|missing-marker|mismatched-marker|symlink-marker) rm -rf -- "$fake_path" ;;
+  esac
+  printf 'releases/%s\n' "$SHA1" > "$PREFIX/app/state/previous-target"
+}
+
+FAKE_RELEASE_SHA=0000000000000000000000000000000000000001
+assert_unsafe_previous_target_rejected traversal 'releases/../rollback-victim'
+assert_unsafe_previous_target_rejected nested "releases/$SHA1/nested"
+assert_unsafe_previous_target_rejected invalid-sha 'releases/not-a-full-sha'
+assert_unsafe_previous_target_rejected symlink-release "releases/$FAKE_RELEASE_SHA" symlink-release
+assert_unsafe_previous_target_rejected missing-marker "releases/$FAKE_RELEASE_SHA" missing-marker
+assert_unsafe_previous_target_rejected mismatched-marker "releases/$FAKE_RELEASE_SHA" mismatched-marker
+assert_unsafe_previous_target_rejected symlink-marker "releases/$FAKE_RELEASE_SHA" symlink-marker
+
 printf 'releases/%s\n' "$SHA1" > "$PREFIX/fail-active-target"
 if FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \

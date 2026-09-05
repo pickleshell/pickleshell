@@ -91,6 +91,18 @@ ensure_internal_directory() {
   if [[ ! -e $path && ! -L $path ]]; then mkdir -- "$path" || die "cannot create internal deployment path: $label"; fi
   [[ -d $path && ! -L $path ]] || die "unsafe internal deployment path: $label"
 }
+managed_release_target() {
+  local target=$1 label=$2 sha path marker
+  [[ $target =~ ^releases/[0-9a-f]{40}$ ]] || die "managed release target is unsafe: $label"
+  sha=${target#releases/}; path="$RELEASES/$sha"; marker="$path/.release-sha"
+  [[ -d $path && ! -L $path ]] || die "managed release target is unsafe: $label"
+  [[ -f $marker && ! -L $marker && $(stat -c %s "$marker") == 41 && $(<"$marker") == "$sha" ]] ||
+    die "managed release target is unsafe: $label"
+  printf '%s' "$target"
+}
+optional_managed_release_target() {
+  if [[ -z $1 ]]; then printf ''; else managed_release_target "$1" "$2"; fi
+}
 validate_internal_paths
 [[ -f $NODE_EXECUTABLE && -x $NODE_EXECUTABLE && ! -L $NODE_EXECUTABLE ]] || die 'node executable must be a regular executable'
 [[ -f $BACKEND_EXECUTABLE && -x $BACKEND_EXECUTABLE && ! -L $BACKEND_EXECUTABLE ]] || die 'backend executable must be a regular executable'
@@ -112,10 +124,12 @@ if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT"
 [[ ! -e $AUDIT_LOG || ( -f $AUDIT_LOG && ! -L $AUDIT_LOG ) ]] || die 'audit log path is unsafe'
 if [[ ! -e $AUDIT_LOG ]]; then install -m 0660 /dev/null "$AUDIT_LOG"; else chmod 0660 "$AUDIT_LOG"; fi
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$AUDIT_LOG"; fi
-active_target() { [[ -L $ACTIVE ]] || return 1; local target; target=$(readlink -- "$ACTIVE"); [[ $target == releases/* && $target != *..* && -d $ROOT/$target && ! -L $ROOT/$target ]] || die 'active target is unsafe'; printf %s "$target"; }
+active_target() { [[ -L $ACTIVE ]] || return 1; local target; target=$(readlink -- "$ACTIVE") || die 'active target is unsafe'; managed_release_target "$target" active; }
 SWITCH_TEMP_PATHS=()
 switch() {
   local target=$1 previous=$2 previous_tmp current_tmp active_tmp="$ROOT/.active.switch.$$"
+  target=$(managed_release_target "$target" target)
+  previous=$(optional_managed_release_target "$previous" previous)
   previous_tmp=$(mktemp "$DEPLOY_STATE/.previous-target.switch.XXXXXX") || return
   SWITCH_TEMP_PATHS=("$previous_tmp")
   current_tmp=$(mktemp "$DEPLOY_STATE/.current-target.switch.XXXXXX") || return
@@ -202,8 +216,11 @@ transactional_switch() {
     "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/current-target"
   ) had_prior=() failures=()
   validate_internal_paths
+  target=$(managed_release_target "$target" target)
+  previous=$(optional_managed_release_target "$previous" previous)
+  [[ $release == "$ROOT/$target" ]] || die 'managed release target is unsafe: transaction'
   mkdir -- "$backup_root" || return 1
-  if [[ -L $ACTIVE ]]; then active_before=$(readlink -- "$ACTIVE") || { rm -rf -- "$backup_root"; return 1; }; fi
+  if [[ -L $ACTIVE ]]; then active_before=$(active_target) || { rm -rf -- "$backup_root"; return 1; }; fi
   for index in "${!paths[@]}"; do
     path=${paths[$index]}
     if [[ -e $path || -L $path ]]; then
@@ -299,8 +316,9 @@ cleanup_failed_first_activation() {
 }
 if ((ROLLBACK)); then
   validate_internal_paths
-  current=$(<"$DEPLOY_STATE/current-target") || die 'current target is missing'; previous=$(<"$DEPLOY_STATE/previous-target") || die 'previous target is missing'
-  [[ -n $previous && $(active_target) == "$current" && -d $ROOT/$previous ]] || die 'rollback target is unavailable or inconsistent'
+  current=$(managed_release_target "$(<"$DEPLOY_STATE/current-target")" current)
+  previous=$(managed_release_target "$(<"$DEPLOY_STATE/previous-target")" previous)
+  [[ $(active_target) == "$current" ]] || die 'rollback target is unavailable or inconsistent'
   transaction_status=0; transactional_switch "$ROOT/$previous" "$previous" "$current" || transaction_status=$?
   if ((transaction_status)); then
     ((transaction_status == 2)) && die "rollback switch failed; current deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
@@ -333,7 +351,7 @@ cleanup_exit() {
   [[ -z ${FIRST_ACTIVATION_BACKUP_ROOT:-} ]] || rm -rf -- "$FIRST_ACTIVATION_BACKUP_ROOT"
   if ((RELEASE_CREATED && ! ACTIVATION_SUCCEEDED)); then
     if [[ -L $ACTIVE ]]; then
-      active_now=$(readlink -- "$ACTIVE") || release_cleanup_safe=0
+      active_now=$(active_target) || release_cleanup_safe=0
       [[ $active_now != "releases/$RESOLVED" ]] || release_cleanup_safe=0
     elif [[ -e $ACTIVE ]]; then
       release_cleanup_safe=0
@@ -359,7 +377,9 @@ done < <(find -P "$STAGING" -type l -print0)
 find -P "$STAGING" -type d -exec chmod 0555 {} +; find -P "$STAGING" -type f -exec chmod 0444 {} +
 mv -T "$STAGING" "$RELEASE"; STAGING=''; RELEASE_CREATED=1; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
 validate_internal_paths
-if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then prior_previous=$(<"$DEPLOY_STATE/previous-target"); fi
+if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then
+  prior_previous=$(optional_managed_release_target "$(<"$DEPLOY_STATE/previous-target")" previous)
+fi
 if [[ -z $previous ]]; then capture_first_activation_state || die 'cannot preserve pre-existing first-activation state'; fi
 transaction_status=0; transactional_switch "$RELEASE" "releases/$RESOLVED" "$previous" || transaction_status=$?
 if ((transaction_status)); then
