@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { z } from "zod";
-import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -36,6 +36,6 @@ async function main() {
   console.error("PickleShell Memory MCP running on stdio");
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
   main().catch((error) => { console.error(`Fatal: ${error.message}`); process.exit(1); });
 }

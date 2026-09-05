@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec @NODE_EXECUTABLE@ --env-file=@MCP_ENV_FILE@ @ACTIVE_ROOT@/pickleshell-memory-mcp/src/index.js

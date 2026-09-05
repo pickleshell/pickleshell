@@ -1,0 +1,33 @@
+[Unit]
+Description=PickleShell optional memory backend sidecar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+EnvironmentFile=@BACKEND_ENV_FILE@
+ExecStart=@BACKEND_WRAPPER@
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+ReadOnlyPaths=@ACTIVE_ROOT@
+ReadOnlyPaths=@CONFIG_ROOT@
+ReadWritePaths=@STATE_ROOT@
+ReadWritePaths=@LOG_ROOT@
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

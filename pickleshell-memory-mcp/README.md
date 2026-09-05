@@ -42,7 +42,47 @@ Optional variables:
 | `PICKLESHELL_MEMORY_BACKEND_TOKEN` | unset | Bearer credential sent only to the backend |
 | `PICKLESHELL_MEMORY_TIMEOUT_MS` | `10000` | Request timeout, 1–120000 ms |
 
-Install and start independently:
+## Optional immutable deployment profile
+
+Memory has a separate deployment entry point and does not modify or require
+the core Gateway release:
+
+```bash
+sudo deploy/memory-release.sh \
+  --source /path/to/clean/checkout \
+  --root /opt/pickleshell-memory \
+  --commit <full-git-sha> \
+  --backend-executable /usr/local/bin/pickleshell-memory-backend
+```
+
+Before installation, create the dedicated `pickleshell-memory` user/group and
+operator-owned `/etc/pickleshell-memory/backend.env` and `mcp.env` files. Both
+files must be regular, non-symlink files owned by the invoking operator, group
+`pickleshell-memory`, mode `0640`. Put backend process configuration in
+`backend.env`; put the MCP variables below and any backend bearer token in
+`mcp.env`. Secrets are never passed on a command line. The backend executable
+is a credential-free, fixed path and receives its configuration through the
+service environment.
+
+The installer stages only this package and its memory deployment assets under
+`releases/<sha>`, atomically switches `active`, installs a hardened backend
+unit plus MCP/readiness wrappers, and runs readiness. Readiness performs a real
+MCP stdio initialize, tool discovery, and `memory_capabilities` backend health
+call. On failure the activation is rejected. To switch back to the recorded
+previous release, repeat the path/identity options with `--rollback`.
+
+The audit contract is `/var/log/pickleshell-memory/audit.jsonl`, owned by the
+memory service identity and mode `0640`, in a `0750` directory. The installed
+logrotate policy rotates daily, retains 14 rotations for at most 30 days,
+compresses old logs, and recreates the file with the same least-privilege
+ownership. Review retention against local policy before activation.
+
+For a no-sudo clean-host rehearsal, run `npm run test:memory-deployment`. It
+uses a temporary isolated prefix, fake backend and service manager, and covers
+two activations, rendered permissions/artifacts, real MCP stdio readiness, and
+rollback without touching Gateway or host service paths.
+
+Manual development start:
 
 ```bash
 npm --prefix pickleshell-memory-mcp ci

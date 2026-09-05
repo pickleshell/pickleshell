@@ -405,6 +405,22 @@ spawn/write/output/close. If the ChatGPT plugin still shows stale tools after a
 tunnel restart or schema upgrade, refresh the plugin registration in ChatGPT and
 start a new conversation.
 
+## Optional memory profile
+
+The optional memory sidecar and Memory MCP are deployed independently with
+`deploy/memory-release.sh`; they are not inputs to Gateway, tunnel, Browser, or
+Terminal startup/readiness. Follow the complete configuration, credential,
+audit-retention, readiness, upgrade, and rollback contract in
+`pickleshell-memory-mcp/README.md`. Never add memory dependencies to the core
+release units. Validate changes without privileges or host writes with:
+
+```bash
+npm run test:memory-deployment
+```
+
+This isolated test deliberately proves the core Gateway tree and services are
+neither staged nor required.
+
 ## Upgrade checklist
 
 1. Read the live unit state with `systemctl show` for `ExecStart`, `User`,
