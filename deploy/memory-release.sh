@@ -104,7 +104,13 @@ cleanup_failed_first_activation() {
 if ((ROLLBACK)); then
   current=$(<"$DEPLOY_STATE/current-target") || die 'current target is missing'; previous=$(<"$DEPLOY_STATE/previous-target") || die 'previous target is missing'
   [[ -n $previous && $(active_target) == "$current" && -d $ROOT/$previous ]] || die 'rollback target is unavailable or inconsistent'
-  render_artifacts "$ROOT/$previous"; switch "$previous" "$current"; restart_verify || { switch "$current" "$previous"; die 'rollback readiness failed'; }
+  render_artifacts "$ROOT/$previous"; switch "$previous" "$current"
+  if ! restart_verify; then
+    switch "$current" "$previous" || die 'rollback readiness failed; current deployment state recovery failed'
+    render_artifacts "$ROOT/$current" || die 'rollback readiness failed; current deployment artifact recovery failed'
+    restart_verify || die 'rollback readiness failed; current deployment recovery verification failed'
+    die 'rollback readiness failed; current deployment restored and verified'
+  fi
   printf 'memory-release: rolled back to %s\n' "$previous"; exit 0
 fi
 [[ -n $SOURCE && $COMMIT =~ ^[0-9a-fA-F]{40}$ ]] || die 'source and full commit are required'

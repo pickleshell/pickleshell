@@ -108,7 +108,13 @@ case "$1" in
       "${FAKE_SYSTEMD_ROOT}/bin/backend-wrapper" >/dev/null 2>&1 & echo $! > "$pidfile"
       for _ in {1..50}; do
         kill -0 "$!" 2>/dev/null || exit 1
-        curl --fail --silent --max-time 0.2 "http://127.0.0.1:${FAKE_BACKEND_PORT}/health" >/dev/null && exit 0
+        if curl --fail --silent --max-time 0.2 "http://127.0.0.1:${FAKE_BACKEND_PORT}/health" >/dev/null; then
+          if [[ -f ${FAKE_SYSTEMD_ROOT}/fail-active-target ]] &&
+             [[ $(readlink "${FAKE_SYSTEMD_ROOT}/app/active") == "$(<"${FAKE_SYSTEMD_ROOT}/fail-active-target")" ]]; then
+            exit 1
+          fi
+          exit 0
+        fi
         sleep 0.02
       done
       exit 1
@@ -249,13 +255,40 @@ git -C "$FIXTURE" commit -qm v2
 SHA2=$(git -C "$FIXTURE" rev-parse HEAD)
 install_release "$SHA2"
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA2"
-FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
+declare -A V2_HASHES
+for artifact in \
+  "$PREFIX/units/pickleshell-memory-isolated.service" \
+  "$PREFIX/bin/backend-wrapper" \
+  "$PREFIX/bin/pickleshell-memory-mcp" \
+  "$PREFIX/bin/pickleshell-memory-ready" \
+  "$PREFIX/logrotate/pickleshell-memory"; do
+  V2_HASHES["$artifact"]=$(sha256sum "$artifact" | cut -d' ' -f1)
+done
+V2_PID=$(<"$PREFIX/backend.pid")
+RESTARTS_BEFORE=$(grep -c '^restart pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls")
+printf 'releases/%s\n' "$SHA1" > "$PREFIX/fail-active-target"
+if FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
   --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
   --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
   --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
   --systemctl "$PREFIX/bin/systemctl" \
-  --wrapper-dir "$PREFIX/bin" --rollback
-test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
+  --wrapper-dir "$PREFIX/bin" --rollback >"$TMP/failed-rollback.out" 2>&1; then
+  echo 'failed rollback unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'rollback readiness failed; current deployment restored and verified' "$TMP/failed-rollback.out"
+! grep -q 'memory-release: active release\|memory-release: rolled back' "$TMP/failed-rollback.out"
+test "$(readlink "$PREFIX/app/active")" = "releases/$SHA2"
+test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA2"
+test "$(<"$PREFIX/app/state/previous-target")" = "releases/$SHA1"
+for artifact in "${!V2_HASHES[@]}"; do
+  test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "${V2_HASHES[$artifact]}"
+done
+test "$(grep -c '^restart pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls")" -eq "$((RESTARTS_BEFORE + 2))"
+V2_RECOVERED_PID=$(<"$PREFIX/backend.pid")
+test "$V2_RECOVERED_PID" != "$V2_PID"
+kill -0 "$V2_RECOVERED_PID"
+"$PREFIX/bin/pickleshell-memory-ready"
 kill "$(<"$PREFIX/backend.pid")" 2>/dev/null || true
 printf 'memory deployment E2E: ok\n'
