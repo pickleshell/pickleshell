@@ -116,6 +116,37 @@ test("backend failures become bounded structured errors", async () => {
   assert.deepEqual(JSON.parse(result.content[0].text), { error: "backend_failure", status: 503, retryable: true });
 });
 
+test("audit failure after a successful mutation returns a non-retryable uncertain outcome", async () => {
+  const config = loadConfig(baseEnv);
+  let backendCalls = 0;
+  let auditAttempts = 0;
+  const backend = {
+    call: async () => { backendCalls += 1; return { id: "m1" }; },
+    discover: async () => ({ status: "ok", provider: "mem0" }),
+  };
+  const auditor = { record: () => { auditAttempts += 1; throw new Error("audit unavailable"); } };
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer(config, backend, auditor);
+  const client = new Client({ name: "test", version: "1" }, { capabilities: {} });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  try {
+    const result = await client.callTool({ name: "memory_add", arguments: { text: "fact" } });
+    assert.equal(result.isError, true, "the audit failure must remain a structured MCP tool error");
+    assert.deepEqual(JSON.parse(result.content[0].text), {
+      error: "audit_failure_after_mutation",
+      status: 500,
+      retryable: false,
+      mutation_outcome: "uncertain",
+    });
+    assert.equal(backendCalls, 1, "the mutation must execute only once");
+    assert.equal(auditAttempts, 1, "an audit failure must not trigger a second audit attempt");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("discovery reports effective policy and transparent backend health", async () => {
   const config = loadConfig(baseEnv);
   const events = [];
