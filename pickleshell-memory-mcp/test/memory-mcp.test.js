@@ -76,6 +76,37 @@ test("admin schemas require explicit user_id while agent schemas cannot accept i
   }
 });
 
+test("agent MCP calls that supply user_id are denied and audited before backend access", async () => {
+  const config = loadConfig(baseEnv);
+  const backendCalls = [];
+  const auditEvents = [];
+  const backend = {
+    call: async (...args) => { backendCalls.push(args); return {}; },
+    discover: async () => ({ status: "ok", provider: "mem0" }),
+  };
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer(config, backend, { record: (event) => auditEvents.push(event) });
+  const client = new Client({ name: "test", version: "1" }, { capabilities: {} });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  try {
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "fact", user_id: "global" },
+    });
+    assert.equal(result.isError, true);
+    assert.equal(JSON.parse(result.content[0].text).error, "scope_override_denied");
+    assert.equal(backendCalls.length, 0, "denied calls must not reach the backend");
+    assert.equal(auditEvents.length, 1);
+    assert.equal(auditEvents[0].decision, "denied");
+    assert.equal(auditEvents[0].outcome, "error");
+    assert.equal(auditEvents[0].error, "scope_override_denied");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("backend failures become bounded structured errors", async () => {
   const config = loadConfig(baseEnv);
   const service = new MemoryService(config, new BackendClient(config, async () => new Response(

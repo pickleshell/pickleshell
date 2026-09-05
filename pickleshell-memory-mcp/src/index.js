@@ -22,7 +22,8 @@ export function createServer(config, backend = new BackendClient(config), audito
     memory_delete: { ...id, ...scope }, memory_history: { ...id, ...scope },
   };
   for (const [name, inputSchema] of Object.entries(tools)) {
-    server.registerTool(name, { description: `Mem0 ${name.slice(7)} with PickleShell policy enforcement`, inputSchema }, (args) => service.call(name, args));
+    const transportSchema = config.role === "agent" ? z.object(inputSchema).passthrough() : inputSchema;
+    server.registerTool(name, { description: `Mem0 ${name.slice(7)} with PickleShell policy enforcement`, inputSchema: transportSchema }, (args) => service.call(name, args));
   }
   server.registerTool("memory_capabilities", { description: "Discover memory backend and effective policy without exposing credentials", inputSchema: {} },
     async () => service.capabilities());
