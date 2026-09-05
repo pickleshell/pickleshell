@@ -64,7 +64,8 @@ switch() {
   mv -Tf "$tmp" "$ACTIVE"
 }
 render_artifacts() {
-  local release=$1 contents token value template target
+  local release=$1 contents token value template target mode staged backup index restore_index
+  local -a targets=() staged_files=() backup_files=() had_prior=() committed=()
   for spec in \
     "pickleshell-memory-backend.service.in:$UNITS_DIR/$SERVICE:0644" \
     "pickleshell-memory-backend.sh.in:$WRAPPER_DIR/backend-wrapper:0755" \
@@ -75,10 +76,58 @@ render_artifacts() {
       case $token in ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; esac
       contents=${contents//"@$token@"/"$value"}
     done
-    [[ $contents != *'@'* ]] || die 'unresolved deployment placeholder'
-    printf '%s\n' "$contents" | install -m "$mode" /dev/stdin "$target" || return
+    if [[ $contents == *'@'* ]]; then
+      printf 'memory-release: error: unresolved deployment placeholder\n' >&2
+      for staged in "${staged_files[@]}"; do rm -f -- "$staged"; done
+      return 1
+    fi
+    staged=$(mktemp "$(dirname -- "$target")/.$(basename -- "$target").render.XXXXXX") || return
+    if ! printf '%s\n' "$contents" | install -m "$mode" /dev/stdin "$staged"; then
+      rm -f -- "$staged"
+      for staged in "${staged_files[@]}"; do rm -f -- "$staged"; done
+      return 1
+    fi
+    targets+=("$target"); staged_files+=("$staged")
   done
-  printf '#!/usr/bin/env bash\nexec %q %q %q\n' "$NODE_EXECUTABLE" "$release/pickleshell-memory-mcp/src/readiness.js" "$WRAPPER_DIR/pickleshell-memory-mcp" | install -m 0755 /dev/stdin "$WRAPPER_DIR/pickleshell-memory-ready" || return
+  target="$WRAPPER_DIR/pickleshell-memory-ready"; mode=0755
+  staged=$(mktemp "$(dirname -- "$target")/.$(basename -- "$target").render.XXXXXX") || {
+    for staged in "${staged_files[@]}"; do rm -f -- "$staged"; done
+    return 1
+  }
+  if ! printf '#!/usr/bin/env bash\nexec %q %q %q\n' "$NODE_EXECUTABLE" "$release/pickleshell-memory-mcp/src/readiness.js" "$WRAPPER_DIR/pickleshell-memory-mcp" | install -m "$mode" /dev/stdin "$staged"; then
+    rm -f -- "$staged"
+    for staged in "${staged_files[@]}"; do rm -f -- "$staged"; done
+    return 1
+  fi
+  targets+=("$target"); staged_files+=("$staged")
+
+  for index in "${!targets[@]}"; do
+    target=${targets[$index]}; staged=${staged_files[$index]}
+    backup=$(mktemp "$(dirname -- "$target")/.$(basename -- "$target").backup.XXXXXX") || break
+    rm -f -- "$backup" || break
+    backup_files[$index]=$backup
+    if [[ -e $target || -L $target ]]; then
+      had_prior[$index]=1
+      mv -T -- "$target" "$backup" || break
+    else
+      had_prior[$index]=0
+    fi
+    if ! mv -T -- "$staged" "$target"; then
+      if [[ ${had_prior[$index]} == 1 ]]; then mv -T -- "$backup" "$target" || true; fi
+      break
+    fi
+    committed+=("$index")
+  done
+  if ((${#committed[@]} != ${#targets[@]})); then
+    for ((restore_index=${#committed[@]} - 1; restore_index >= 0; restore_index--)); do
+      index=${committed[$restore_index]}; target=${targets[$index]}; backup=${backup_files[$index]}
+      if [[ ${had_prior[$index]} == 1 ]]; then mv -Tf -- "$backup" "$target" || true; else rm -f -- "$target" || true; fi
+    done
+    for staged in "${staged_files[@]}"; do rm -f -- "$staged"; done
+    for backup in "${backup_files[@]}"; do [[ -n $backup ]] && rm -f -- "$backup"; done
+    return 1
+  fi
+  for backup in "${backup_files[@]}"; do rm -f -- "$backup"; done
 }
 restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
 cleanup_failed_first_activation() {
