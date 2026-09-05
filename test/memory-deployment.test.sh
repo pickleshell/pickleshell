@@ -59,7 +59,11 @@ case "$1" in
       source "${FAKE_SYSTEMD_ROOT}/config/backend.env"
       set +a
       "${FAKE_SYSTEMD_ROOT}/bin/backend-wrapper" >/dev/null 2>&1 & echo $! > "$pidfile"
-      for _ in {1..50}; do kill -0 "$!" 2>/dev/null && exit 0; sleep 0.02; done
+      for _ in {1..50}; do
+        kill -0 "$!" 2>/dev/null || exit 1
+        curl --fail --silent --max-time 0.2 "http://127.0.0.1:${FAKE_BACKEND_PORT}/health" >/dev/null && exit 0
+        sleep 0.02
+      done
       exit 1
     fi
     ;;
