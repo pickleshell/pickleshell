@@ -285,6 +285,49 @@ test("ambiguous backend failures preserve retryability for non-mutation reads", 
   }
 });
 
+function nativeAbortFetch() {
+  const abortError = new DOMException("native fetch timeout detail", "AbortError");
+  assert.equal(abortError.name, "AbortError");
+  assert.equal(abortError.code, 20, "the native legacy numeric code must exercise error classification order");
+  return async () => { throw abortError; };
+}
+
+test("native DOMException AbortError preserves timeout semantics for mutations", async () => {
+  const config = loadConfig(baseEnv);
+  const auditEvents = [];
+  const service = new MemoryService(config, new BackendClient(config, nativeAbortFetch()), {
+    record: (event) => auditEvents.push(event),
+  });
+
+  const mutation = await service.call("memory_add", { text: "fact" });
+  assert.deepEqual(JSON.parse(mutation.content[0].text), {
+    error: "backend_timeout",
+    status: 504,
+    retryable: false,
+    mutation_outcome: "uncertain",
+  });
+  assert.deepEqual(auditEvents.map(({ tool, outcome, error }) => ({ tool, outcome, error })), [
+    { tool: "memory_add", outcome: "error", error: "backend_timeout" },
+  ]);
+});
+
+test("native DOMException AbortError preserves timeout semantics for discovery readiness", async () => {
+  const config = loadConfig(baseEnv);
+  const auditEvents = [];
+  const service = new MemoryService(config, new BackendClient(config, nativeAbortFetch()), {
+    record: (event) => auditEvents.push(event),
+  });
+  const readiness = await service.capabilities();
+  assert.deepEqual(JSON.parse(readiness.content[0].text), {
+    error: "backend_timeout",
+    status: 504,
+    retryable: true,
+  });
+  assert.deepEqual(auditEvents.map(({ tool, outcome, error }) => ({ tool, outcome, error })), [
+    { tool: "memory_capabilities", outcome: "error", error: "backend_timeout" },
+  ]);
+});
+
 test("audit failure after a successful mutation returns a non-retryable uncertain outcome", async () => {
   const config = loadConfig(baseEnv);
   let backendCalls = 0;

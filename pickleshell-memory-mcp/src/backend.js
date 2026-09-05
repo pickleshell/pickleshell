@@ -29,8 +29,8 @@ export class BackendClient {
       if (!response.ok) throw backendError(mapStatus(response.status), response.status, response.status >= 500, payload, response.status >= 500);
       return payload;
     } catch (error) {
-      if (error?.code) throw error;
       if (error?.name === "AbortError") throw backendError("backend_timeout", 504, true, undefined, true);
+      if (error?.code) throw error;
       throw backendError("backend_unavailable", 503, true, undefined, true);
     } finally { clearTimeout(timer); }
   }
@@ -47,8 +47,8 @@ export class BackendClient {
       try { return await response.json(); }
       catch { throw backendError("invalid_backend_response", 502, false); }
     } catch (error) {
-      if (error?.code) throw error;
       if (error?.name === "AbortError") throw backendError("backend_timeout", 504, true);
+      if (error?.code) throw error;
       throw backendError("backend_unavailable", 503, true);
     } finally { clearTimeout(timer); }
   }
