@@ -65,6 +65,9 @@ git -C "$FIXTURE" config user.name Fixture
 git -C "$FIXTURE" add .
 git -C "$FIXTURE" commit -qm v1
 SHA1=$(git -C "$FIXTURE" rev-parse HEAD)
+LINKED_FIXTURE="$TMP/linked-source"
+git -C "$FIXTURE" worktree add -q --detach "$LINKED_FIXTURE" "$SHA1"
+test -f "$LINKED_FIXTURE/.git"
 
 cat > "$PREFIX/bin/backend.js" <<'EOF'
 #!/usr/bin/env node
@@ -168,8 +171,9 @@ EOF
 chmod 0755 "$PREFIX/bin/logrotate"
 
 install_release() {
+  local source=${2:-$FIXTURE}
   PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
-    --profile isolated --source "$FIXTURE" --root "$PREFIX/app" --commit "$1" \
+    --profile isolated --source "$source" --root "$PREFIX/app" --commit "$1" \
     --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
     --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
     --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
@@ -259,7 +263,23 @@ grep -q '^stop pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/system
 test ! -e "$FIRST_FAILURE/enabled/pickleshell-memory-first-failure.service"
 grep -q '^disable pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
 
-install_release "$SHA1"
+NON_GIT_SOURCE="$TMP/non-git-source"
+mkdir -- "$NON_GIT_SOURCE"
+if install_release "$SHA1" "$NON_GIT_SOURCE" >"$TMP/non-git-source.out" 2>&1; then
+  echo 'non-Git source unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'source must be a different Git worktree' "$TMP/non-git-source.out"
+
+printf 'dirty\n' > "$LINKED_FIXTURE/untracked"
+if install_release "$SHA1" "$LINKED_FIXTURE" >"$TMP/dirty-linked-source.out" 2>&1; then
+  echo 'dirty linked worktree unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'source worktree is dirty' "$TMP/dirty-linked-source.out"
+rm -- "$LINKED_FIXTURE/untracked"
+
+install_release "$SHA1" "$LINKED_FIXTURE"
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
 test -f "$PREFIX/enabled/pickleshell-memory-isolated.service"
 test "$(grep -c '^enable pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls")" -eq 1

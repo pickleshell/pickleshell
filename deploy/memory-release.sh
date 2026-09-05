@@ -258,7 +258,10 @@ if ((ROLLBACK)); then
   printf 'memory-release: rolled back to %s\n' "$previous"; exit 0
 fi
 [[ -n $SOURCE && $COMMIT =~ ^[0-9a-fA-F]{40}$ ]] || die 'source and full commit are required'
-SOURCE=$(realpath -e -- "$SOURCE") || die 'source does not exist'; [[ -d $SOURCE/.git && $SOURCE != "$ROOT" ]] || die 'source must be a different Git worktree'
+SOURCE=$(realpath -e -- "$SOURCE") || die 'source does not exist'
+SOURCE_TOPLEVEL=$(git -C "$SOURCE" rev-parse --show-toplevel 2>/dev/null) || die 'source must be a different Git worktree'
+SOURCE_TOPLEVEL=$(realpath -e -- "$SOURCE_TOPLEVEL") || die 'source must be a different Git worktree'
+[[ $SOURCE_TOPLEVEL == "$SOURCE" && $SOURCE != "$ROOT" ]] || die 'source must be a different Git worktree'
 [[ -z $(git -C "$SOURCE" status --porcelain=v1 --untracked-files=all) ]] || die 'source worktree is dirty'
 RESOLVED=$(git -C "$SOURCE" rev-parse --verify "$COMMIT^{commit}") || die 'commit does not resolve'; [[ $RESOLVED == "$COMMIT" ]] || die 'commit is not exact'
 RELEASE="$RELEASES/$RESOLVED"; STAGING="$RELEASES/.staging-$RESOLVED-$$"
