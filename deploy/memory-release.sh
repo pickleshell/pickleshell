@@ -36,6 +36,24 @@ for pair in "$ROOT:root" "$CONFIG_ROOT:config root" "$STATE_ROOT:state root" "$L
 [[ $SERVICE_USER =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_GROUP =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_USER != root ]] || die 'unsafe service identity'
 [[ $SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.service$ && $SERVICE != *..* ]] || die 'unsafe service name'
 for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"; do [[ ! -L $path ]] || die "sensitive path is a symlink: $path"; done
+RELEASES="$ROOT/releases"; ACTIVE="$ROOT/active"; DEPLOY_STATE="$ROOT/state"
+validate_internal_paths() {
+  local path label
+  for path in "$RELEASES" "$DEPLOY_STATE"; do
+    [[ $path == "$RELEASES" ]] && label=releases || label=state
+    [[ ! -L $path && ( ! -e $path || -d $path ) ]] || die "unsafe internal deployment path: $label"
+  done
+  for path in "$DEPLOY_STATE/current-target" "$DEPLOY_STATE/previous-target"; do
+    label=${path##*/}
+    [[ ! -L $path && ( ! -e $path || -f $path ) ]] || die "unsafe internal deployment path: $label"
+  done
+}
+ensure_internal_directory() {
+  local path=$1 label=$2
+  if [[ ! -e $path && ! -L $path ]]; then mkdir -- "$path" || die "cannot create internal deployment path: $label"; fi
+  [[ -d $path && ! -L $path ]] || die "unsafe internal deployment path: $label"
+}
+validate_internal_paths
 [[ -f $NODE_EXECUTABLE && -x $NODE_EXECUTABLE && ! -L $NODE_EXECUTABLE ]] || die 'node executable must be a regular executable'
 [[ -f $BACKEND_EXECUTABLE && -x $BACKEND_EXECUTABLE && ! -L $BACKEND_EXECUTABLE ]] || die 'backend executable must be a regular executable'
 BACKEND_ENV_FILE="$CONFIG_ROOT/backend.env"; MCP_ENV_FILE="$CONFIG_ROOT/mcp.env"; AUDIT_LOG="$LOG_ROOT/audit.jsonl"
@@ -49,12 +67,14 @@ done
 configured_audit=$(grep '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE" | cut -d= -f2-)
 [[ $configured_audit == "$AUDIT_LOG" ]] || die 'mcp.env audit log must match the managed audit path'
 mkdir -p -- "$ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"
+ensure_internal_directory "$RELEASES" releases
+ensure_internal_directory "$DEPLOY_STATE" state
+validate_internal_paths
 chmod 0750 "$STATE_ROOT" "$LOG_ROOT"
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT" "$LOG_ROOT"; fi
 [[ ! -e $AUDIT_LOG || ( -f $AUDIT_LOG && ! -L $AUDIT_LOG ) ]] || die 'audit log path is unsafe'
 if [[ ! -e $AUDIT_LOG ]]; then install -m 0660 /dev/null "$AUDIT_LOG"; else chmod 0660 "$AUDIT_LOG"; fi
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$AUDIT_LOG"; fi
-RELEASES="$ROOT/releases"; ACTIVE="$ROOT/active"; DEPLOY_STATE="$ROOT/state"; mkdir -p -- "$RELEASES" "$DEPLOY_STATE"
 active_target() { [[ -L $ACTIVE ]] || return 1; local target; target=$(readlink -- "$ACTIVE"); [[ $target == releases/* && $target != *..* && -d $ROOT/$target && ! -L $ROOT/$target ]] || die 'active target is unsafe'; printf %s "$target"; }
 SWITCH_TEMP_PATHS=()
 switch() {
@@ -144,6 +164,7 @@ transactional_switch() {
     "$WRAPPER_DIR/pickleshell-memory-ready" "$LOGROTATE_DIR/pickleshell-memory"
     "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/current-target"
   ) had_prior=() failures=()
+  validate_internal_paths
   mkdir -- "$backup_root" || return 1
   if [[ -L $ACTIVE ]]; then active_before=$(readlink -- "$ACTIVE") || { rm -rf -- "$backup_root"; return 1; }; fi
   for index in "${!paths[@]}"; do
@@ -194,6 +215,7 @@ FIRST_ACTIVATION_PATHS=(
 FIRST_ACTIVATION_HAD_PRIOR=()
 capture_first_activation_state() {
   local index path
+  validate_internal_paths
   FIRST_ACTIVATION_BACKUP_ROOT="$ROOT/.first-activation-backup.$$"
   mkdir -- "$FIRST_ACTIVATION_BACKUP_ROOT" || return 1
   for index in "${!FIRST_ACTIVATION_PATHS[@]}"; do
@@ -239,6 +261,7 @@ cleanup_failed_first_activation() {
   fi
 }
 if ((ROLLBACK)); then
+  validate_internal_paths
   current=$(<"$DEPLOY_STATE/current-target") || die 'current target is missing'; previous=$(<"$DEPLOY_STATE/previous-target") || die 'previous target is missing'
   [[ -n $previous && $(active_target) == "$current" && -d $ROOT/$previous ]] || die 'rollback target is unavailable or inconsistent'
   transaction_status=0; transactional_switch "$ROOT/$previous" "$previous" "$current" || transaction_status=$?
@@ -279,6 +302,7 @@ while IFS= read -r -d '' link; do
 done < <(find -P "$STAGING" -type l -print0)
 find -P "$STAGING" -type d -exec chmod 0555 {} +; find -P "$STAGING" -type f -exec chmod 0444 {} +
 mv -T "$STAGING" "$RELEASE"; STAGING=''; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
+validate_internal_paths
 if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then prior_previous=$(<"$DEPLOY_STATE/previous-target"); fi
 if [[ -z $previous ]]; then capture_first_activation_state || die 'cannot preserve pre-existing first-activation state'; fi
 transaction_status=0; transactional_switch "$RELEASE" "releases/$RESOLVED" "$previous" || transaction_status=$?

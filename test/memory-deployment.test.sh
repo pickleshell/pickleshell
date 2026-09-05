@@ -182,6 +182,54 @@ install_release() {
     --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin"
 }
 
+run_unsafe_internal_path_case() {
+  local name=$1 path_kind=$2 case_root victim expected_entries=1
+  case_root="$TMP/unsafe-$name"; victim="$TMP/unsafe-$name-victim"
+  mkdir -p -- "$case_root"/{app,bin,config,log,logrotate,state-root,units,wrappers} "$victim"
+  cp -- "$(command -v node)" "$case_root/bin/node"
+  printf '#!/usr/bin/env bash\ntouch %q\nexit 1\n' "$case_root/systemctl-called" > "$case_root/bin/systemctl"
+  chmod 0755 "$case_root/bin/node" "$case_root/bin/systemctl"
+  printf 'victim-safe\n' > "$victim/sentinel"
+  printf 'BACKEND_TEST=1\n' > "$case_root/config/backend.env"
+  printf '%s\n' \
+    'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
+    'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+    "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
+  chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  case $path_kind in
+    releases) ln -s "$victim" "$case_root/app/releases" ;;
+    state) ln -s "$victim" "$case_root/app/state" ;;
+    current-target|previous-target)
+      mkdir -- "$case_root/app/state"; printf 'victim-state-safe\n' > "$victim/record"
+      ln -s "$victim/record" "$case_root/app/state/$path_kind"; expected_entries=2 ;;
+  esac
+  if "$FIXTURE/deploy/memory-release.sh" \
+    --profile isolated --source "$LINKED_FIXTURE" --root "$case_root/app" --commit "$SHA1" \
+    --config-root "$case_root/config" --state-root "$case_root/state-root" --log-root "$case_root/log" \
+    --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" \
+    --backend-executable "$case_root/bin/node" --node-executable "$case_root/bin/node" \
+    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-unsafe-$name.service \
+    --systemctl "$case_root/bin/systemctl" --wrapper-dir "$case_root/wrappers" > "$case_root/output" 2>&1; then
+    echo "unsafe $name path unexpectedly succeeded" >&2; exit 1
+  fi
+  if ! grep -q "unsafe internal deployment path: $path_kind" "$case_root/output"; then
+    [[ ! -e $case_root/systemctl-called ]] || echo "unsafe $name path reached service action before rejection" >&2
+    [[ -e $case_root/systemctl-called ]] || echo "unsafe $name path was not rejected by internal-path preflight" >&2
+    exit 1
+  fi
+  test ! -e "$case_root/systemctl-called"; test ! -e "$case_root/log/audit.jsonl"
+  test "$(<"$victim/sentinel")" = victim-safe
+  test "$(find -P "$victim" -mindepth 1 -maxdepth 1 | wc -l)" -eq "$expected_entries"
+  if [[ $path_kind == current-target || $path_kind == previous-target ]]; then
+    test "$(<"$victim/record")" = victim-state-safe; test -L "$case_root/app/state/$path_kind"
+  fi
+}
+
+run_unsafe_internal_path_case releases releases
+run_unsafe_internal_path_case state state
+run_unsafe_internal_path_case current-state current-target
+run_unsafe_internal_path_case previous-state previous-target
+
 FIRST_FAILURE="$TMP/first-failure"
 mkdir -p -- "$FIRST_FAILURE"/{app,bin,config,log,logrotate,state,units}
 mkdir -p -- "$FIRST_FAILURE/app/state"
