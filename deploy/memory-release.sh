@@ -185,23 +185,53 @@ transactional_switch() {
 }
 restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
 RESTORE_DISABLED_ON_FIRST_FAILURE=0
+FIRST_ACTIVATION_BACKUP_ROOT=''
+FIRST_ACTIVATION_PATHS=(
+  "$UNITS_DIR/$SERVICE" "$WRAPPER_DIR/backend-wrapper" "$WRAPPER_DIR/pickleshell-memory-mcp"
+  "$WRAPPER_DIR/pickleshell-memory-ready" "$LOGROTATE_DIR/pickleshell-memory"
+  "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/current-target"
+)
+FIRST_ACTIVATION_HAD_PRIOR=()
+capture_first_activation_state() {
+  local index path
+  FIRST_ACTIVATION_BACKUP_ROOT="$ROOT/.first-activation-backup.$$"
+  mkdir -- "$FIRST_ACTIVATION_BACKUP_ROOT" || return 1
+  for index in "${!FIRST_ACTIVATION_PATHS[@]}"; do
+    path=${FIRST_ACTIVATION_PATHS[$index]}
+    if [[ -e $path || -L $path ]]; then
+      FIRST_ACTIVATION_HAD_PRIOR[$index]=1
+      cp -a -- "$path" "$FIRST_ACTIVATION_BACKUP_ROOT/$index" || return 1
+    else
+      FIRST_ACTIVATION_HAD_PRIOR[$index]=0
+    fi
+  done
+}
+restore_first_activation_state() {
+  local index path
+  local -a failures=()
+  for index in "${!FIRST_ACTIVATION_PATHS[@]}"; do
+    path=${FIRST_ACTIVATION_PATHS[$index]}
+    if [[ ${FIRST_ACTIVATION_HAD_PRIOR[$index]} == 1 ]]; then
+      rm -f -- "$path" && mv -T -- "$FIRST_ACTIVATION_BACKUP_ROOT/$index" "$path" || failures+=(artifact-state-restore)
+    else
+      rm -f -- "$path" || failures+=(artifact-state-remove)
+    fi
+  done
+  rm -f -- "$ACTIVE" || failures+=(active-remove)
+  if ((${#failures[@]})); then
+    FIRST_ACTIVATION_CLEANUP_FAILURES=$(IFS=,; printf '%s' "${failures[*]}")
+    return 1
+  fi
+  rm -rf -- "$FIRST_ACTIVATION_BACKUP_ROOT" || { FIRST_ACTIVATION_CLEANUP_FAILURES=backup-cleanup; return 1; }
+  FIRST_ACTIVATION_BACKUP_ROOT=''
+}
 cleanup_failed_first_activation() {
-  local failures=() path
+  local failures=()
   "$SYSTEMCTL" stop "$SERVICE" >/dev/null 2>&1 || failures+=(service-stop)
   if ((RESTORE_DISABLED_ON_FIRST_FAILURE)); then
     "$SYSTEMCTL" disable "$SERVICE" >/dev/null 2>&1 || failures+=(service-disable)
   fi
-  for path in \
-    "$UNITS_DIR/$SERVICE" \
-    "$WRAPPER_DIR/backend-wrapper" \
-    "$WRAPPER_DIR/pickleshell-memory-mcp" \
-    "$WRAPPER_DIR/pickleshell-memory-ready" \
-    "$LOGROTATE_DIR/pickleshell-memory" \
-    "$ACTIVE"; do
-    rm -f -- "$path" >/dev/null 2>&1 || failures+=(artifact-removal)
-  done
-  printf '' > "$DEPLOY_STATE/current-target" 2>/dev/null || failures+=(state-clear)
-  printf '' > "$DEPLOY_STATE/previous-target" 2>/dev/null || failures+=(state-clear)
+  restore_first_activation_state || failures+=(state-restore)
   "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || failures+=(daemon-reload)
   if ((${#failures[@]})); then
     FIRST_ACTIVATION_CLEANUP_FAILURES=$(IFS=,; printf '%s' "${failures[*]}")
@@ -231,7 +261,12 @@ fi
 SOURCE=$(realpath -e -- "$SOURCE") || die 'source does not exist'; [[ -d $SOURCE/.git && $SOURCE != "$ROOT" ]] || die 'source must be a different Git worktree'
 [[ -z $(git -C "$SOURCE" status --porcelain=v1 --untracked-files=all) ]] || die 'source worktree is dirty'
 RESOLVED=$(git -C "$SOURCE" rev-parse --verify "$COMMIT^{commit}") || die 'commit does not resolve'; [[ $RESOLVED == "$COMMIT" ]] || die 'commit is not exact'
-RELEASE="$RELEASES/$RESOLVED"; STAGING="$RELEASES/.staging-$RESOLVED-$$"; trap 'rm -rf -- "${STAGING:-}"' EXIT
+RELEASE="$RELEASES/$RESOLVED"; STAGING="$RELEASES/.staging-$RESOLVED-$$"
+cleanup_exit() {
+  [[ -z ${STAGING:-} ]] || rm -rf -- "$STAGING"
+  [[ -z ${FIRST_ACTIVATION_BACKUP_ROOT:-} ]] || rm -rf -- "$FIRST_ACTIVATION_BACKUP_ROOT"
+}
+trap cleanup_exit EXIT
 [[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
 mkdir -- "$STAGING"; git -C "$SOURCE" archive "$RESOLVED" deploy/systemd/pickleshell-memory-backend.service.in deploy/systemd/pickleshell-memory-backend.sh.in deploy/systemd/pickleshell-memory-mcp.sh.in deploy/systemd/pickleshell-memory.logrotate.in pickleshell-memory-mcp | tar -x -C "$STAGING"
 printf '%s\n' "$RESOLVED" > "$STAGING/.release-sha"; npm --prefix "$STAGING/pickleshell-memory-mcp" ci --omit=dev
@@ -242,6 +277,7 @@ done < <(find -P "$STAGING" -type l -print0)
 find -P "$STAGING" -type d -exec chmod 0555 {} +; find -P "$STAGING" -type f -exec chmod 0444 {} +
 mv -T "$STAGING" "$RELEASE"; STAGING=''; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
 if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then prior_previous=$(<"$DEPLOY_STATE/previous-target"); fi
+if [[ -z $previous ]]; then capture_first_activation_state || die 'cannot preserve pre-existing first-activation state'; fi
 transaction_status=0; transactional_switch "$RELEASE" "releases/$RESOLVED" "$previous" || transaction_status=$?
 if ((transaction_status)); then
   ((transaction_status == 2)) && die "deployment switch failed; previous deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
@@ -270,5 +306,7 @@ if [[ -z $previous ]]; then
     fi
     die 'activation enablement failed; first activation cleaned up'
   fi
+  rm -rf -- "$FIRST_ACTIVATION_BACKUP_ROOT" || die 'cannot remove first-activation backup'
+  FIRST_ACTIVATION_BACKUP_ROOT=''
 fi
 printf 'memory-release: active release: releases/%s\n' "$RESOLVED"

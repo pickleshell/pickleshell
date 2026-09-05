@@ -180,8 +180,30 @@ install_release() {
 
 FIRST_FAILURE="$TMP/first-failure"
 mkdir -p -- "$FIRST_FAILURE"/{app,bin,config,log,logrotate,state,units}
+mkdir -p -- "$FIRST_FAILURE/app/state"
 cp -- "$PREFIX/bin/backend.js" "$PREFIX/bin/systemctl" "$FIRST_FAILURE/bin/"
 chmod 0755 "$FIRST_FAILURE/bin/backend.js" "$FIRST_FAILURE/bin/systemctl"
+declare -A FIRST_FAILURE_PRIOR_MODES
+for artifact in \
+  "$FIRST_FAILURE/units/pickleshell-memory-first-failure.service" \
+  "$FIRST_FAILURE/bin/backend-wrapper" \
+  "$FIRST_FAILURE/bin/pickleshell-memory-mcp" \
+  "$FIRST_FAILURE/bin/pickleshell-memory-ready" \
+  "$FIRST_FAILURE/logrotate/pickleshell-memory"; do
+  printf 'pre-existing:%s\n' "$(basename -- "$artifact")" > "$artifact"
+  chmod 0600 "$artifact"
+  FIRST_FAILURE_PRIOR_MODES["$artifact"]=$(stat -c %a "$artifact")
+done
+printf 'pre-existing-current\n' > "$FIRST_FAILURE/app/state/current-target"
+printf 'pre-existing-previous\n' > "$FIRST_FAILURE/app/state/previous-target"
+FIRST_FAILURE_PRIOR_HASHES=$(sha256sum \
+  "$FIRST_FAILURE/units/pickleshell-memory-first-failure.service" \
+  "$FIRST_FAILURE/bin/backend-wrapper" \
+  "$FIRST_FAILURE/bin/pickleshell-memory-mcp" \
+  "$FIRST_FAILURE/bin/pickleshell-memory-ready" \
+  "$FIRST_FAILURE/logrotate/pickleshell-memory" \
+  "$FIRST_FAILURE/app/state/current-target" \
+  "$FIRST_FAILURE/app/state/previous-target")
 FIRST_PORT=$((40001 + RANDOM % 10000))
 printf 'FAKE_BACKEND_PORT=%s\n' "$FIRST_PORT" > "$FIRST_FAILURE/config/backend.env"
 printf '%s\n' \
@@ -210,16 +232,25 @@ test -f "$FIRST_FAILURE/backend.pid" || { cat "$TMP/first-failure.out" >&2; exit
 FIRST_FAILURE_PID=$(<"$FIRST_FAILURE/backend.pid")
 ! kill -0 "$FIRST_FAILURE_PID" 2>/dev/null
 test ! -e "$FIRST_FAILURE/app/active"
-test -z "$(<"$FIRST_FAILURE/app/state/current-target")"
-test -z "$(<"$FIRST_FAILURE/app/state/previous-target")"
+test "$(<"$FIRST_FAILURE/app/state/current-target")" = pre-existing-current
+test "$(<"$FIRST_FAILURE/app/state/previous-target")" = pre-existing-previous
 for artifact in \
   "$FIRST_FAILURE/units/pickleshell-memory-first-failure.service" \
   "$FIRST_FAILURE/bin/backend-wrapper" \
   "$FIRST_FAILURE/bin/pickleshell-memory-mcp" \
   "$FIRST_FAILURE/bin/pickleshell-memory-ready" \
   "$FIRST_FAILURE/logrotate/pickleshell-memory"; do
-  test ! -e "$artifact"
+  test -f "$artifact"
+  test "$(stat -c %a "$artifact")" = "${FIRST_FAILURE_PRIOR_MODES[$artifact]}"
 done
+test "$(sha256sum \
+  "$FIRST_FAILURE/units/pickleshell-memory-first-failure.service" \
+  "$FIRST_FAILURE/bin/backend-wrapper" \
+  "$FIRST_FAILURE/bin/pickleshell-memory-mcp" \
+  "$FIRST_FAILURE/bin/pickleshell-memory-ready" \
+  "$FIRST_FAILURE/logrotate/pickleshell-memory" \
+  "$FIRST_FAILURE/app/state/current-target" \
+  "$FIRST_FAILURE/app/state/previous-target")" = "$FIRST_FAILURE_PRIOR_HASHES"
 test -f "$FIRST_FAILURE/config/backend.env"
 test -f "$FIRST_FAILURE/config/mcp.env"
 test -f "$FIRST_FAILURE/log/audit.jsonl"
