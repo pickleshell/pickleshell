@@ -181,6 +181,59 @@ test("missing memories and backend failures remain allowed audit errors", async 
   }
 });
 
+test("audit failure supersedes authorization and backend errors without losing uncertain mutation state", async () => {
+  const config = loadConfig(baseEnv);
+  const auditSecret = "private audit detail";
+  const cases = [
+    {
+      name: "authorization failure",
+      tool: "memory_search",
+      args: { query: "private query", user_id: "global" },
+      backend: { call: async () => assert.fail("denied calls must not reach the backend") },
+      expected: { error: "audit_failure", status: 500, retryable: false },
+    },
+    {
+      name: "uncertain backend mutation failure",
+      tool: "memory_add",
+      args: { text: "private memory" },
+      backend: {
+        call: async () => {
+          throw Object.assign(new Error("private backend detail"), {
+            code: "backend_timeout",
+            status: 504,
+            retryable: true,
+            mutationOutcomeUncertain: true,
+          });
+        },
+      },
+      expected: {
+        error: "audit_failure",
+        status: 500,
+        retryable: false,
+        mutation_outcome: "uncertain",
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    let auditAttempts = 0;
+    const service = new MemoryService(config, testCase.backend, {
+      record: () => {
+        auditAttempts += 1;
+        throw new Error(auditSecret);
+      },
+    });
+
+    const result = await service.call(testCase.tool, testCase.args);
+    const payload = JSON.parse(result.content[0].text);
+
+    assert.deepEqual(payload, testCase.expected, testCase.name);
+    assert.equal(auditAttempts, 1, `${testCase.name}: audit must be attempted once`);
+    assert.equal(JSON.stringify(payload).includes(auditSecret), false, testCase.name);
+    assert.equal(JSON.stringify(payload).includes("private"), false, testCase.name);
+  }
+});
+
 test("ambiguous backend failures make every mutation non-retryable with uncertain outcome", async () => {
   const config = loadConfig(baseEnv);
   const failures = [
