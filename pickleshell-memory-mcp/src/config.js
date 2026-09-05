@@ -23,6 +23,9 @@ export function loadConfig(env = process.env) {
   if (!new Set(["http:", "https:"]).has(backendUrl.protocol) || backendUrl.username || backendUrl.password) {
     throw new Error("PICKLESHELL_MEMORY_BACKEND_URL must be credential-free HTTP(S)");
   }
+  if (backendUrl.search || backendUrl.hash) {
+    throw new Error("PICKLESHELL_MEMORY_BACKEND_URL must not include a query or fragment");
+  }
   return Object.freeze({
     role, actor, scope: role === "agent" ? scope : null,
     auditLog, backendUrl: backendUrl.href.replace(/\/$/, ""),

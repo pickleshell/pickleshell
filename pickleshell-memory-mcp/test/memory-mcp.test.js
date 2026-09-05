@@ -25,6 +25,22 @@ test("configuration makes admin global scope explicit and agents fixed-scope", (
   assert.throws(() => loadConfig({ ...baseEnv, PICKLESHELL_MEMORY_BACKEND_URL: "http://secret@example.test" }), /credential-free/);
 });
 
+test("configuration rejects backend URL queries and fragments", () => {
+  assert.throws(
+    () => loadConfig({ ...baseEnv, PICKLESHELL_MEMORY_BACKEND_URL: "https://example.test/memory?tenant=one" }),
+    /must not include a query or fragment/,
+  );
+  assert.throws(
+    () => loadConfig({ ...baseEnv, PICKLESHELL_MEMORY_BACKEND_URL: "https://example.test/memory#backend" }),
+    /must not include a query or fragment/,
+  );
+
+  assert.equal(
+    loadConfig({ ...baseEnv, PICKLESHELL_MEMORY_BACKEND_URL: "https://example.test/memory/" }).backendUrl,
+    "https://example.test/memory",
+  );
+});
+
 test("agent policy injects its scope, preserves Mem0 metadata, audits, and denies widening", async (t) => {
   const requests = [];
   const server = http.createServer(async (req, res) => {
