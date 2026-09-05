@@ -328,6 +328,34 @@ test("native DOMException AbortError preserves timeout semantics for discovery r
   ]);
 });
 
+test("discovery audit failure supersedes backend errors without exposing details", async () => {
+  const config = loadConfig(baseEnv);
+  let auditAttempts = 0;
+  const service = new MemoryService(config, {
+    discover: async () => {
+      throw Object.assign(new Error("private backend discovery detail"), {
+        code: "backend_unavailable",
+        status: 503,
+        retryable: true,
+      });
+    },
+  }, {
+    record: () => {
+      auditAttempts += 1;
+      throw new Error("private audit detail");
+    },
+  });
+
+  const result = await service.capabilities();
+  const payload = JSON.parse(result.content[0].text);
+
+  assert.deepEqual(payload, { error: "audit_failure", status: 500, retryable: false });
+  assert.equal(result.isError, true);
+  assert.equal(auditAttempts, 1, "the failed discovery must be audited exactly once");
+  assert.equal(JSON.stringify(payload).includes("backend"), false);
+  assert.equal(JSON.stringify(payload).includes("audit detail"), false);
+});
+
 test("audit failure after a successful mutation returns a non-retryable uncertain outcome", async () => {
   const config = loadConfig(baseEnv);
   let backendCalls = 0;

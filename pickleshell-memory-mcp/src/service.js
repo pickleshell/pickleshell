@@ -39,7 +39,10 @@ export class MemoryService {
     try {
       health = await this.backend.discover();
     } catch (error) {
-      this.tryAudit("memory_capabilities", null, "allowed", "error", started, error.code || "internal_error");
+      if (!this.tryAudit("memory_capabilities", null, "allowed", "error", started,
+        error.code || "internal_error")) {
+        return this.error("audit_failure", 500, false);
+      }
       return this.error(error.code || "internal_error", error.status || 500, error.retryable === true);
     }
     if (!this.tryAudit("memory_capabilities", null, "allowed", "ok", started)) {
