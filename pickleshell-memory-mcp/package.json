@@ -1,0 +1,19 @@
+{
+  "name": "@pickleshell/memory-mcp",
+  "version": "0.1.0",
+  "description": "Optional policy-enforcing MCP transport for workstation memory backends",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": { "pickleshell-memory-mcp": "src/index.js" },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.22.0",
+    "zod": "^3.24.4"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT",
+  "private": true
+}

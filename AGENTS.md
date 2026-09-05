@@ -144,6 +144,9 @@ npm --prefix mcp-server ci
 npm --prefix mcp-server run build
 npm --prefix mcp-server test
 npm --prefix mcp-server audit --omit=dev
+npm --prefix pickleshell-memory-mcp ci
+npm --prefix pickleshell-memory-mcp test
+npm --prefix pickleshell-memory-mcp audit --omit=dev
 git diff --check
 ```
 

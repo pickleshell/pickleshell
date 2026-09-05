@@ -112,6 +112,21 @@ separate design is approved:
 - request queues;
 - richer progress event normalization.
 
+### Optional workstation memory
+
+The Mem0 spike has graduated into an optional `pickleshell-memory-mcp` vertical
+slice. It remains independently installed and supervised; Gateway startup and
+readiness never depend on memory. The package provides stdio transport,
+backend authentication, explicit admin versus fixed agent authorization,
+content-free auditing, structured errors, and discovery while preserving Mem0
+semantics and metadata. Assistant Notebook and associative memory remain
+complementary rather than synchronized.
+
+The next memory milestone is an independently reviewed deployment profile for
+the sidecar and MCP process, including operator-owned credentials, log
+rotation/retention, readiness, rollback, and a clean-host end-to-end test. It
+must remain optional and may not weaken agent scope policy.
+
 ## Path to a 10/10 agent platform
 
 These are long-term production-hardening milestones. They extend the current

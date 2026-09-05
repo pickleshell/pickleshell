@@ -30,6 +30,10 @@ full traces. The Browser exposes Playwright automation tools. Continue local
 coding sessions, delegate to an operator-approved model, and transfer files
 into a controlled workspace.
 
+An independently installed [Memory MCP](pickleshell-memory-mcp/README.md) is
+available as an optional workstation sidecar integration. It is not a fourth
+core service and never participates in Gateway startup or readiness.
+
 ## Philosophy
 
 > "Any task can be solved in a single prompt."
@@ -335,6 +339,7 @@ npm run audit
 - [ChatGPT setup](docs/chatgpt.md) — connect the plugin and run the connection test
 - [Deployment guide](docs/deployment.md) — install, upgrade, verify, and troubleshoot the Gateway, tunnel, Browser, and Terminal services
 - [API reference](docs/api.md) — MCP tool schemas, async protocol, and Gateway endpoints
+- [Optional Memory MCP](pickleshell-memory-mcp/README.md) — Mem0 transport, policy, audit, errors, and discovery
 - [Model allowlist](docs/models.md) - maintained model IDs and runtime selection guidance
 - [Security policy](SECURITY.md) — trust model, threat boundaries, and vulnerability reporting
 - [Roadmap](docs/roadmap.md) — v1 production checklist and deferred features

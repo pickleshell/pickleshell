@@ -6,9 +6,9 @@
   "license": "MIT",
   "scripts": {
     "build": "npm --prefix mcp-server run build && npm --prefix terminal run build",
-    "test": "npm --prefix gateway test && npm --prefix mcp-server test && npm --prefix terminal test && bash test/deployment-release.test.sh",
+    "test": "npm --prefix gateway test && npm --prefix mcp-server test && npm --prefix terminal test && npm --prefix pickleshell-memory-mcp test && bash test/deployment-release.test.sh",
     "test:file-handoff-integration": "bash test/file-transfer-handoff.test.sh",
-    "audit": "npm --prefix gateway audit --omit=dev && npm --prefix mcp-server audit --omit=dev && npm --prefix terminal audit --omit=dev"
+    "audit": "npm --prefix gateway audit --omit=dev && npm --prefix mcp-server audit --omit=dev && npm --prefix terminal audit --omit=dev && npm --prefix pickleshell-memory-mcp audit --omit=dev"
   },
   "engines": {
     "node": ">=20"

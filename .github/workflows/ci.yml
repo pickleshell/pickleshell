@@ -28,11 +28,13 @@ jobs:
           cache-dependency-path: |
             gateway/package-lock.json
             mcp-server/package-lock.json
+            pickleshell-memory-mcp/package-lock.json
             terminal/package-lock.json
       - name: Install dependencies
         run: |
           npm --prefix gateway ci
           npm --prefix mcp-server ci
+          npm --prefix pickleshell-memory-mcp ci
           npm --prefix terminal ci
       - name: Rebuild node-pty from source
         run: npm_config_build_from_source=true npm --prefix terminal rebuild node-pty
