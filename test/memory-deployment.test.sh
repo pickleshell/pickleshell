@@ -14,6 +14,47 @@ cp -- "$REPO/deploy/systemd/pickleshell-memory-backend.service.in" "$FIXTURE/dep
 cp -- "$REPO/deploy/systemd/pickleshell-memory-mcp.sh.in" "$FIXTURE/deploy/systemd/"
 cp -- "$REPO/deploy/systemd/pickleshell-memory-backend.sh.in" "$FIXTURE/deploy/systemd/"
 cp -- "$REPO/deploy/systemd/pickleshell-memory.logrotate.in" "$FIXTURE/deploy/systemd/"
+
+if "$FIXTURE/deploy/memory-release.sh" --profile isolated >"$TMP/isolated-defaults.out" 2>&1; then
+  echo 'isolated profile unexpectedly accepted production defaults' >&2
+  exit 1
+fi
+grep -q 'isolated profile requires explicit dedicated deployment paths and service identity' "$TMP/isolated-defaults.out"
+test ! -e "$TMP/systemctl-called"
+
+PREFLIGHT="$TMP/preflight"
+mkdir -p -- "$PREFLIGHT/bin"
+cp -- "$(command -v node)" "$PREFLIGHT/bin/node"
+cat > "$PREFLIGHT/bin/systemctl" <<EOF
+#!/usr/bin/env bash
+touch '$TMP/systemctl-called'
+exit 1
+EOF
+chmod 0755 "$PREFLIGHT/bin/node" "$PREFLIGHT/bin/systemctl"
+preflight_args=(
+  --profile isolated --root "$PREFLIGHT/app" --config-root "$PREFLIGHT/config"
+  --state-root "$PREFLIGHT/state" --log-root "$PREFLIGHT/log" --units-dir "$PREFLIGHT/units"
+  --logrotate-dir "$PREFLIGHT/logrotate" --wrapper-dir "$PREFLIGHT/wrappers"
+  --backend-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl"
+  --service-user isolated-memory --service-group isolated-memory
+  --service pickleshell-memory-isolated.service --rollback
+)
+if "$FIXTURE/deploy/memory-release.sh" "${preflight_args[@]}" --config-root /etc/pickleshell-memory >"$TMP/isolated-production-path.out" 2>&1; then
+  echo 'isolated profile unexpectedly accepted a production path' >&2
+  exit 1
+fi
+grep -q 'isolated deployment paths must share the dedicated root prefix' "$TMP/isolated-production-path.out"
+if "$FIXTURE/deploy/memory-release.sh" "${preflight_args[@]}" --service pickleshell-memory-backend.service >"$TMP/isolated-production-service.out" 2>&1; then
+  echo 'isolated profile unexpectedly accepted the production service' >&2
+  exit 1
+fi
+grep -q 'isolated profile rejects production service identity' "$TMP/isolated-production-service.out"
+test ! -e "$PREFLIGHT/app"
+test ! -e "$PREFLIGHT/state"
+test ! -e "$PREFLIGHT/log"
+test ! -e "$PREFLIGHT/units"
+test ! -e "$TMP/systemctl-called"
+
 for artifact in "$FIXTURE"/deploy/systemd/*.in; do
   printf '\n# release-marker: v1\n' >> "$artifact"
 done
@@ -54,7 +95,7 @@ case "$1" in
   restart)
     pidfile=${FAKE_SYSTEMD_ROOT:?}/backend.pid
     if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; wait "$(<"$pidfile")" 2>/dev/null || true; fi
-    if [[ $2 == pickleshell-memory-backend.service ]]; then
+    if [[ $2 == pickleshell-memory-isolated.service ]]; then
       set -a
       source "${FAKE_SYSTEMD_ROOT}/config/backend.env"
       set +a
@@ -89,6 +130,7 @@ install_release() {
     --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
     --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
     --service-user "$(id -un)" --service-group "$(id -gn)" \
+    --service pickleshell-memory-isolated.service \
     --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin"
 }
 
@@ -98,13 +140,13 @@ test "$(stat -c %a "$PREFIX/config/backend.env")" = 640
 test "$(stat -c %a "$PREFIX/config/mcp.env")" = 640
 test "$(stat -c %a "$PREFIX/log/audit.jsonl")" = 660
 test "$(stat -c %a "$PREFIX/log")" = 750
-test -f "$PREFIX/units/pickleshell-memory-backend.service"
+test -f "$PREFIX/units/pickleshell-memory-isolated.service"
 test -x "$PREFIX/bin/pickleshell-memory-mcp"
 test -x "$PREFIX/bin/pickleshell-memory-ready"
 test -f "$PREFIX/logrotate/pickleshell-memory"
 grep -q 'rotate 14' "$PREFIX/logrotate/pickleshell-memory"
 grep -q 'create 0660 ' "$PREFIX/logrotate/pickleshell-memory"
-grep -q "$PREFIX/config/backend.env" "$PREFIX/units/pickleshell-memory-backend.service"
+grep -q "$PREFIX/config/backend.env" "$PREFIX/units/pickleshell-memory-isolated.service"
 ! find "$PREFIX/app" "$PREFIX/units" "$PREFIX/bin" -type f -exec grep -l 'pickleshell-gateway\|gateway/' {} + | grep -q .
 audit_lines=$(wc -l < "$PREFIX/log/audit.jsonl")
 "$PREFIX/bin/pickleshell-memory-ready"
@@ -116,7 +158,7 @@ test "$(stat -c %a "$PREFIX/log")" = 750
 
 declare -A V1_HASHES
 for artifact in \
-  "$PREFIX/units/pickleshell-memory-backend.service" \
+  "$PREFIX/units/pickleshell-memory-isolated.service" \
   "$PREFIX/bin/backend-wrapper" \
   "$PREFIX/bin/pickleshell-memory-mcp" \
   "$PREFIX/bin/pickleshell-memory-ready" \
@@ -158,7 +200,8 @@ FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
   --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
   --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" --systemctl "$PREFIX/bin/systemctl" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
+  --systemctl "$PREFIX/bin/systemctl" \
   --wrapper-dir "$PREFIX/bin" --rollback
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
 kill "$(<"$PREFIX/backend.pid")" 2>/dev/null || true

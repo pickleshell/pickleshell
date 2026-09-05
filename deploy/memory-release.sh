@@ -9,15 +9,28 @@ CONFIG_ROOT='/etc/pickleshell-memory'; STATE_ROOT='/var/lib/pickleshell-memory';
 UNITS_DIR='/etc/systemd/system'; LOGROTATE_DIR='/etc/logrotate.d'; WRAPPER_DIR='/usr/local/libexec'
 SERVICE_USER='pickleshell-memory'; SERVICE_GROUP='pickleshell-memory'; SERVICE='pickleshell-memory-backend.service'
 NODE_EXECUTABLE='/usr/bin/node'; BACKEND_EXECUTABLE='/usr/local/bin/pickleshell-memory-backend'; SYSTEMCTL=systemctl; ROLLBACK=0
+ISOLATED_ROOT_SET=0; ISOLATED_CONFIG_SET=0; ISOLATED_STATE_SET=0; ISOLATED_LOG_SET=0
+ISOLATED_UNITS_SET=0; ISOLATED_LOGROTATE_SET=0; ISOLATED_WRAPPER_SET=0
+ISOLATED_USER_SET=0; ISOLATED_GROUP_SET=0; ISOLATED_SERVICE_SET=0
+ISOLATED_BACKEND_SET=0; ISOLATED_SYSTEMCTL_SET=0
 while (($#)); do case "$1" in
-  --source) SOURCE=${2:-}; shift 2;; --root) ROOT=${2:-}; shift 2;; --commit) COMMIT=${2:-}; shift 2;;
-  --profile) PROFILE=${2:-}; shift 2;; --config-root) CONFIG_ROOT=${2:-}; shift 2;; --state-root) STATE_ROOT=${2:-}; shift 2;;
-  --log-root) LOG_ROOT=${2:-}; shift 2;; --units-dir) UNITS_DIR=${2:-}; shift 2;; --logrotate-dir) LOGROTATE_DIR=${2:-}; shift 2;;
-  --wrapper-dir) WRAPPER_DIR=${2:-}; shift 2;; --service-user) SERVICE_USER=${2:-}; shift 2;; --service-group) SERVICE_GROUP=${2:-}; shift 2;;
-  --service) SERVICE=${2:-}; shift 2;; --node-executable) NODE_EXECUTABLE=${2:-}; shift 2;;
-  --backend-executable) BACKEND_EXECUTABLE=${2:-}; shift 2;; --systemctl) SYSTEMCTL=${2:-}; shift 2;; --rollback) ROLLBACK=1; shift;;
+  --source) SOURCE=${2:-}; shift 2;; --root) ROOT=${2:-}; ISOLATED_ROOT_SET=1; shift 2;; --commit) COMMIT=${2:-}; shift 2;;
+  --profile) PROFILE=${2:-}; shift 2;; --config-root) CONFIG_ROOT=${2:-}; ISOLATED_CONFIG_SET=1; shift 2;; --state-root) STATE_ROOT=${2:-}; ISOLATED_STATE_SET=1; shift 2;;
+  --log-root) LOG_ROOT=${2:-}; ISOLATED_LOG_SET=1; shift 2;; --units-dir) UNITS_DIR=${2:-}; ISOLATED_UNITS_SET=1; shift 2;; --logrotate-dir) LOGROTATE_DIR=${2:-}; ISOLATED_LOGROTATE_SET=1; shift 2;;
+  --wrapper-dir) WRAPPER_DIR=${2:-}; ISOLATED_WRAPPER_SET=1; shift 2;; --service-user) SERVICE_USER=${2:-}; ISOLATED_USER_SET=1; shift 2;; --service-group) SERVICE_GROUP=${2:-}; ISOLATED_GROUP_SET=1; shift 2;;
+  --service) SERVICE=${2:-}; ISOLATED_SERVICE_SET=1; shift 2;; --node-executable) NODE_EXECUTABLE=${2:-}; shift 2;;
+  --backend-executable) BACKEND_EXECUTABLE=${2:-}; ISOLATED_BACKEND_SET=1; shift 2;; --systemctl) SYSTEMCTL=${2:-}; ISOLATED_SYSTEMCTL_SET=1; shift 2;; --rollback) ROLLBACK=1; shift;;
   -h|--help) usage; exit 0;; *) usage >&2; die "unknown option: $1";; esac done
 [[ $PROFILE == production || $PROFILE == isolated ]] || die 'profile must be production or isolated'
+if [[ $PROFILE == isolated ]]; then
+  ((ISOLATED_ROOT_SET && ISOLATED_CONFIG_SET && ISOLATED_STATE_SET && ISOLATED_LOG_SET && ISOLATED_UNITS_SET && ISOLATED_LOGROTATE_SET && ISOLATED_WRAPPER_SET && ISOLATED_USER_SET && ISOLATED_GROUP_SET && ISOLATED_SERVICE_SET && ISOLATED_BACKEND_SET && ISOLATED_SYSTEMCTL_SET)) || die 'isolated profile requires explicit dedicated deployment paths and service identity'
+  ISOLATED_PREFIX=${ROOT%/*}
+  [[ -n $ISOLATED_PREFIX && $ISOLATED_PREFIX != / && $ISOLATED_PREFIX != /opt && $ISOLATED_PREFIX != /etc && $ISOLATED_PREFIX != /var && $ISOLATED_PREFIX != /usr ]] || die 'isolated root must use a dedicated prefix'
+  for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR" "$BACKEND_EXECUTABLE" "$SYSTEMCTL"; do
+    [[ $path == "$ISOLATED_PREFIX"/* ]] || die 'isolated deployment paths must share the dedicated root prefix'
+  done
+  [[ $SERVICE_USER != pickleshell-memory && $SERVICE_GROUP != pickleshell-memory && $SERVICE != pickleshell-memory-backend.service ]] || die 'isolated profile rejects production service identity'
+fi
 safe_path() { [[ $1 = /* && $1 != / && $1 != /etc && $1 != /opt && $1 != /var && $1 != /usr && $1 != /home && $1 != *'..'* && $1 != *[[:space:]@]* && $1 != *[\;\|\&\$\(\)\<\>\\\"\'\`\*\?\[\]]* ]] || die "$2 is unsafe"; }
 for pair in "$ROOT:root" "$CONFIG_ROOT:config root" "$STATE_ROOT:state root" "$LOG_ROOT:log root" "$UNITS_DIR:units directory" "$LOGROTATE_DIR:logrotate directory" "$WRAPPER_DIR:wrapper directory" "$NODE_EXECUTABLE:node executable" "$BACKEND_EXECUTABLE:backend executable"; do safe_path "${pair%%:*}" "${pair#*:}"; done
 [[ $SERVICE_USER =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_GROUP =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_USER != root ]] || die 'unsafe service identity'
