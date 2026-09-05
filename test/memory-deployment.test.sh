@@ -55,6 +55,36 @@ test ! -e "$PREFLIGHT/log"
 test ! -e "$PREFLIGHT/units"
 test ! -e "$TMP/systemctl-called"
 
+ANCESTOR_CASE="$TMP/symlink-ancestor"
+ANCESTOR_VICTIM="$TMP/symlink-ancestor-victim"
+mkdir -p -- "$ANCESTOR_CASE" "$ANCESTOR_VICTIM"/{app,bin,config,log,logrotate,state,units,wrappers}
+ln -s "$ANCESTOR_VICTIM" "$ANCESTOR_CASE/deploy"
+cp -- "$(command -v node)" "$ANCESTOR_VICTIM/bin/node"
+printf '#!/usr/bin/env bash\ntouch %q\nexit 1\n' "$ANCESTOR_VICTIM/systemctl-called" > "$ANCESTOR_VICTIM/bin/systemctl"
+chmod 0755 "$ANCESTOR_VICTIM/bin/node" "$ANCESTOR_VICTIM/bin/systemctl"
+printf 'victim-safe\n' > "$ANCESTOR_VICTIM/sentinel"
+printf 'BACKEND_TEST=1\n' > "$ANCESTOR_VICTIM/config/backend.env"
+printf '%s\n' \
+  'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
+  'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$ANCESTOR_CASE/deploy/log/audit.jsonl" > "$ANCESTOR_VICTIM/config/mcp.env"
+chmod 0640 "$ANCESTOR_VICTIM/config/backend.env" "$ANCESTOR_VICTIM/config/mcp.env"
+if "$FIXTURE/deploy/memory-release.sh" \
+  --profile isolated --root "$ANCESTOR_CASE/deploy/app" --config-root "$ANCESTOR_CASE/deploy/config" \
+  --state-root "$ANCESTOR_CASE/deploy/state" --log-root "$ANCESTOR_CASE/deploy/log" \
+  --units-dir "$ANCESTOR_CASE/deploy/units" --logrotate-dir "$ANCESTOR_CASE/deploy/logrotate" \
+  --wrapper-dir "$ANCESTOR_CASE/deploy/wrappers" --backend-executable "$ANCESTOR_CASE/deploy/bin/node" \
+  --node-executable "$ANCESTOR_CASE/deploy/bin/node" --systemctl "$ANCESTOR_CASE/deploy/bin/systemctl" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" \
+  --service pickleshell-memory-symlink-ancestor.service --rollback > "$ANCESTOR_CASE/output" 2>&1; then
+  echo 'symlinked deployment ancestor unexpectedly succeeded' >&2
+  exit 1
+fi
+test "$(<"$ANCESTOR_VICTIM/sentinel")" = victim-safe
+test ! -e "$ANCESTOR_VICTIM/log/audit.jsonl"
+test ! -e "$ANCESTOR_VICTIM/systemctl-called"
+grep -q 'configured deployment path has a symlink component' "$ANCESTOR_CASE/output"
+
 for artifact in "$FIXTURE"/deploy/systemd/*.in; do
   printf '\n# release-marker: v1\n' >> "$artifact"
 done
