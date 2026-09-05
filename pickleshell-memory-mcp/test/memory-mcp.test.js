@@ -123,13 +123,62 @@ test("agent MCP calls that supply user_id are denied and audited before backend 
   }
 });
 
-test("backend failures become bounded structured errors", async () => {
+test("policy rejections are audited as denied before backend access", async () => {
+  const cases = [
+    {
+      name: "admin scope is required",
+      config: loadConfig({ ...baseEnv, PICKLESHELL_MEMORY_ROLE: "admin", PICKLESHELL_MEMORY_SCOPE: undefined }),
+      tool: "memory_search",
+      args: { query: "fact" },
+      error: "scope_required",
+    },
+    {
+      name: "unknown tools are rejected",
+      config: loadConfig(baseEnv),
+      tool: "memory_import",
+      args: {},
+      error: "unknown_tool",
+    },
+  ];
+
+  for (const policyCase of cases) {
+    const backendCalls = [];
+    const auditEvents = [];
+    const backend = { call: async (...args) => { backendCalls.push(args); return {}; } };
+    const service = new MemoryService(policyCase.config, backend, {
+      record: (event) => auditEvents.push(event),
+    });
+
+    const result = await service.call(policyCase.tool, policyCase.args);
+
+    assert.equal(result.isError, true, policyCase.name);
+    assert.equal(JSON.parse(result.content[0].text).error, policyCase.error, policyCase.name);
+    assert.equal(backendCalls.length, 0, `${policyCase.name}: policy rejection must not reach backend`);
+    assert.equal(auditEvents.length, 1, policyCase.name);
+    assert.equal(auditEvents[0].decision, "denied", policyCase.name);
+    assert.equal(auditEvents[0].outcome, "error", policyCase.name);
+    assert.equal(auditEvents[0].error, policyCase.error, policyCase.name);
+  }
+});
+
+test("missing memories and backend failures remain allowed audit errors", async () => {
   const config = loadConfig(baseEnv);
-  const service = new MemoryService(config, new BackendClient(config, async () => new Response(
-    JSON.stringify({ detail: "private backend detail" }), { status: 503, headers: { "content-type": "application/json" } }
-  )), { record() {} });
-  const result = await service.call("memory_get", { memory_id: "m1" });
-  assert.deepEqual(JSON.parse(result.content[0].text), { error: "backend_failure", status: 503, retryable: true });
+  const cases = [
+    [404, "memory_not_found", false],
+    [503, "backend_failure", true],
+  ];
+
+  for (const [status, error, retryable] of cases) {
+    const auditEvents = [];
+    const service = new MemoryService(config, new BackendClient(config, async () => new Response(
+      JSON.stringify({ detail: "private backend detail" }), { status, headers: { "content-type": "application/json" } }
+    )), { record: (event) => auditEvents.push(event) });
+    const result = await service.call("memory_get", { memory_id: "m1" });
+    assert.deepEqual(JSON.parse(result.content[0].text), { error, status, retryable });
+    assert.equal(auditEvents[0].decision, "allowed");
+    assert.equal(auditEvents[0].outcome, "error");
+    assert.equal(auditEvents[0].error, error);
+  }
 });
 
 test("ambiguous backend failures make every mutation non-retryable with uncertain outcome", async () => {

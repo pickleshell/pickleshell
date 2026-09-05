@@ -22,5 +22,5 @@ export function authorize(config, tool, args) {
 }
 
 function policyError(code, message) {
-  return Object.assign(new Error(message), { code, status: 403, retryable: false });
+  return Object.assign(new Error(message), { code, status: 403, retryable: false, policyDenied: true });
 }
