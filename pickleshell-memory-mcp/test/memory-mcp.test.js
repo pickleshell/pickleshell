@@ -132,6 +132,57 @@ test("backend failures become bounded structured errors", async () => {
   assert.deepEqual(JSON.parse(result.content[0].text), { error: "backend_failure", status: 503, retryable: true });
 });
 
+test("ambiguous backend failures make every mutation non-retryable with uncertain outcome", async () => {
+  const config = loadConfig(baseEnv);
+  const failures = [
+    ["timeout", async () => { throw Object.assign(new Error("backend timeout secret"), { name: "AbortError" }); },
+      { error: "backend_timeout", status: 504 }],
+    ["network", async () => { throw new Error("network failure secret"); },
+      { error: "backend_unavailable", status: 503 }],
+    ["5xx", async () => new Response(JSON.stringify({ detail: "private backend detail" }), { status: 503 }),
+      { error: "backend_failure", status: 503 }],
+    ["invalid success response", async () => new Response("private invalid response", { status: 200 }),
+      { error: "invalid_backend_response", status: 502 }],
+  ];
+  const mutations = [
+    ["memory_add", { text: "fact" }],
+    ["memory_update", { memory_id: "m1", text: "updated" }],
+    ["memory_delete", { memory_id: "m1" }],
+  ];
+
+  for (const [failureName, fetchImpl, expected] of failures) {
+    for (const [tool, args] of mutations) {
+      const service = new MemoryService(config, new BackendClient(config, fetchImpl), { record() {} });
+      const result = await service.call(tool, args);
+      assert.deepEqual(JSON.parse(result.content[0].text), {
+        ...expected,
+        retryable: false,
+        mutation_outcome: "uncertain",
+      }, `${tool} must not invite a retry after a ${failureName} failure`);
+    }
+  }
+});
+
+test("ambiguous backend failures preserve retryability for non-mutation reads", async () => {
+  const config = loadConfig(baseEnv);
+  const failures = [
+    [async () => { throw Object.assign(new Error("backend timeout secret"), { name: "AbortError" }); },
+      { error: "backend_timeout", status: 504, retryable: true }],
+    [async () => { throw new Error("network failure secret"); },
+      { error: "backend_unavailable", status: 503, retryable: true }],
+    [async () => new Response(JSON.stringify({ detail: "private backend detail" }), { status: 503 }),
+      { error: "backend_failure", status: 503, retryable: true }],
+    [async () => new Response("private invalid response", { status: 200 }),
+      { error: "invalid_backend_response", status: 502, retryable: false }],
+  ];
+
+  for (const [fetchImpl, expected] of failures) {
+    const service = new MemoryService(config, new BackendClient(config, fetchImpl), { record() {} });
+    const result = await service.call("memory_search", { query: "fact" });
+    assert.deepEqual(JSON.parse(result.content[0].text), expected);
+  }
+});
+
 test("audit failure after a successful mutation returns a non-retryable uncertain outcome", async () => {
   const config = loadConfig(baseEnv);
   let backendCalls = 0;

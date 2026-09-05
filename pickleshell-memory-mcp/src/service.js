@@ -15,7 +15,10 @@ export class MemoryService {
       result = await this.backend.call(decision.operation, scope, args);
     } catch (error) {
       this.tryAudit(tool, scope, error.code?.includes("denied") ? "denied" : "allowed", "error", started, error.code || "internal_error");
-      return this.error(error.code || "internal_error", error.status || 500, error.retryable === true);
+      const uncertainMutation = MUTATIONS.has(tool) && error.mutationOutcomeUncertain === true;
+      return this.error(error.code || "internal_error", error.status || 500,
+        uncertainMutation ? false : error.retryable === true,
+        uncertainMutation ? { mutation_outcome: "uncertain" } : {});
     }
 
     if (!this.tryAudit(tool, scope, "allowed", "ok", started)) {

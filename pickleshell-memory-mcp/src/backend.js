@@ -25,13 +25,13 @@ export class BackendClient {
       const text = await response.text();
       let payload;
       try { payload = text ? JSON.parse(text) : {}; }
-      catch { throw backendError("invalid_backend_response", 502, false); }
-      if (!response.ok) throw backendError(mapStatus(response.status), response.status, response.status >= 500, payload);
+      catch { throw backendError("invalid_backend_response", 502, false, undefined, true); }
+      if (!response.ok) throw backendError(mapStatus(response.status), response.status, response.status >= 500, payload, response.status >= 500);
       return payload;
     } catch (error) {
       if (error?.code) throw error;
-      if (error?.name === "AbortError") throw backendError("backend_timeout", 504, true);
-      throw backendError("backend_unavailable", 503, true);
+      if (error?.name === "AbortError") throw backendError("backend_timeout", 504, true, undefined, true);
+      throw backendError("backend_unavailable", 503, true, undefined, true);
     } finally { clearTimeout(timer); }
   }
 
@@ -62,6 +62,6 @@ function mapStatus(status) {
   return status >= 500 ? "backend_failure" : "backend_rejected";
 }
 
-function backendError(code, status, retryable, backend) {
-  return Object.assign(new Error(code), { code, status, retryable, backend });
+function backendError(code, status, retryable, backend, mutationOutcomeUncertain = false) {
+  return Object.assign(new Error(code), { code, status, retryable, backend, mutationOutcomeUncertain });
 }
