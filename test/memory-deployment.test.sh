@@ -85,6 +85,33 @@ test ! -e "$ANCESTOR_VICTIM/log/audit.jsonl"
 test ! -e "$ANCESTOR_VICTIM/systemctl-called"
 grep -q 'configured deployment path has a symlink component' "$ANCESTOR_CASE/output"
 
+WRITABLE_CONFIG_CASE="$TMP/writable-production-config"
+mkdir -p -- "$WRITABLE_CONFIG_CASE/config"
+printf 'BACKEND_TEST=1\n' > "$WRITABLE_CONFIG_CASE/config/backend.env"
+printf '%s\n' \
+  'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
+  'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$WRITABLE_CONFIG_CASE/log/audit.jsonl" > "$WRITABLE_CONFIG_CASE/config/mcp.env"
+chmod 0640 "$WRITABLE_CONFIG_CASE/config/backend.env" "$WRITABLE_CONFIG_CASE/config/mcp.env"
+if "$FIXTURE/deploy/memory-release.sh" \
+  --profile production --root "$WRITABLE_CONFIG_CASE/app" --config-root "$WRITABLE_CONFIG_CASE/config" \
+  --state-root "$WRITABLE_CONFIG_CASE/state" --log-root "$WRITABLE_CONFIG_CASE/log" \
+  --units-dir "$WRITABLE_CONFIG_CASE/units" --logrotate-dir "$WRITABLE_CONFIG_CASE/logrotate" \
+  --wrapper-dir "$WRITABLE_CONFIG_CASE/wrappers" --backend-executable "$PREFLIGHT/bin/node" \
+  --node-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" \
+  --service pickleshell-memory-writable-config.service --rollback > "$WRITABLE_CONFIG_CASE/output" 2>&1; then
+  echo 'writable production config root unexpectedly succeeded' >&2
+  exit 1
+fi
+test ! -e "$WRITABLE_CONFIG_CASE/app"
+test ! -e "$WRITABLE_CONFIG_CASE/state"
+test ! -e "$WRITABLE_CONFIG_CASE/log"
+test ! -e "$WRITABLE_CONFIG_CASE/units"
+test ! -e "$WRITABLE_CONFIG_CASE/logrotate"
+test ! -e "$WRITABLE_CONFIG_CASE/wrappers"
+grep -q 'operator config path is writable by the service identity' "$WRITABLE_CONFIG_CASE/output"
+
 for artifact in "$FIXTURE"/deploy/systemd/*.in; do
   printf '\n# release-marker: v1\n' >> "$artifact"
 done

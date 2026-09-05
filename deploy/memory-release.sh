@@ -46,6 +46,33 @@ validate_no_symlink_components() {
 for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"; do validate_no_symlink_components "$path"; done
 [[ $SERVICE_USER =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_GROUP =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_USER != root ]] || die 'unsafe service identity'
 [[ $SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.service$ && $SERVICE != *..* ]] || die 'unsafe service name'
+service_uid=$(id -u "$SERVICE_USER") || die 'service user does not exist'
+service_gid=$(getent group "$SERVICE_GROUP" | cut -d: -f3); [[ -n $service_gid ]] || die 'service group does not exist'
+validate_operator_config_path() {
+  local path=$CONFIG_ROOT component current='' owner group mode mode_value operator_uid
+  local -a components service_gids
+  operator_uid=$(id -u)
+  read -r -a service_gids <<< "$(id -G "$SERVICE_USER")"
+  [[ " ${service_gids[*]} " == *" $service_gid "* ]] || service_gids+=("$service_gid")
+  IFS=/ read -r -a components <<< "${path#/}"
+  components=("" "${components[@]}")
+  for component in "${components[@]}"; do
+    if [[ -z $component ]]; then current=/; else current="${current%/}/$component"; fi
+    [[ -e $current ]] || break
+    read -r owner group mode < <(stat -c '%u %g %a' -- "$current") || die 'cannot inspect operator config path'
+    mode_value=$((8#$mode))
+    [[ $owner == 0 || $owner == "$operator_uid" ]] || die 'operator config path has an untrusted owner'
+    if [[ $owner == "$service_uid" ]] && ((mode_value & 0200)); then
+      die 'operator config path is writable by the service identity'
+    fi
+    if ((mode_value & 0020)) && [[ " ${service_gids[*]} " == *" $group "* ]]; then
+      die 'operator config path is writable by the service identity'
+    fi
+    ((!(mode_value & 0002))) || die 'operator config path is writable by the service identity'
+    [[ $owner != "$service_uid" ]] || die 'operator config path has an untrusted owner'
+  done
+}
+if [[ $PROFILE == production ]]; then validate_operator_config_path; fi
 for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"; do [[ ! -L $path ]] || die "sensitive path is a symlink: $path"; done
 RELEASES="$ROOT/releases"; ACTIVE="$ROOT/active"; DEPLOY_STATE="$ROOT/state"
 validate_internal_paths() {
@@ -68,7 +95,6 @@ validate_internal_paths
 [[ -f $NODE_EXECUTABLE && -x $NODE_EXECUTABLE && ! -L $NODE_EXECUTABLE ]] || die 'node executable must be a regular executable'
 [[ -f $BACKEND_EXECUTABLE && -x $BACKEND_EXECUTABLE && ! -L $BACKEND_EXECUTABLE ]] || die 'backend executable must be a regular executable'
 BACKEND_ENV_FILE="$CONFIG_ROOT/backend.env"; MCP_ENV_FILE="$CONFIG_ROOT/mcp.env"; AUDIT_LOG="$LOG_ROOT/audit.jsonl"
-service_gid=$(getent group "$SERVICE_GROUP" | cut -d: -f3); [[ -n $service_gid ]] || die 'service group does not exist'
 for file in "$BACKEND_ENV_FILE" "$MCP_ENV_FILE"; do
   [[ -f $file && ! -L $file ]] || die "required operator config is missing or a symlink: $file"
   [[ $(stat -c %a "$file") == 640 ]] || die "operator config must have mode 0640: $file"
