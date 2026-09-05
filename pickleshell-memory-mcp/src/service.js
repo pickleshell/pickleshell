@@ -16,14 +16,15 @@ export class MemoryService {
       scope = decision.scope;
       result = await this.backend.call(decision.operation, scope, args);
     } catch (error) {
-      const uncertainMutation = MUTATIONS.has(tool) && error.mutationOutcomeUncertain === true;
+      const mutation = MUTATIONS.has(tool);
+      const uncertainMutation = mutation && error.mutationOutcomeUncertain === true;
       if (!this.tryAudit(tool, scope, error.policyDenied === true ? "denied" : "allowed", "error", started,
         error.code || "internal_error")) {
         return this.error("audit_failure", 500, false,
           uncertainMutation ? { mutation_outcome: "uncertain" } : {});
       }
       return this.error(error.code || "internal_error", error.status || 500,
-        uncertainMutation ? false : error.retryable === true,
+        mutation ? false : error.retryable === true,
         uncertainMutation ? { mutation_outcome: "uncertain" } : {});
     }
 

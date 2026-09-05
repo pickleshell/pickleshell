@@ -181,6 +181,27 @@ test("missing memories and backend failures remain allowed audit errors", async 
   }
 });
 
+test("backend rate limits are retryable only for safe reads", async () => {
+  const config = loadConfig(baseEnv);
+  const fetchImpl = async () => new Response(
+    JSON.stringify({ detail: "private backend detail" }),
+    { status: 429, headers: { "content-type": "application/json" } },
+  );
+
+  for (const [tool, args, retryable] of [
+    ["memory_search", { query: "fact" }, true],
+    ["memory_add", { text: "fact" }, false],
+  ]) {
+    const service = new MemoryService(config, new BackendClient(config, fetchImpl), { record() {} });
+    const result = await service.call(tool, args);
+    assert.deepEqual(JSON.parse(result.content[0].text), {
+      error: "backend_rate_limited",
+      status: 429,
+      retryable,
+    }, `${tool} must preserve its automatic-retry safeguard`);
+  }
+});
+
 test("audit failure supersedes authorization and backend errors without losing uncertain mutation state", async () => {
   const config = loadConfig(baseEnv);
   const auditSecret = "private audit detail";

@@ -26,7 +26,7 @@ export class BackendClient {
       let payload;
       try { payload = text ? JSON.parse(text) : {}; }
       catch { throw backendError("invalid_backend_response", 502, false, undefined, true); }
-      if (!response.ok) throw backendError(mapStatus(response.status), response.status, response.status >= 500, payload, response.status >= 500);
+      if (!response.ok) throw backendError(mapStatus(response.status), response.status, isRetryableStatus(response.status), payload, response.status >= 500);
       return payload;
     } catch (error) {
       if (error?.name === "AbortError") throw backendError("backend_timeout", 504, true, undefined, true);
@@ -43,7 +43,7 @@ export class BackendClient {
         headers: { accept: "application/json", ...(this.config.backendToken ? { authorization: `Bearer ${this.config.backendToken}` } : {}) },
         signal: controller.signal,
       });
-      if (!response.ok) throw backendError(mapStatus(response.status), response.status, response.status >= 500);
+      if (!response.ok) throw backendError(mapStatus(response.status), response.status, isRetryableStatus(response.status));
       try { return await response.json(); }
       catch { throw backendError("invalid_backend_response", 502, false); }
     } catch (error) {
@@ -60,6 +60,10 @@ function mapStatus(status) {
   if (status === 404) return "memory_not_found";
   if (status === 429) return "backend_rate_limited";
   return status >= 500 ? "backend_failure" : "backend_rejected";
+}
+
+function isRetryableStatus(status) {
+  return status === 429 || status >= 500;
 }
 
 function backendError(code, status, retryable, backend, mutationOutcomeUncertain = false) {
