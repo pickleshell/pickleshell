@@ -124,6 +124,19 @@ esac
 EOF
 chmod 0755 "$PREFIX/bin/systemctl"
 
+REAL_MV=$(command -v mv)
+cat > "$PREFIX/bin/mv" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+for argument in "\$@"; do target=\$argument; done
+if [[ -f \${FAKE_SYSTEMD_ROOT:-}/fail-artifact-mv && \$target == \${FAKE_SYSTEMD_ROOT}/bin/pickleshell-memory-mcp ]]; then
+  rm -f -- "\${FAKE_SYSTEMD_ROOT}/fail-artifact-mv"
+  exit 1
+fi
+exec '$REAL_MV' "\$@"
+EOF
+chmod 0755 "$PREFIX/bin/mv"
+
 cat > "$PREFIX/bin/logrotate" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -136,7 +149,7 @@ EOF
 chmod 0755 "$PREFIX/bin/logrotate"
 
 install_release() {
-  FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
+  PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
     --profile isolated --source "$FIXTURE" --root "$PREFIX/app" --commit "$1" \
     --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
     --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
@@ -226,6 +239,49 @@ for artifact in \
 done
 V1_PID=$(<"$PREFIX/backend.pid")
 
+sed -i 's/release-marker: v1/release-marker: render-failure/g' "$FIXTURE"/deploy/systemd/*.in
+printf '\n@UNRESOLVED_RENDER_FAILURE@\n' >> "$FIXTURE/deploy/systemd/pickleshell-memory.logrotate.in"
+git -C "$FIXTURE" add deploy/systemd
+git -C "$FIXTURE" commit -qm render-failure
+RENDER_FAILURE_SHA=$(git -C "$FIXTURE" rev-parse HEAD)
+if install_release "$RENDER_FAILURE_SHA" >"$TMP/render-failure.out" 2>&1; then
+  echo 'render-failure upgrade unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'unresolved deployment placeholder' "$TMP/render-failure.out"
+test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
+test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA1"
+test -z "$(<"$PREFIX/app/state/previous-target")"
+for artifact in "${!V1_HASHES[@]}"; do
+  test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "${V1_HASHES[$artifact]}"
+done
+test "$(<"$PREFIX/backend.pid")" = "$V1_PID"
+kill -0 "$V1_PID"
+! find "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -maxdepth 1 -type f \( -name '.*.render.*' -o -name '.*.backup.*' \) | grep -q .
+
+git -C "$FIXTURE" checkout -q "$SHA1" -- deploy/systemd
+sed -i 's/release-marker: v1/release-marker: commit-failure/g' "$FIXTURE"/deploy/systemd/*.in
+git -C "$FIXTURE" add deploy/systemd
+git -C "$FIXTURE" commit -qm commit-failure
+COMMIT_FAILURE_SHA=$(git -C "$FIXTURE" rev-parse HEAD)
+touch "$PREFIX/fail-artifact-mv"
+if install_release "$COMMIT_FAILURE_SHA" >"$TMP/commit-failure.out" 2>&1; then
+  echo 'commit-failure upgrade unexpectedly succeeded' >&2
+  exit 1
+fi
+test ! -e "$PREFIX/fail-artifact-mv"
+test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
+test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA1"
+test -z "$(<"$PREFIX/app/state/previous-target")"
+for artifact in "${!V1_HASHES[@]}"; do
+  test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "${V1_HASHES[$artifact]}"
+done
+test "$(<"$PREFIX/backend.pid")" = "$V1_PID"
+kill -0 "$V1_PID"
+! find "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -maxdepth 1 -type f \( -name '.*.render.*' -o -name '.*.backup.*' \) | grep -q .
+
+git -C "$FIXTURE" checkout -q "$SHA1" -- deploy/systemd
+
 sed -i 's/release-marker: v1/release-marker: failed-upgrade/g' "$FIXTURE"/deploy/systemd/*.in
 sed -i '1a process.exit(23); // deterministic failed-upgrade readiness' "$FIXTURE/pickleshell-memory-mcp/src/readiness.js"
 git -C "$FIXTURE" add deploy/systemd pickleshell-memory-mcp/src/readiness.js
@@ -290,5 +346,6 @@ V2_RECOVERED_PID=$(<"$PREFIX/backend.pid")
 test "$V2_RECOVERED_PID" != "$V2_PID"
 kill -0 "$V2_RECOVERED_PID"
 "$PREFIX/bin/pickleshell-memory-ready"
+! find "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -maxdepth 1 -type f \( -name '.*.render.*' -o -name '.*.backup.*' \) | grep -q .
 kill "$(<"$PREFIX/backend.pid")" 2>/dev/null || true
 printf 'memory deployment E2E: ok\n'
