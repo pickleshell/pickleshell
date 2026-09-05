@@ -159,6 +159,19 @@ exec '$REAL_MV' "\$@"
 EOF
 chmod 0755 "$PREFIX/bin/mv"
 
+REAL_RM=$(command -v rm)
+cat > "$PREFIX/bin/rm" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+for argument in "\$@"; do target=\$argument; done
+if [[ -f \${FAKE_SYSTEMD_ROOT:-}/fail-release-rm && \$target == \${FAKE_SYSTEMD_ROOT}/app/releases/* ]]; then
+  '$REAL_RM' -f -- "\${FAKE_SYSTEMD_ROOT}/fail-release-rm"
+  exit 1
+fi
+exec '$REAL_RM' "\$@"
+EOF
+chmod 0755 "$PREFIX/bin/rm"
+
 cat > "$PREFIX/bin/logrotate" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -266,7 +279,7 @@ printf '%s\n' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$FIRST_FAILURE/log/audit.jsonl" > "$FIRST_FAILURE/config/mcp.env"
 chmod 0640 "$FIRST_FAILURE/config/backend.env" "$FIRST_FAILURE/config/mcp.env"
 touch "$FIRST_FAILURE/fail-enable"
-if FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
+if PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --source "$FIXTURE" --root "$FIRST_FAILURE/app" --commit "$SHA1" \
   --config-root "$FIRST_FAILURE/config" --state-root "$FIRST_FAILURE/state" --log-root "$FIRST_FAILURE/log" \
   --units-dir "$FIRST_FAILURE/units" --logrotate-dir "$FIRST_FAILURE/logrotate" \
@@ -278,7 +291,7 @@ if FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
   echo 'failed first activation unexpectedly succeeded' >&2
   exit 1
 fi
-grep -q 'activation enablement failed; first activation cleaned up' "$TMP/first-failure.out"
+grep -q 'activation enablement failed; first-activation state restored' "$TMP/first-failure.out"
 ! grep -q 'memory-release: active release\|memory-release: rolled back' "$TMP/first-failure.out"
 test -f "$FIRST_FAILURE/backend.pid" || { cat "$TMP/first-failure.out" >&2; exit 1; }
 FIRST_FAILURE_PID=$(<"$FIRST_FAILURE/backend.pid")
@@ -310,6 +323,23 @@ test "$(grep -c '^daemon-reload$' "$FIRST_FAILURE/systemctl.calls")" -eq 2
 grep -q '^stop pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
 test ! -e "$FIRST_FAILURE/enabled/pickleshell-memory-first-failure.service"
 grep -q '^disable pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
+test ! -e "$FIRST_FAILURE/app/releases/$SHA1"
+
+rm -- "$FIRST_FAILURE/fail-enable"
+PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
+  --profile isolated --source "$FIXTURE" --root "$FIRST_FAILURE/app" --commit "$SHA1" \
+  --config-root "$FIRST_FAILURE/config" --state-root "$FIRST_FAILURE/state" --log-root "$FIRST_FAILURE/log" \
+  --units-dir "$FIRST_FAILURE/units" --logrotate-dir "$FIRST_FAILURE/logrotate" \
+  --backend-executable "$FIRST_FAILURE/bin/backend.js" --node-executable "$(command -v node)" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" \
+  --service pickleshell-memory-first-failure.service \
+  --systemctl "$FIRST_FAILURE/bin/systemctl" --wrapper-dir "$FIRST_FAILURE/bin"
+test -d "$FIRST_FAILURE/app/releases/$SHA1"
+test "$(readlink "$FIRST_FAILURE/app/active")" = "releases/$SHA1"
+test "$(<"$FIRST_FAILURE/app/state/current-target")" = "releases/$SHA1"
+test -f "$FIRST_FAILURE/enabled/pickleshell-memory-first-failure.service"
+"$FIRST_FAILURE/bin/pickleshell-memory-ready"
+kill "$(<"$FIRST_FAILURE/backend.pid")" 2>/dev/null || true
 
 NON_GIT_SOURCE="$TMP/non-git-source"
 mkdir -- "$NON_GIT_SOURCE"
@@ -382,6 +412,7 @@ for failure in current-state active; do
   git -C "$FIXTURE" commit -qm "switch-$failure-failure"
   SWITCH_FAILURE_SHA=$(git -C "$FIXTURE" rev-parse HEAD)
   touch "$PREFIX/fail-$failure-mv"
+  if [[ $failure == current-state ]]; then touch "$PREFIX/fail-release-rm"; fi
   if install_release "$SWITCH_FAILURE_SHA" >"$TMP/switch-$failure-failure.out" 2>&1; then
     echo "switch-$failure failure upgrade unexpectedly succeeded" >&2
     exit 1
@@ -389,6 +420,13 @@ for failure in current-state active; do
   test ! -e "$PREFIX/fail-$failure-mv"
   grep -q 'deployment switch failed; previous deployment restored' "$TMP/switch-$failure-failure.out"
   ! grep -q 'memory-release: active release\|memory-release: rolled back' "$TMP/switch-$failure-failure.out"
+  if [[ $failure == current-state ]]; then
+    grep -q 'failed to remove unsuccessful release' "$TMP/switch-$failure-failure.out"
+    test -d "$PREFIX/app/releases/$SWITCH_FAILURE_SHA"
+    "$REAL_RM" -rf -- "$PREFIX/app/releases/$SWITCH_FAILURE_SHA"
+  else
+    test ! -e "$PREFIX/app/releases/$SWITCH_FAILURE_SHA"
+  fi
   assert_v1_preserved
 done
 

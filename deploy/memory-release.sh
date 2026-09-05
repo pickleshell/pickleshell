@@ -288,9 +288,28 @@ SOURCE_TOPLEVEL=$(realpath -e -- "$SOURCE_TOPLEVEL") || die 'source must be a di
 [[ -z $(git -C "$SOURCE" status --porcelain=v1 --untracked-files=all) ]] || die 'source worktree is dirty'
 RESOLVED=$(git -C "$SOURCE" rev-parse --verify "$COMMIT^{commit}") || die 'commit does not resolve'; [[ $RESOLVED == "$COMMIT" ]] || die 'commit is not exact'
 RELEASE="$RELEASES/$RESOLVED"; STAGING="$RELEASES/.staging-$RESOLVED-$$"
+RELEASE_CREATED=0; ACTIVATION_SUCCEEDED=0
 cleanup_exit() {
+  local status=$? active_now='' release_cleanup_safe=1
+  trap - EXIT
   [[ -z ${STAGING:-} ]] || rm -rf -- "$STAGING"
   [[ -z ${FIRST_ACTIVATION_BACKUP_ROOT:-} ]] || rm -rf -- "$FIRST_ACTIVATION_BACKUP_ROOT"
+  if ((RELEASE_CREATED && ! ACTIVATION_SUCCEEDED)); then
+    if [[ -L $ACTIVE ]]; then
+      active_now=$(readlink -- "$ACTIVE") || release_cleanup_safe=0
+      [[ $active_now != "releases/$RESOLVED" ]] || release_cleanup_safe=0
+    elif [[ -e $ACTIVE ]]; then
+      release_cleanup_safe=0
+    fi
+    if ((!release_cleanup_safe)); then
+      printf 'memory-release: error: failed release cleanup; release may be active: %s\n' "$RELEASE" >&2
+      status=1
+    elif ! find -P "$RELEASE" -type d -exec chmod u+w {} + || ! rm -rf -- "$RELEASE"; then
+      printf 'memory-release: error: failed to remove unsuccessful release: %s\n' "$RELEASE" >&2
+      status=1
+    fi
+  fi
+  exit "$status"
 }
 trap cleanup_exit EXIT
 [[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
@@ -301,7 +320,7 @@ while IFS= read -r -d '' link; do
   [[ $resolved_link == "$STAGING/pickleshell-memory-mcp"/* ]] || die 'release symlink escapes the memory package'
 done < <(find -P "$STAGING" -type l -print0)
 find -P "$STAGING" -type d -exec chmod 0555 {} +; find -P "$STAGING" -type f -exec chmod 0444 {} +
-mv -T "$STAGING" "$RELEASE"; STAGING=''; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
+mv -T "$STAGING" "$RELEASE"; STAGING=''; RELEASE_CREATED=1; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
 validate_internal_paths
 if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then prior_previous=$(<"$DEPLOY_STATE/previous-target"); fi
 if [[ -z $previous ]]; then capture_first_activation_state || die 'cannot preserve pre-existing first-activation state'; fi
@@ -323,7 +342,7 @@ if ! restart_verify; then
   if ! cleanup_failed_first_activation; then
     die "activation readiness failed; first-activation cleanup failed (${FIRST_ACTIVATION_CLEANUP_FAILURES:-unknown})"
   fi
-  die 'activation readiness failed; first activation cleaned up'
+  die 'activation readiness failed; first-activation state restored'
 fi
 if [[ -z $previous ]]; then
   if ! "$SYSTEMCTL" is-enabled "$SERVICE" >/dev/null 2>&1; then RESTORE_DISABLED_ON_FIRST_FAILURE=1; fi
@@ -331,9 +350,10 @@ if [[ -z $previous ]]; then
     if ! cleanup_failed_first_activation; then
       die "activation enablement failed; first-activation cleanup failed (${FIRST_ACTIVATION_CLEANUP_FAILURES:-unknown})"
     fi
-    die 'activation enablement failed; first activation cleaned up'
+    die 'activation enablement failed; first-activation state restored'
   fi
   rm -rf -- "$FIRST_ACTIVATION_BACKUP_ROOT" || die 'cannot remove first-activation backup'
   FIRST_ACTIVATION_BACKUP_ROOT=''
 fi
+ACTIVATION_SUCCEEDED=1
 printf 'memory-release: active release: releases/%s\n' "$RESOLVED"
