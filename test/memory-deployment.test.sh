@@ -144,6 +144,14 @@ if [[ -f \${FAKE_SYSTEMD_ROOT:-}/fail-artifact-mv && \$target == \${FAKE_SYSTEMD
   rm -f -- "\${FAKE_SYSTEMD_ROOT}/fail-artifact-mv"
   exit 1
 fi
+if [[ -f \${FAKE_SYSTEMD_ROOT:-}/fail-current-state-mv && \$target == \${FAKE_SYSTEMD_ROOT}/app/state/current-target ]]; then
+  rm -f -- "\${FAKE_SYSTEMD_ROOT}/fail-current-state-mv"
+  exit 1
+fi
+if [[ -f \${FAKE_SYSTEMD_ROOT:-}/fail-active-mv && \$target == \${FAKE_SYSTEMD_ROOT}/app/active ]]; then
+  rm -f -- "\${FAKE_SYSTEMD_ROOT}/fail-active-mv"
+  exit 1
+fi
 exec '$REAL_MV' "\$@"
 EOF
 chmod 0755 "$PREFIX/bin/mv"
@@ -254,6 +262,36 @@ for artifact in \
   V1_HASHES["$artifact"]=$(sha256sum "$artifact" | cut -d' ' -f1)
 done
 V1_PID=$(<"$PREFIX/backend.pid")
+
+assert_v1_preserved() {
+  test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
+  test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA1"
+  test -z "$(<"$PREFIX/app/state/previous-target")"
+  for artifact in "${!V1_HASHES[@]}"; do
+    test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "${V1_HASHES[$artifact]}"
+  done
+  test "$(<"$PREFIX/backend.pid")" = "$V1_PID"
+  kill -0 "$V1_PID"
+  "$PREFIX/bin/pickleshell-memory-ready"
+  ! find "$PREFIX/app" "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -type f \( -name '.*.render.*' -o -name '.*.backup.*' -o -name '.*.switch.*' \) | grep -q .
+}
+
+for failure in current-state active; do
+  git -C "$FIXTURE" checkout -q "$SHA1" -- deploy/systemd
+  sed -i "s/release-marker: v1/release-marker: switch-$failure-failure/g" "$FIXTURE"/deploy/systemd/*.in
+  git -C "$FIXTURE" add deploy/systemd
+  git -C "$FIXTURE" commit -qm "switch-$failure-failure"
+  SWITCH_FAILURE_SHA=$(git -C "$FIXTURE" rev-parse HEAD)
+  touch "$PREFIX/fail-$failure-mv"
+  if install_release "$SWITCH_FAILURE_SHA" >"$TMP/switch-$failure-failure.out" 2>&1; then
+    echo "switch-$failure failure upgrade unexpectedly succeeded" >&2
+    exit 1
+  fi
+  test ! -e "$PREFIX/fail-$failure-mv"
+  grep -q 'deployment switch failed; previous deployment restored' "$TMP/switch-$failure-failure.out"
+  ! grep -q 'memory-release: active release\|memory-release: rolled back' "$TMP/switch-$failure-failure.out"
+  assert_v1_preserved
+done
 
 sed -i 's/release-marker: v1/release-marker: render-failure/g' "$FIXTURE"/deploy/systemd/*.in
 printf '\n@UNRESOLVED_RENDER_FAILURE@\n' >> "$FIXTURE/deploy/systemd/pickleshell-memory.logrotate.in"
@@ -367,5 +405,23 @@ kill -0 "$V2_RECOVERED_PID"
 test -f "$PREFIX/enabled/pickleshell-memory-isolated.service"
 ! grep -q '^disable pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls"
 ! find "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -maxdepth 1 -type f \( -name '.*.render.*' -o -name '.*.backup.*' \) | grep -q .
+rm -f -- "$PREFIX/fail-active-target"
+FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
+  --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
+  --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
+  --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
+  --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin" --rollback
+test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
+test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA1"
+test "$(<"$PREFIX/app/state/previous-target")" = "releases/$SHA2"
+for artifact in "${!V1_HASHES[@]}"; do
+  test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "${V1_HASHES[$artifact]}"
+done
+ROLLBACK_PID=$(<"$PREFIX/backend.pid")
+test "$ROLLBACK_PID" != "$V2_RECOVERED_PID"
+kill -0 "$ROLLBACK_PID"
+"$PREFIX/bin/pickleshell-memory-ready"
+! find "$PREFIX/app" "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -type f \( -name '.*.render.*' -o -name '.*.backup.*' -o -name '.*.switch.*' \) | grep -q .
 kill "$(<"$PREFIX/backend.pid")" 2>/dev/null || true
 printf 'memory deployment E2E: ok\n'

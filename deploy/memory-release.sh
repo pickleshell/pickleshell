@@ -56,12 +56,19 @@ if [[ ! -e $AUDIT_LOG ]]; then install -m 0660 /dev/null "$AUDIT_LOG"; else chmo
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$AUDIT_LOG"; fi
 RELEASES="$ROOT/releases"; ACTIVE="$ROOT/active"; DEPLOY_STATE="$ROOT/state"; mkdir -p -- "$RELEASES" "$DEPLOY_STATE"
 active_target() { [[ -L $ACTIVE ]] || return 1; local target; target=$(readlink -- "$ACTIVE"); [[ $target == releases/* && $target != *..* && -d $ROOT/$target && ! -L $ROOT/$target ]] || die 'active target is unsafe'; printf %s "$target"; }
+SWITCH_TEMP_PATHS=()
 switch() {
-  local target=$1 previous=$2 tmp="$ROOT/.active.new.$$"
-  printf '%s\n' "$previous" > "$DEPLOY_STATE/previous-target" || return
-  printf '%s\n' "$target" > "$DEPLOY_STATE/current-target" || return
-  ln -s "$target" "$tmp" || return
-  mv -Tf "$tmp" "$ACTIVE"
+  local target=$1 previous=$2 previous_tmp current_tmp active_tmp="$ROOT/.active.switch.$$"
+  previous_tmp=$(mktemp "$DEPLOY_STATE/.previous-target.switch.XXXXXX") || return
+  SWITCH_TEMP_PATHS=("$previous_tmp")
+  current_tmp=$(mktemp "$DEPLOY_STATE/.current-target.switch.XXXXXX") || return
+  SWITCH_TEMP_PATHS+=("$current_tmp" "$active_tmp")
+  if ! printf '%s\n' "$previous" > "$previous_tmp" || ! printf '%s\n' "$target" > "$current_tmp" ||
+     ! ln -s "$target" "$active_tmp" || ! mv -Tf -- "$previous_tmp" "$DEPLOY_STATE/previous-target" ||
+     ! mv -Tf -- "$current_tmp" "$DEPLOY_STATE/current-target" || ! mv -Tf -- "$active_tmp" "$ACTIVE"; then
+    return 1
+  fi
+  SWITCH_TEMP_PATHS=()
 }
 render_artifacts() {
   local release=$1 contents token value template target mode staged backup index restore_index
@@ -129,6 +136,53 @@ render_artifacts() {
   fi
   for backup in "${backup_files[@]}"; do rm -f -- "$backup"; done
 }
+TRANSACTION_RECOVERY_FAILURES=''
+transactional_switch() {
+  local release=$1 target=$2 previous=$3 backup_root="$ROOT/.switch-backup.$$" index path temp active_before=''
+  local -a paths=(
+    "$UNITS_DIR/$SERVICE" "$WRAPPER_DIR/backend-wrapper" "$WRAPPER_DIR/pickleshell-memory-mcp"
+    "$WRAPPER_DIR/pickleshell-memory-ready" "$LOGROTATE_DIR/pickleshell-memory"
+    "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/current-target"
+  ) had_prior=() failures=()
+  mkdir -- "$backup_root" || return 1
+  if [[ -L $ACTIVE ]]; then active_before=$(readlink -- "$ACTIVE") || { rm -rf -- "$backup_root"; return 1; }; fi
+  for index in "${!paths[@]}"; do
+    path=${paths[$index]}
+    if [[ -e $path || -L $path ]]; then
+      had_prior[$index]=1
+      cp -a -- "$path" "$backup_root/$index" || { rm -rf -- "$backup_root"; return 1; }
+    else
+      had_prior[$index]=0
+    fi
+  done
+  if render_artifacts "$release" && switch "$target" "$previous"; then
+    rm -rf -- "$backup_root" || { TRANSACTION_RECOVERY_FAILURES=backup-cleanup; return 2; }
+    return 0
+  fi
+  for index in "${!paths[@]}"; do
+    path=${paths[$index]}
+    if [[ ${had_prior[$index]} == 1 ]]; then
+      mv -Tf -- "$backup_root/$index" "$path" || failures+=(artifact-state-restore)
+    else
+      rm -f -- "$path" || failures+=(artifact-state-remove)
+    fi
+  done
+  for temp in "${SWITCH_TEMP_PATHS[@]}"; do rm -f -- "$temp" || failures+=(switch-temp-remove); done
+  SWITCH_TEMP_PATHS=()
+  if [[ -n $active_before ]]; then
+    if ! ln -s "$active_before" "$ROOT/.active.restore.$$" || ! mv -Tf -- "$ROOT/.active.restore.$$" "$ACTIVE"; then
+      failures+=(active-restore)
+    fi
+  else
+    rm -f -- "$ACTIVE" || failures+=(active-remove)
+  fi
+  if ((${#failures[@]})); then
+    TRANSACTION_RECOVERY_FAILURES=$(IFS=,; printf '%s' "${failures[*]}")
+    return 2
+  fi
+  rm -rf -- "$backup_root" || { TRANSACTION_RECOVERY_FAILURES=backup-cleanup; return 2; }
+  return 1
+}
 restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
 RESTORE_DISABLED_ON_FIRST_FAILURE=0
 cleanup_failed_first_activation() {
@@ -157,10 +211,17 @@ cleanup_failed_first_activation() {
 if ((ROLLBACK)); then
   current=$(<"$DEPLOY_STATE/current-target") || die 'current target is missing'; previous=$(<"$DEPLOY_STATE/previous-target") || die 'previous target is missing'
   [[ -n $previous && $(active_target) == "$current" && -d $ROOT/$previous ]] || die 'rollback target is unavailable or inconsistent'
-  render_artifacts "$ROOT/$previous"; switch "$previous" "$current"
+  transaction_status=0; transactional_switch "$ROOT/$previous" "$previous" "$current" || transaction_status=$?
+  if ((transaction_status)); then
+    ((transaction_status == 2)) && die "rollback switch failed; current deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
+    die 'rollback switch failed; current deployment restored'
+  fi
   if ! restart_verify; then
-    switch "$current" "$previous" || die 'rollback readiness failed; current deployment state recovery failed'
-    render_artifacts "$ROOT/$current" || die 'rollback readiness failed; current deployment artifact recovery failed'
+    transaction_status=0; transactional_switch "$ROOT/$current" "$current" "$previous" || transaction_status=$?
+    if ((transaction_status)); then
+      ((transaction_status == 2)) && die "rollback readiness failed; current deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
+      die 'rollback readiness failed; current deployment switch recovery failed'
+    fi
     restart_verify || die 'rollback readiness failed; current deployment recovery verification failed'
     die 'rollback readiness failed; current deployment restored and verified'
   fi
@@ -181,11 +242,18 @@ done < <(find -P "$STAGING" -type l -print0)
 find -P "$STAGING" -type d -exec chmod 0555 {} +; find -P "$STAGING" -type f -exec chmod 0444 {} +
 mv -T "$STAGING" "$RELEASE"; STAGING=''; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
 if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then prior_previous=$(<"$DEPLOY_STATE/previous-target"); fi
-render_artifacts "$RELEASE"; switch "releases/$RESOLVED" "$previous"
+transaction_status=0; transactional_switch "$RELEASE" "releases/$RESOLVED" "$previous" || transaction_status=$?
+if ((transaction_status)); then
+  ((transaction_status == 2)) && die "deployment switch failed; previous deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
+  die 'deployment switch failed; previous deployment restored'
+fi
 if ! restart_verify; then
   if [[ -n $previous ]]; then
-    switch "$previous" "$prior_previous" || die 'activation readiness failed; previous deployment state recovery failed'
-    render_artifacts "$ROOT/$previous" || die 'activation readiness failed; previous deployment artifact recovery failed'
+    transaction_status=0; transactional_switch "$ROOT/$previous" "$previous" "$prior_previous" || transaction_status=$?
+    if ((transaction_status)); then
+      ((transaction_status == 2)) && die "activation readiness failed; previous deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
+      die 'activation readiness failed; previous deployment switch recovery failed'
+    fi
     restart_verify || die 'activation readiness failed; previous deployment recovery verification failed'
     die 'activation readiness failed; previous deployment restored and verified'
   fi
