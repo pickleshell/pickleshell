@@ -130,9 +130,13 @@ render_artifacts() {
   for backup in "${backup_files[@]}"; do rm -f -- "$backup"; done
 }
 restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
+RESTORE_DISABLED_ON_FIRST_FAILURE=0
 cleanup_failed_first_activation() {
   local failures=() path
   "$SYSTEMCTL" stop "$SERVICE" >/dev/null 2>&1 || failures+=(service-stop)
+  if ((RESTORE_DISABLED_ON_FIRST_FAILURE)); then
+    "$SYSTEMCTL" disable "$SERVICE" >/dev/null 2>&1 || failures+=(service-disable)
+  fi
   for path in \
     "$UNITS_DIR/$SERVICE" \
     "$WRAPPER_DIR/backend-wrapper" \
@@ -189,5 +193,14 @@ if ! restart_verify; then
     die "activation readiness failed; first-activation cleanup failed (${FIRST_ACTIVATION_CLEANUP_FAILURES:-unknown})"
   fi
   die 'activation readiness failed; first activation cleaned up'
+fi
+if [[ -z $previous ]]; then
+  if ! "$SYSTEMCTL" is-enabled "$SERVICE" >/dev/null 2>&1; then RESTORE_DISABLED_ON_FIRST_FAILURE=1; fi
+  if ! "$SYSTEMCTL" enable "$SERVICE"; then
+    if ! cleanup_failed_first_activation; then
+      die "activation enablement failed; first-activation cleanup failed (${FIRST_ACTIVATION_CLEANUP_FAILURES:-unknown})"
+    fi
+    die 'activation enablement failed; first activation cleaned up'
+  fi
 fi
 printf 'memory-release: active release: releases/%s\n' "$RESOLVED"

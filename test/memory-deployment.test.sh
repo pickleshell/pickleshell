@@ -93,6 +93,17 @@ set -Eeuo pipefail
 printf '%s\n' "$*" >> "${FAKE_SYSTEMD_ROOT:?}/systemctl.calls"
 case "$1" in
   daemon-reload|is-active) exit 0 ;;
+  is-enabled)
+    [[ -f ${FAKE_SYSTEMD_ROOT:?}/enabled/$2 ]]
+    ;;
+  enable)
+    mkdir -p -- "${FAKE_SYSTEMD_ROOT:?}/enabled"
+    touch "${FAKE_SYSTEMD_ROOT}/enabled/$2"
+    [[ ! -f ${FAKE_SYSTEMD_ROOT}/fail-enable ]]
+    ;;
+  disable)
+    rm -f -- "${FAKE_SYSTEMD_ROOT:?}/enabled/$2"
+    ;;
   stop)
     pidfile=${FAKE_SYSTEMD_ROOT:?}/backend.pid
     if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; wait "$(<"$pidfile")" 2>/dev/null || true; fi
@@ -169,9 +180,10 @@ printf '%s\n' \
   'PICKLESHELL_MEMORY_ROLE=agent' \
   'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
   'PICKLESHELL_MEMORY_SCOPE=fixture-scope' \
-  'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:1' \
+  "PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:$FIRST_PORT" \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$FIRST_FAILURE/log/audit.jsonl" > "$FIRST_FAILURE/config/mcp.env"
 chmod 0640 "$FIRST_FAILURE/config/backend.env" "$FIRST_FAILURE/config/mcp.env"
+touch "$FIRST_FAILURE/fail-enable"
 if FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --source "$FIXTURE" --root "$FIRST_FAILURE/app" --commit "$SHA1" \
   --config-root "$FIRST_FAILURE/config" --state-root "$FIRST_FAILURE/state" --log-root "$FIRST_FAILURE/log" \
@@ -184,7 +196,7 @@ if FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
   echo 'failed first activation unexpectedly succeeded' >&2
   exit 1
 fi
-grep -q 'activation readiness failed; first activation cleaned up' "$TMP/first-failure.out"
+grep -q 'activation enablement failed; first activation cleaned up' "$TMP/first-failure.out"
 ! grep -q 'memory-release: active release\|memory-release: rolled back' "$TMP/first-failure.out"
 test -f "$FIRST_FAILURE/backend.pid" || { cat "$TMP/first-failure.out" >&2; exit 1; }
 FIRST_FAILURE_PID=$(<"$FIRST_FAILURE/backend.pid")
@@ -205,9 +217,13 @@ test -f "$FIRST_FAILURE/config/mcp.env"
 test -f "$FIRST_FAILURE/log/audit.jsonl"
 test "$(grep -c '^daemon-reload$' "$FIRST_FAILURE/systemctl.calls")" -eq 2
 grep -q '^stop pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
+test ! -e "$FIRST_FAILURE/enabled/pickleshell-memory-first-failure.service"
+grep -q '^disable pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
 
 install_release "$SHA1"
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
+test -f "$PREFIX/enabled/pickleshell-memory-isolated.service"
+test "$(grep -c '^enable pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls")" -eq 1
 test "$(stat -c %a "$PREFIX/config/backend.env")" = 640
 test "$(stat -c %a "$PREFIX/config/mcp.env")" = 640
 test "$(stat -c %a "$PREFIX/log/audit.jsonl")" = 660
@@ -311,6 +327,8 @@ git -C "$FIXTURE" commit -qm v2
 SHA2=$(git -C "$FIXTURE" rev-parse HEAD)
 install_release "$SHA2"
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA2"
+test -f "$PREFIX/enabled/pickleshell-memory-isolated.service"
+test "$(grep -c '^enable pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls")" -eq 1
 declare -A V2_HASHES
 for artifact in \
   "$PREFIX/units/pickleshell-memory-isolated.service" \
@@ -346,6 +364,8 @@ V2_RECOVERED_PID=$(<"$PREFIX/backend.pid")
 test "$V2_RECOVERED_PID" != "$V2_PID"
 kill -0 "$V2_RECOVERED_PID"
 "$PREFIX/bin/pickleshell-memory-ready"
+test -f "$PREFIX/enabled/pickleshell-memory-isolated.service"
+! grep -q '^disable pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls"
 ! find "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -maxdepth 1 -type f \( -name '.*.render.*' -o -name '.*.backup.*' \) | grep -q .
 kill "$(<"$PREFIX/backend.pid")" 2>/dev/null || true
 printf 'memory deployment E2E: ok\n'
