@@ -112,6 +112,80 @@ test ! -e "$WRITABLE_CONFIG_CASE/logrotate"
 test ! -e "$WRITABLE_CONFIG_CASE/wrappers"
 grep -q 'operator config path is writable by the service identity' "$WRITABLE_CONFIG_CASE/output"
 
+command -v getfacl >/dev/null || { echo 'getfacl is required for deployment tests' >&2; exit 1; }
+command -v setfacl >/dev/null || { echo 'setfacl is required for deployment tests' >&2; exit 1; }
+id usbmux >/dev/null 2>&1 || { echo 'usbmux test identity is required for deployment tests' >&2; exit 1; }
+getent group plugdev >/dev/null || { echo 'plugdev test group is required for deployment tests' >&2; exit 1; }
+ACL_TMP="$TMP/production-acl"
+ACL_BIN="$TMP/acl-bin"
+mkdir -p -- "$ACL_TMP" "$ACL_BIN"
+REAL_STAT=$(command -v stat)
+REAL_GETFACL=$(command -v getfacl)
+cat > "$ACL_BIN/stat" <<EOF
+#!/usr/bin/env bash
+if [[ \${*: -1} == /tmp && \$* == *'%u %g %a'* ]]; then
+  printf '0 0 755\n'
+  exit 0
+fi
+exec '$REAL_STAT' "\$@"
+EOF
+chmod 0755 "$ACL_BIN/stat"
+run_production_acl_case() {
+  local name=$1 acl=$2 expected=$3 case_root
+  case_root="$ACL_TMP/$name"
+  mkdir -p -- "$case_root/config"
+  printf 'BACKEND_TEST=1\n' > "$case_root/config/backend.env"
+  printf '%s\n' \
+    'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
+    'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+    "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
+  chgrp plugdev "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  setfacl -m "$acl" "$case_root/config"
+  if PATH="$ACL_BIN:$PATH" "$FIXTURE/deploy/memory-release.sh" \
+    --profile production --root "$case_root/app" --config-root "$case_root/config" \
+    --state-root "$case_root/state" --log-root "$case_root/log" \
+    --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" \
+    --wrapper-dir "$case_root/wrappers" --backend-executable "$PREFLIGHT/bin/node" \
+    --node-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl" \
+    --service-user usbmux --service-group plugdev \
+    --service pickleshell-memory-acl.service --rollback > "$case_root/output" 2>&1; then
+    echo "production ACL case $name unexpectedly succeeded" >&2
+    exit 1
+  fi
+  if [[ $expected == unavailable ]]; then
+    if [[ -e $case_root/app || -e $case_root/state || -e $case_root/log ]] ||
+       ! grep -q 'cannot inspect operator config ACLs' "$case_root/output"; then
+      echo "production ACL case $name did not fail closed before mutation" >&2
+      exit 1
+    fi
+  elif [[ $expected == reject ]]; then
+    if [[ -e $case_root/app || -e $case_root/state || -e $case_root/log ]] ||
+       ! grep -q 'operator config path is writable by the service identity' "$case_root/output"; then
+      echo "production ACL case $name was not rejected before mutation" >&2
+      exit 1
+    fi
+  else
+    ! grep -q 'operator config path is writable by the service identity' "$case_root/output"
+    test ! -e "$case_root/app"
+  fi
+}
+cat > "$ACL_BIN/getfacl" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod 0755 "$ACL_BIN/getfacl"
+run_production_acl_case unavailable 'u:usbmux:r-x' unavailable
+cat > "$ACL_BIN/getfacl" <<EOF
+#!/usr/bin/env bash
+exec '$REAL_GETFACL' "\$@"
+EOF
+chmod 0755 "$ACL_BIN/getfacl"
+run_production_acl_case named-user 'u:usbmux:rwx' reject
+run_production_acl_case named-group 'g:plugdev:rwx' reject
+run_production_acl_case default-named-user 'd:u:usbmux:rwx' reject
+run_production_acl_case safe 'u:usbmux:r-x,d:u:usbmux:r-x' allow
+
 for artifact in "$FIXTURE"/deploy/systemd/*.in; do
   printf '\n# release-marker: v1\n' >> "$artifact"
 done
@@ -573,8 +647,9 @@ done
 V2_PID=$(<"$PREFIX/backend.pid")
 RESTARTS_BEFORE=$(grep -c '^restart pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls")
 
-assert_unsafe_previous_target_rejected() {
-  local name=$1 target=$2 setup=${3:-none} fake_sha fake_path calls_before artifact
+assert_unsafe_rollback_target_rejected() {
+  local name=$1 subject=$2 target=$3 setup=${4:-none} fake_sha fake_path calls_before artifact
+  local root_before releases_before deploy_state_before state_root_before log_root_before audit_before
   fake_sha=${target#releases/}; fake_path="$PREFIX/app/$target"
   case $setup in
     symlink-release)
@@ -590,7 +665,19 @@ assert_unsafe_previous_target_rejected() {
       ln -s "$PREFIX/rollback-marker-victim" "$fake_path/.release-sha"
       ;;
   esac
-  printf '%s\n' "$target" > "$PREFIX/app/state/previous-target"
+  case $subject in
+    active) ln -sfn "$target" "$PREFIX/app/active" ;;
+    current) printf '%s\n' "$target" > "$PREFIX/app/state/current-target" ;;
+    previous) printf '%s\n' "$target" > "$PREFIX/app/state/previous-target" ;;
+  esac
+  chmod 0711 "$PREFIX/app" "$PREFIX/app/releases" "$PREFIX/app/state" "$PREFIX/state" "$PREFIX/log"
+  chmod 0600 "$PREFIX/log/audit.jsonl"
+  root_before=$(stat -c '%F:%a:%u:%g' "$PREFIX/app")
+  releases_before=$(stat -c '%F:%a:%u:%g' "$PREFIX/app/releases")
+  deploy_state_before=$(stat -c '%F:%a:%u:%g' "$PREFIX/app/state")
+  state_root_before=$(stat -c '%F:%a:%u:%g' "$PREFIX/state")
+  log_root_before=$(stat -c '%F:%a:%u:%g' "$PREFIX/log")
+  audit_before=$(stat -c '%F:%a:%u:%g:%s' "$PREFIX/log/audit.jsonl"):$(sha256sum "$PREFIX/log/audit.jsonl" | cut -d' ' -f1)
   calls_before=$(wc -l < "$PREFIX/systemctl.calls")
   if FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
     --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
@@ -601,14 +688,25 @@ assert_unsafe_previous_target_rejected() {
     echo "unsafe rollback target $name unexpectedly succeeded" >&2
     exit 1
   fi
-  if ! grep -q 'managed release target is unsafe: previous' "$TMP/unsafe-rollback-$name.out"; then
+  if ! grep -q "managed release target is unsafe: $subject" "$TMP/unsafe-rollback-$name.out"; then
     echo "unsafe rollback target $name was not rejected by managed-release validation" >&2
     exit 1
   fi
+  if [[ $(stat -c '%F:%a:%u:%g' "$PREFIX/app") != "$root_before" ||
+        $(stat -c '%F:%a:%u:%g' "$PREFIX/app/releases") != "$releases_before" ||
+        $(stat -c '%F:%a:%u:%g' "$PREFIX/app/state") != "$deploy_state_before" ||
+        $(stat -c '%F:%a:%u:%g' "$PREFIX/state") != "$state_root_before" ||
+        $(stat -c '%F:%a:%u:%g' "$PREFIX/log") != "$log_root_before" ||
+        $(stat -c '%F:%a:%u:%g:%s' "$PREFIX/log/audit.jsonl"):$(sha256sum "$PREFIX/log/audit.jsonl" | cut -d' ' -f1) != "$audit_before" ]]; then
+    echo "unsafe rollback target $name mutated deployment state before rejection" >&2
+    exit 1
+  fi
   test "$(wc -l < "$PREFIX/systemctl.calls")" -eq "$calls_before"
-  test "$(readlink "$PREFIX/app/active")" = "releases/$SHA2"
-  test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA2"
-  test "$(<"$PREFIX/app/state/previous-target")" = "$target"
+  case $subject in
+    active) test "$(readlink "$PREFIX/app/active")" = "$target" ;;
+    current) test "$(<"$PREFIX/app/state/current-target")" = "$target" ;;
+    previous) test "$(<"$PREFIX/app/state/previous-target")" = "$target" ;;
+  esac
   test "$(<"$PREFIX/backend.pid")" = "$V2_PID"; kill -0 "$V2_PID"
   for artifact in "${!V2_HASHES[@]}"; do
     test "$(sha256sum "$artifact" | cut -d' ' -f1)" = "${V2_HASHES[$artifact]}"
@@ -616,17 +714,23 @@ assert_unsafe_previous_target_rejected() {
   case $setup in
     symlink-release|missing-marker|mismatched-marker|symlink-marker) rm -rf -- "$fake_path" ;;
   esac
+  ln -sfn "releases/$SHA2" "$PREFIX/app/active"
+  printf 'releases/%s\n' "$SHA2" > "$PREFIX/app/state/current-target"
   printf 'releases/%s\n' "$SHA1" > "$PREFIX/app/state/previous-target"
+  chmod 0750 "$PREFIX/app" "$PREFIX/app/releases" "$PREFIX/app/state" "$PREFIX/state" "$PREFIX/log"
+  chmod 0660 "$PREFIX/log/audit.jsonl"
 }
 
 FAKE_RELEASE_SHA=0000000000000000000000000000000000000001
-assert_unsafe_previous_target_rejected traversal 'releases/../rollback-victim'
-assert_unsafe_previous_target_rejected nested "releases/$SHA1/nested"
-assert_unsafe_previous_target_rejected invalid-sha 'releases/not-a-full-sha'
-assert_unsafe_previous_target_rejected symlink-release "releases/$FAKE_RELEASE_SHA" symlink-release
-assert_unsafe_previous_target_rejected missing-marker "releases/$FAKE_RELEASE_SHA" missing-marker
-assert_unsafe_previous_target_rejected mismatched-marker "releases/$FAKE_RELEASE_SHA" mismatched-marker
-assert_unsafe_previous_target_rejected symlink-marker "releases/$FAKE_RELEASE_SHA" symlink-marker
+assert_unsafe_rollback_target_rejected traversal previous 'releases/../rollback-victim'
+assert_unsafe_rollback_target_rejected nested previous "releases/$SHA1/nested"
+assert_unsafe_rollback_target_rejected invalid-sha previous 'releases/not-a-full-sha'
+assert_unsafe_rollback_target_rejected invalid-current current 'releases/not-a-full-sha'
+assert_unsafe_rollback_target_rejected invalid-active active 'releases/not-a-full-sha'
+assert_unsafe_rollback_target_rejected symlink-release previous "releases/$FAKE_RELEASE_SHA" symlink-release
+assert_unsafe_rollback_target_rejected missing-marker previous "releases/$FAKE_RELEASE_SHA" missing-marker
+assert_unsafe_rollback_target_rejected mismatched-marker previous "releases/$FAKE_RELEASE_SHA" mismatched-marker
+assert_unsafe_rollback_target_rejected symlink-marker previous "releases/$FAKE_RELEASE_SHA" symlink-marker
 
 printf 'releases/%s\n' "$SHA1" > "$PREFIX/fail-active-target"
 if FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \

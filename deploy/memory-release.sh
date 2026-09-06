@@ -49,11 +49,14 @@ for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGR
 service_uid=$(id -u "$SERVICE_USER") || die 'service user does not exist'
 service_gid=$(getent group "$SERVICE_GROUP" | cut -d: -f3); [[ -n $service_gid ]] || die 'service group does not exist'
 validate_operator_config_path() {
-  local path=$CONFIG_ROOT component current='' owner group mode mode_value operator_uid
+  local path=$CONFIG_ROOT component current='' owner group mode mode_value operator_uid acl
   local -a components service_gids
   operator_uid=$(id -u)
   read -r -a service_gids <<< "$(id -G "$SERVICE_USER")"
   [[ " ${service_gids[*]} " == *" $service_gid "* ]] || service_gids+=("$service_gid")
+  ACL_INSPECTOR=$(command -v getfacl) || die 'cannot inspect operator config ACLs'
+  [[ $ACL_INSPECTOR = /* && -f $ACL_INSPECTOR && -x $ACL_INSPECTOR && ! -L $ACL_INSPECTOR ]] ||
+    die 'cannot inspect operator config ACLs'
   IFS=/ read -r -a components <<< "${path#/}"
   components=("" "${components[@]}")
   for component in "${components[@]}"; do
@@ -70,7 +73,48 @@ validate_operator_config_path() {
     fi
     ((!(mode_value & 0002))) || die 'operator config path is writable by the service identity'
     [[ $owner != "$service_uid" ]] || die 'operator config path has an untrusted owner'
+    acl=$("$ACL_INSPECTOR" -cpnEP -- "$current") || die 'cannot inspect operator config ACLs'
+    operator_config_acl_allows_service_write "$acl" "$owner" "$group" "${service_gids[*]}" &&
+      die 'operator config path is writable by the service identity'
   done
+}
+operator_config_acl_allows_service_write() {
+  local acl=$1 owner=$2 owning_group=$3 gids=$4 line entry scope kind qualifier perms extra
+  local access_mask=rwx default_mask=rwx applies=0 mask
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    case $line in
+      mask::[r-][w-][x-]) access_mask=${line#mask::} ;;
+      default:mask::[r-][w-][x-]) default_mask=${line#default:mask::} ;;
+    esac
+  done <<< "$acl"
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    scope=access; entry=$line
+    if [[ $entry == default:* ]]; then scope=default; entry=${entry#default:}; fi
+    IFS=: read -r kind qualifier perms extra <<< "$entry"
+    [[ -z ${extra:-} && $perms == [r-][w-][x-] ]] || die 'cannot inspect operator config ACLs'
+    case $kind:$qualifier in
+      mask:|user:|group:|other:) ;;
+      user:[0-9]*|group:[0-9]*) [[ $qualifier =~ ^[0-9]+$ ]] || die 'cannot inspect operator config ACLs' ;;
+      *) die 'cannot inspect operator config ACLs' ;;
+    esac
+    [[ $kind != mask ]] || continue
+    applies=0
+    case $kind:$qualifier in
+      user:) [[ $owner == "$service_uid" ]] && applies=1 ;;
+      user:*) [[ $qualifier == "$service_uid" ]] && applies=1 ;;
+      group:) [[ " $gids " == *" $owning_group "* ]] && applies=1 ;;
+      group:*) [[ " $gids " == *" $qualifier "* ]] && applies=1 ;;
+      other:) applies=1 ;;
+    esac
+    ((applies)) || continue
+    [[ $perms == *w* ]] || continue
+    if [[ $kind == user && -z $qualifier || $kind == other ]]; then return 0; fi
+    [[ $scope == access ]] && mask=$access_mask || mask=$default_mask
+    [[ $mask != *w* ]] || return 0
+  done <<< "$acl"
+  return 1
 }
 if [[ $PROFILE == production ]]; then validate_operator_config_path; fi
 for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"; do [[ ! -L $path ]] || die "sensitive path is a symlink: $path"; done
@@ -103,6 +147,16 @@ managed_release_target() {
 optional_managed_release_target() {
   if [[ -z $1 ]]; then printf ''; else managed_release_target "$1" "$2"; fi
 }
+active_target() { [[ -L $ACTIVE ]] || return 1; local target; target=$(readlink -- "$ACTIVE") || die 'active target is unsafe'; managed_release_target "$target" active; }
+prevalidate_rollback() {
+  local current_value previous_value
+  validate_internal_paths
+  current_value=$(<"$DEPLOY_STATE/current-target") || die 'current target is missing'
+  previous_value=$(<"$DEPLOY_STATE/previous-target") || die 'previous target is missing'
+  current=$(managed_release_target "$current_value" current)
+  previous=$(managed_release_target "$previous_value" previous)
+  [[ $(active_target) == "$current" ]] || die 'rollback target is unavailable or inconsistent'
+}
 validate_internal_paths
 [[ -f $NODE_EXECUTABLE && -x $NODE_EXECUTABLE && ! -L $NODE_EXECUTABLE ]] || die 'node executable must be a regular executable'
 [[ -f $BACKEND_EXECUTABLE && -x $BACKEND_EXECUTABLE && ! -L $BACKEND_EXECUTABLE ]] || die 'backend executable must be a regular executable'
@@ -115,6 +169,7 @@ done
 [[ $(grep -c '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE") == 1 ]] || die 'mcp.env must define PICKLESHELL_MEMORY_AUDIT_LOG exactly once'
 configured_audit=$(grep '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE" | cut -d= -f2-)
 [[ $configured_audit == "$AUDIT_LOG" ]] || die 'mcp.env audit log must match the managed audit path'
+if ((ROLLBACK)); then prevalidate_rollback; fi
 mkdir -p -- "$ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"
 ensure_internal_directory "$RELEASES" releases
 ensure_internal_directory "$DEPLOY_STATE" state
@@ -124,7 +179,6 @@ if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT"
 [[ ! -e $AUDIT_LOG || ( -f $AUDIT_LOG && ! -L $AUDIT_LOG ) ]] || die 'audit log path is unsafe'
 if [[ ! -e $AUDIT_LOG ]]; then install -m 0660 /dev/null "$AUDIT_LOG"; else chmod 0660 "$AUDIT_LOG"; fi
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$AUDIT_LOG"; fi
-active_target() { [[ -L $ACTIVE ]] || return 1; local target; target=$(readlink -- "$ACTIVE") || die 'active target is unsafe'; managed_release_target "$target" active; }
 SWITCH_TEMP_PATHS=()
 switch() {
   local target=$1 previous=$2 previous_tmp current_tmp active_tmp="$ROOT/.active.switch.$$"
@@ -315,10 +369,6 @@ cleanup_failed_first_activation() {
   fi
 }
 if ((ROLLBACK)); then
-  validate_internal_paths
-  current=$(managed_release_target "$(<"$DEPLOY_STATE/current-target")" current)
-  previous=$(managed_release_target "$(<"$DEPLOY_STATE/previous-target")" previous)
-  [[ $(active_target) == "$current" ]] || die 'rollback target is unavailable or inconsistent'
   transaction_status=0; transactional_switch "$ROOT/$previous" "$previous" "$current" || transaction_status=$?
   if ((transaction_status)); then
     ((transaction_status == 2)) && die "rollback switch failed; current deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
