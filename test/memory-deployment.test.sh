@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+trap 'echo "memory deployment test failed at line $LINENO" >&2' ERR
 
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 TMP=$(mktemp -d)
-trap 'find -P "$TMP" -type d -exec chmod u+w {} + 2>/dev/null || true; rm -rf -- "$TMP"' EXIT
+trap 'for pidfile in $(find "$TMP" -name backend.pid -o -name broker.pid); do kill "$(<"$pidfile")" 2>/dev/null || true; done; find -P "$TMP" -type d -exec chmod u+w {} + 2>/dev/null || true; rm -rf -- "$TMP"' EXIT
 FIXTURE="$TMP/source"
 PREFIX="$TMP/isolated"
 mkdir -p -- "$FIXTURE/deploy/systemd" "$FIXTURE/pickleshell-memory-mcp" "$FIXTURE/pickleshell-memory-broker" "$PREFIX/bin" "$PREFIX/config" "$PREFIX/log" "$PREFIX/units" "$PREFIX/logrotate"
@@ -42,7 +43,7 @@ preflight_args=(
   --state-root "$PREFLIGHT/state" --log-root "$PREFLIGHT/log" --units-dir "$PREFLIGHT/units"
   --logrotate-dir "$PREFLIGHT/logrotate" --wrapper-dir "$PREFLIGHT/wrappers"
   --backend-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl"
-  --service-user isolated-memory --service-group isolated-memory
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user isolated-memory --service-group isolated-memory
   --service pickleshell-memory-isolated.service --rollback
 )
 if "$FIXTURE/deploy/memory-release.sh" "${preflight_args[@]}" --config-root /etc/pickleshell-memory >"$TMP/isolated-production-path.out" 2>&1; then
@@ -55,6 +56,25 @@ if "$FIXTURE/deploy/memory-release.sh" "${preflight_args[@]}" --service picklesh
   exit 1
 fi
 grep -q 'isolated profile rejects production service identity' "$TMP/isolated-production-service.out"
+for invalid in omitted production same-service; do
+  invalid_args=("${preflight_args[@]}")
+  case $invalid in
+    omitted)
+      # Remove only the explicit broker service pair.
+      invalid_args=(); skip=0
+      for arg in "${preflight_args[@]}"; do
+        if ((skip)); then skip=0; continue; fi
+        if [[ $arg == --broker-service ]]; then skip=1; continue; fi
+        invalid_args+=("$arg")
+      done ;;
+    production) invalid_args+=(--broker-service pickleshell-memory-broker.service) ;;
+    same-service) invalid_args+=(--broker-service pickleshell-memory-isolated.service) ;;
+  esac
+  if "$FIXTURE/deploy/memory-release.sh" "${invalid_args[@]}" >"$TMP/broker-$invalid.out" 2>&1; then
+    echo "invalid isolated broker identity accepted: $invalid" >&2; exit 1
+  fi
+  test ! -e "$TMP/systemctl-called"
+done
 test ! -e "$PREFLIGHT/app"
 test ! -e "$PREFLIGHT/state"
 test ! -e "$PREFLIGHT/log"
@@ -75,13 +95,14 @@ printf '%s\n' \
   'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$ANCESTOR_CASE/deploy/log/audit.jsonl" > "$ANCESTOR_VICTIM/config/mcp.env"
 chmod 0640 "$ANCESTOR_VICTIM/config/backend.env" "$ANCESTOR_VICTIM/config/mcp.env"
+chmod 0600 "$ANCESTOR_VICTIM/config/backend.env"
 if "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --root "$ANCESTOR_CASE/deploy/app" --config-root "$ANCESTOR_CASE/deploy/config" \
   --state-root "$ANCESTOR_CASE/deploy/state" --log-root "$ANCESTOR_CASE/deploy/log" \
   --units-dir "$ANCESTOR_CASE/deploy/units" --logrotate-dir "$ANCESTOR_CASE/deploy/logrotate" \
   --wrapper-dir "$ANCESTOR_CASE/deploy/wrappers" --backend-executable "$ANCESTOR_CASE/deploy/bin/node" \
   --node-executable "$ANCESTOR_CASE/deploy/bin/node" --systemctl "$ANCESTOR_CASE/deploy/bin/systemctl" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" \
   --service pickleshell-memory-symlink-ancestor.service --rollback > "$ANCESTOR_CASE/output" 2>&1; then
   echo 'symlinked deployment ancestor unexpectedly succeeded' >&2
   exit 1
@@ -99,13 +120,14 @@ printf '%s\n' \
   'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$WRITABLE_CONFIG_CASE/log/audit.jsonl" > "$WRITABLE_CONFIG_CASE/config/mcp.env"
 chmod 0640 "$WRITABLE_CONFIG_CASE/config/backend.env" "$WRITABLE_CONFIG_CASE/config/mcp.env"
+chmod 0600 "$WRITABLE_CONFIG_CASE/config/backend.env"
 if "$FIXTURE/deploy/memory-release.sh" \
   --profile production --root "$WRITABLE_CONFIG_CASE/app" --config-root "$WRITABLE_CONFIG_CASE/config" \
   --state-root "$WRITABLE_CONFIG_CASE/state" --log-root "$WRITABLE_CONFIG_CASE/log" \
   --units-dir "$WRITABLE_CONFIG_CASE/units" --logrotate-dir "$WRITABLE_CONFIG_CASE/logrotate" \
   --wrapper-dir "$WRITABLE_CONFIG_CASE/wrappers" --backend-executable "$PREFLIGHT/bin/node" \
   --node-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" \
   --service pickleshell-memory-writable-config.service --rollback > "$WRITABLE_CONFIG_CASE/output" 2>&1; then
   echo 'writable production config root unexpectedly succeeded' >&2
   exit 1
@@ -148,15 +170,18 @@ run_production_acl_case() {
     "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
   chgrp plugdev "$case_root/config/backend.env" "$case_root/config/mcp.env"
   chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  chmod 0600 "$case_root/config/backend.env"
   setfacl -m "$acl" "$case_root/config"
   [[ $expected != allow ]] || action_args=()
+  [[ $name != admin-read ]] || setfacl -m u:nobody:r-- "$case_root/config/mcp.env"
+  [[ $name != audit-shared ]] || action_args+=(--audit-group plugdev)
   if PATH="$ACL_BIN:$PATH" "$FIXTURE/deploy/memory-release.sh" \
     --profile production --root "$case_root/app" --config-root "$case_root/config" \
     --state-root "$case_root/state" --log-root "$case_root/log" \
     --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" \
     --wrapper-dir "$case_root/wrappers" --backend-executable "$PREFLIGHT/bin/node" \
     --node-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl" \
-    --service-user usbmux --service-group plugdev \
+    --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user usbmux --service-group plugdev \
     --service pickleshell-memory-acl.service "${action_args[@]}" > "$case_root/output" 2>&1; then
     echo "production ACL case $name unexpectedly succeeded" >&2
     exit 1
@@ -187,7 +212,7 @@ run_production_acl_case unavailable 'u:usbmux:r-x' unavailable
 cat > "$ACL_BIN/getfacl" <<EOF
 #!/usr/bin/env bash
 case "\${*: -1}" in
-  "$ACL_TMP"/*/config) exec '$REAL_GETFACL' "\$@" ;;
+  "$ACL_TMP"/*/config|"$ACL_TMP"/*/config/mcp.env) exec '$REAL_GETFACL' "\$@" ;;
   *) printf 'user::rwx\ngroup::r-x\nother::r-x\n' ;;
 esac
 EOF
@@ -200,6 +225,10 @@ run_production_acl_case default-named-group 'd:g:plugdev:rwx' reject
 run_production_acl_case default-other 'd:o:rwx' reject
 run_production_acl_case safe 'u:usbmux:r-x,d:u:usbmux:r-x' allow
 grep -q 'source and full commit are required' "$ACL_TMP/safe/output"
+run_production_acl_case admin-read 'u:usbmux:r-x' allow
+grep -q 'admin config must not grant extended ACL access' "$ACL_TMP/admin-read/output"
+run_production_acl_case audit-shared 'u:usbmux:r-x' allow
+grep -q 'audit access must use a separate group' "$ACL_TMP/audit-shared/output"
 
 # Recreate the prior safe-ACL fallthrough: without the explicit successful
 # return, production mode under errexit exits 1 without reaching the next gate
@@ -216,6 +245,7 @@ printf '%s\n' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$BROKEN_ACL_CASE/log/audit.jsonl" > "$BROKEN_ACL_CASE/config/mcp.env"
 chgrp plugdev "$BROKEN_ACL_CASE/config/backend.env" "$BROKEN_ACL_CASE/config/mcp.env"
 chmod 0640 "$BROKEN_ACL_CASE/config/backend.env" "$BROKEN_ACL_CASE/config/mcp.env"
+chmod 0600 "$BROKEN_ACL_CASE/config/backend.env"
 setfacl -m 'u:usbmux:r-x,d:u:usbmux:r-x' "$BROKEN_ACL_CASE/config"
 if PATH="$ACL_BIN:$PATH" "$BROKEN_ACL_SCRIPT" \
   --profile production --root "$BROKEN_ACL_CASE/app" --config-root "$BROKEN_ACL_CASE/config" \
@@ -223,7 +253,7 @@ if PATH="$ACL_BIN:$PATH" "$BROKEN_ACL_SCRIPT" \
   --units-dir "$BROKEN_ACL_CASE/units" --logrotate-dir "$BROKEN_ACL_CASE/logrotate" \
   --wrapper-dir "$BROKEN_ACL_CASE/wrappers" --backend-executable "$PREFLIGHT/bin/node" \
   --node-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl" \
-  --service-user usbmux --service-group plugdev \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user usbmux --service-group plugdev \
   --service pickleshell-memory-acl.service > "$BROKEN_ACL_CASE/output" 2>&1; then
   echo 'broken safe ACL validator unexpectedly succeeded' >&2
   exit 1
@@ -255,6 +285,7 @@ printf '%s\n' 'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=lock-fix
   'PICKLESHELL_MEMORY_SCOPE=lock-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$LOCK_CASE/log/audit.jsonl" > "$LOCK_CASE/config/mcp.env"
 chmod 0640 "$LOCK_CASE/config/backend.env" "$LOCK_CASE/config/mcp.env"
+chmod 0600 "$LOCK_CASE/config/backend.env"
 prior_sha=1111111111111111111111111111111111111111
 mkdir -- "$LOCK_CASE/app/releases/$prior_sha"
 printf '%s\n' "$prior_sha" > "$LOCK_CASE/app/releases/$prior_sha/.release-sha"
@@ -269,7 +300,7 @@ for action in deploy rollback; do
   args=(--profile isolated --root "$LOCK_CASE/app" --config-root "$LOCK_CASE/config" --state-root "$LOCK_CASE/state"
     --log-root "$LOCK_CASE/log" --units-dir "$LOCK_CASE/units" --logrotate-dir "$LOCK_CASE/logrotate"
     --wrapper-dir "$LOCK_CASE/bin" --backend-executable "$LOCK_CASE/bin/node" --node-executable "$LOCK_CASE/bin/node"
-    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-lock.service
+    --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-lock.service
     --systemctl "$LOCK_CASE/bin/systemctl")
   [[ $action == deploy ]] && args+=(--source "$FIXTURE" --commit "$SHA1") || args+=(--rollback)
   if "$FIXTURE/deploy/memory-release.sh" "${args[@]}" >"$LOCK_CASE/$action.out" 2>&1; then
@@ -289,6 +320,7 @@ for kind in symlink directory mode owner; do
   cp -- "$LOCK_CASE/config/backend.env" "$unsafe/config/backend.env"
   sed "s|$LOCK_CASE/log|$unsafe/log|" "$LOCK_CASE/config/mcp.env" > "$unsafe/config/mcp.env"
   chmod 0640 "$unsafe/config/"*.env
+  chmod 0600 "$unsafe/config/backend.env"
   case $kind in
     symlink) ln -s "$unsafe/config" "$unsafe/app.deploy.lock" ;;
     directory) mkdir "$unsafe/app.deploy.lock" ;;
@@ -306,7 +338,7 @@ EOF
   if PATH="$unsafe/bin:$PATH" "$FIXTURE/deploy/memory-release.sh" --profile isolated --source "$FIXTURE" --root "$unsafe/app" --commit "$SHA1" \
     --config-root "$unsafe/config" --state-root "$unsafe/state" --log-root "$unsafe/log" --units-dir "$unsafe/units" \
     --logrotate-dir "$unsafe/logrotate" --wrapper-dir "$unsafe/bin" --backend-executable "$unsafe/bin/node" \
-    --node-executable "$unsafe/bin/node" --service-user "$(id -un)" --service-group "$(id -gn)" \
+    --node-executable "$unsafe/bin/node" --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" \
     --service pickleshell-memory-unsafe-lock.service --systemctl "$unsafe/bin/systemctl" >"$unsafe/output" 2>&1; then
     echo "unsafe lock $kind unexpectedly accepted" >&2; exit 1
   fi
@@ -327,6 +359,7 @@ printf '%s\n' \
   'PICKLESHELL_MEMORY_SCOPE=collision-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$COLLISION/log/audit.jsonl" > "$COLLISION/config/mcp.env"
 chmod 0640 "$COLLISION/config/backend.env" "$COLLISION/config/mcp.env"
+chmod 0600 "$COLLISION/config/backend.env"
 REAL_MKDIR=$(command -v mkdir)
 cat > "$COLLISION/bin/mkdir" <<EOF
 #!/usr/bin/env bash
@@ -344,7 +377,7 @@ if PATH="$COLLISION/bin:$PATH" "$FIXTURE/deploy/memory-release.sh" \
   --config-root "$COLLISION/config" --state-root "$COLLISION/state" --log-root "$COLLISION/log" \
   --units-dir "$COLLISION/units" --logrotate-dir "$COLLISION/logrotate" --wrapper-dir "$COLLISION/bin" \
   --backend-executable "$COLLISION/bin/node" --node-executable "$COLLISION/bin/node" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-collision.service \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-collision.service \
   --systemctl "$COLLISION/bin/systemctl" >"$COLLISION/output" 2>&1; then
   echo 'atomic final release collision unexpectedly succeeded' >&2
   exit 1
@@ -368,6 +401,7 @@ printf '%s\n' 'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=replacem
   'PICKLESHELL_MEMORY_SCOPE=replacement-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$REPLACEMENT/log/audit.jsonl" > "$REPLACEMENT/config/mcp.env"
 chmod 0640 "$REPLACEMENT/config/"*.env
+chmod 0600 "$REPLACEMENT/config/backend.env"
 REAL_NPM=$(command -v npm)
 cat > "$REPLACEMENT/bin/npm" <<EOF
 #!/usr/bin/env bash
@@ -382,7 +416,7 @@ if PATH="$REPLACEMENT/bin:$PATH" "$FIXTURE/deploy/memory-release.sh" --profile i
   --root "$REPLACEMENT/app" --commit "$SHA1" --config-root "$REPLACEMENT/config" --state-root "$REPLACEMENT/state" \
   --log-root "$REPLACEMENT/log" --units-dir "$REPLACEMENT/units" --logrotate-dir "$REPLACEMENT/logrotate" \
   --wrapper-dir "$REPLACEMENT/bin" --backend-executable "$REPLACEMENT/bin/node" --node-executable "$REPLACEMENT/bin/node" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-replacement.service \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-replacement.service \
   --systemctl "$REPLACEMENT/bin/systemctl" >"$REPLACEMENT/output" 2>&1; then
   echo 'post-claim release replacement unexpectedly succeeded' >&2; exit 1
 fi
@@ -399,20 +433,23 @@ const http = require('node:http');
 const port = Number(process.env.FAKE_BACKEND_PORT);
 http.createServer((req, res) => {
   res.setHeader('content-type', 'application/json');
+  if (process.env.FAKE_BACKEND_TOKEN && req.headers.authorization !== `Bearer ${process.env.FAKE_BACKEND_TOKEN}`) { res.writeHead(401); res.end('{}'); return; }
   if (req.url === '/health') res.end(JSON.stringify({status:'ok', provider:'fixture'}));
   else { res.statusCode = 404; res.end(JSON.stringify({error:'not found'})); }
 }).listen(port, '127.0.0.1');
 EOF
 chmod 0755 "$PREFIX/bin/backend.js"
 PORT=$((20000 + RANDOM % 20000))
-printf 'FAKE_BACKEND_PORT=%s\n' "$PORT" > "$PREFIX/config/backend.env"
+printf 'FAKE_BACKEND_PORT=%s\nFAKE_BACKEND_TOKEN=fixture-direct-bearer\n' "$PORT" > "$PREFIX/config/backend.env"
 printf '%s\n' \
   'PICKLESHELL_MEMORY_ROLE=agent' \
   'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
   'PICKLESHELL_MEMORY_SCOPE=fixture-scope' \
   "PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:$PORT" \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$PREFIX/log/audit.jsonl" > "$PREFIX/config/mcp.env"
+printf 'PICKLESHELL_MEMORY_BACKEND_TOKEN=fixture-direct-bearer\n' >> "$PREFIX/config/mcp.env"
 chmod 0640 "$PREFIX/config/backend.env" "$PREFIX/config/mcp.env"
+chmod 0600 "$PREFIX/config/backend.env"
 
 cat > "$PREFIX/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
@@ -432,13 +469,18 @@ case "$1" in
     rm -f -- "${FAKE_SYSTEMD_ROOT:?}/enabled/$2"
     ;;
   stop)
+    [[ $2 != isolated-memory-broker.service ]] || exit 0
     pidfile=${FAKE_SYSTEMD_ROOT:?}/backend.pid
-    if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; wait "$(<"$pidfile")" 2>/dev/null || true; fi
+    if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; for _ in {1..100}; do state=$(ps -o stat= -p "$(<"$pidfile")" 2>/dev/null || true); [[ -z $state || $state == Z* ]] && break; sleep 0.02; done; fi
     exit 0
     ;;
   restart)
+    if [[ $2 == isolated-memory-broker.service ]]; then
+      [[ -f ${FAKE_SYSTEMD_ROOT}/units/$2 ]] || exit 1
+      exit 0
+    fi
     pidfile=${FAKE_SYSTEMD_ROOT:?}/backend.pid
-    if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; wait "$(<"$pidfile")" 2>/dev/null || true; fi
+    if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; for _ in {1..100}; do state=$(ps -o stat= -p "$(<"$pidfile")" 2>/dev/null || true); [[ -z $state || $state == Z* ]] && break; sleep 0.02; done; fi
     if [[ $2 == pickleshell-memory-isolated.service || $2 == pickleshell-memory-first-failure.service ||
           $2 == pickleshell-memory-managed.service || $2 == pickleshell-memory-real.service ||
           $2 == pickleshell-memory-parent-real.service ]]; then
@@ -449,7 +491,7 @@ case "$1" in
       "${FAKE_BACKEND_COMMAND:-${FAKE_SYSTEMD_ROOT}/bin/backend-wrapper}" >/dev/null 2>&1 & echo $! > "$pidfile"
       for _ in {1..50}; do
         kill -0 "$!" 2>/dev/null || exit 1
-        if curl --fail --silent --max-time 0.2 "http://127.0.0.1:${FAKE_BACKEND_PORT}/health" >/dev/null; then
+        if curl --fail --silent --max-time 0.2 -H "Authorization: Bearer ${FAKE_BACKEND_TOKEN:-}" "http://127.0.0.1:${FAKE_BACKEND_PORT}/health" >/dev/null; then
           if [[ -f ${FAKE_SYSTEMD_ROOT}/fail-active-target ]] &&
              [[ $(readlink "${FAKE_SYSTEMD_ROOT}/app/active") == "$(<"${FAKE_SYSTEMD_ROOT}/fail-active-target")" ]]; then
             exit 1
@@ -517,7 +559,7 @@ install_release() {
     --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
     --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
     --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
-    --service-user "$(id -un)" --service-group "$(id -gn)" \
+    --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" \
     --service pickleshell-memory-isolated.service \
     --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin"
 }
@@ -532,6 +574,7 @@ run_normal_preflight_no_mutation_case() {
     'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
     "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
   chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  chmod 0600 "$case_root/config/backend.env"
   printf 'unchanged\n' > "$case_root/state/sentinel"
   cp -- "$(command -v node)" "$case_root/wrappers/node"
   cp -- "$(command -v node)" "$case_root/wrappers/backend"
@@ -548,7 +591,7 @@ run_normal_preflight_no_mutation_case() {
     --config-root "$case_root/config" --state-root "$case_root/state" --log-root "$case_root/log" \
     --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" \
     --backend-executable "$case_root/wrappers/backend" --node-executable "$case_root/wrappers/node" \
-    --service-user "$(id -un)" --service-group "$(id -gn)" \
+    --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" \
     --service pickleshell-memory-preflight.service --systemctl "$case_root/wrappers/systemctl" \
     --wrapper-dir "$case_root/wrappers" >"$TMP/normal-preflight-$name.out" 2>&1; then
     echo "normal preflight $name unexpectedly succeeded" >&2
@@ -578,6 +621,7 @@ printf '%s\n' \
   'PICKLESHELL_MEMORY_SCOPE=managed-fixture-scope' "PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:$MANAGED_PORT" \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$MANAGED/log/audit.jsonl" > "$MANAGED/config/mcp.env"
 chmod 0640 "$MANAGED/config/backend.env" "$MANAGED/config/mcp.env"
+chmod 0600 "$MANAGED/config/backend.env"
 cat > "$MANAGED/bin/python-fixture" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -638,13 +682,14 @@ printf '%s\n' \
   'PICKLESHELL_MEMORY_SCOPE=incomplete-fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$INCOMPLETE/log/audit.jsonl" > "$INCOMPLETE/config/mcp.env"
 chmod 0640 "$INCOMPLETE/config/backend.env" "$INCOMPLETE/config/mcp.env"
+chmod 0600 "$INCOMPLETE/config/backend.env"
 if "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --source "$INCOMPLETE_SOURCE" --root "$INCOMPLETE/app" --commit "$INCOMPLETE_SHA" \
   --config-root "$INCOMPLETE/config" --state-root "$INCOMPLETE/state" --log-root "$INCOMPLETE/log" \
   --units-dir "$INCOMPLETE/units" --logrotate-dir "$INCOMPLETE/logrotate" --wrapper-dir "$INCOMPLETE/bin" \
   --managed-backend-executable "$INCOMPLETE/bin/pickleshell-memory-backend" \
   --python-executable "$INCOMPLETE/bin/python-fixture" --node-executable "$(command -v node)" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-incomplete.service \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-incomplete.service \
   --systemctl "$INCOMPLETE/bin/systemctl" > "$INCOMPLETE/output" 2>&1; then
   echo 'dependency-incomplete managed release unexpectedly succeeded' >&2
   exit 1
@@ -666,7 +711,7 @@ FAKE_SYSTEMD_ROOT="$MANAGED" "$FIXTURE/deploy/memory-release.sh" \
   --units-dir "$MANAGED/units" --logrotate-dir "$MANAGED/logrotate" --wrapper-dir "$MANAGED/bin" \
   --managed-backend-executable "$MANAGED/bin/pickleshell-memory-backend" \
   --python-executable "$MANAGED/bin/python-fixture" --node-executable "$(command -v node)" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-managed.service \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-managed.service \
   --systemctl "$MANAGED/bin/systemctl"
 test -x "$MANAGED/bin/pickleshell-memory-backend"
 test -x "$MANAGED/app/active/pickleshell-memory-backend/.venv/bin/python"
@@ -683,6 +728,8 @@ REAL_PYTHON=/usr/bin/python3.12
 }
 run_real_managed_install() {
   local script=$1 case_root=$2 service=$3 port
+  local -a broker_args=(--broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)")
+  if ! grep -q -- --broker-service "$script"; then broker_args=(); fi
   port=$((39001 + RANDOM % 5000))
   mkdir -p -- "$case_root"/{bin,config,log,logrotate,state,units}
   cp -- "$PREFIX/bin/backend.js" "$PREFIX/bin/systemctl" "$case_root/bin/"
@@ -693,13 +740,14 @@ run_real_managed_install() {
     'PICKLESHELL_MEMORY_SCOPE=real-managed-fixture-scope' "PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:$port" \
     "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
   chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  ((${#broker_args[@]} == 0)) || chmod 0600 "$case_root/config/backend.env"
   PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$case_root" FAKE_BACKEND_COMMAND="$case_root/bin/backend.js" "$script" \
     --profile isolated --source "$FIXTURE" --root "$case_root/app" --commit "$SHA1" \
     --config-root "$case_root/config" --state-root "$case_root/state" --log-root "$case_root/log" \
     --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" --wrapper-dir "$case_root/bin" \
     --managed-backend-executable "$case_root/bin/pickleshell-memory-backend" \
     --python-executable "$REAL_PYTHON" --node-executable "$(command -v node)" \
-    --service-user "$(id -un)" --service-group "$(id -gn)" --service "$service" \
+    "${broker_args[@]}" --service-user "$(id -un)" --service-group "$(id -gn)" --service "$service" \
     --systemctl "$case_root/bin/systemctl"
 }
 
@@ -754,6 +802,7 @@ run_unsafe_internal_path_case() {
     'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
     "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
   chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  chmod 0600 "$case_root/config/backend.env"
   case $path_kind in
     releases) ln -s "$victim" "$case_root/app/releases" ;;
     state) ln -s "$victim" "$case_root/app/state" ;;
@@ -766,7 +815,7 @@ run_unsafe_internal_path_case() {
     --config-root "$case_root/config" --state-root "$case_root/state-root" --log-root "$case_root/log" \
     --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" \
     --backend-executable "$case_root/bin/node" --node-executable "$case_root/bin/node" \
-    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-unsafe-$name.service \
+    --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-unsafe-$name.service \
     --systemctl "$case_root/bin/systemctl" --wrapper-dir "$case_root/wrappers" > "$case_root/output" 2>&1; then
     echo "unsafe $name path unexpectedly succeeded" >&2; exit 1
   fi
@@ -823,13 +872,14 @@ printf '%s\n' \
   "PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:$FIRST_PORT" \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$FIRST_FAILURE/log/audit.jsonl" > "$FIRST_FAILURE/config/mcp.env"
 chmod 0640 "$FIRST_FAILURE/config/backend.env" "$FIRST_FAILURE/config/mcp.env"
+chmod 0600 "$FIRST_FAILURE/config/backend.env"
 touch "$FIRST_FAILURE/fail-enable"
 if PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --source "$FIXTURE" --root "$FIRST_FAILURE/app" --commit "$SHA1" \
   --config-root "$FIRST_FAILURE/config" --state-root "$FIRST_FAILURE/state" --log-root "$FIRST_FAILURE/log" \
   --units-dir "$FIRST_FAILURE/units" --logrotate-dir "$FIRST_FAILURE/logrotate" \
   --backend-executable "$FIRST_FAILURE/bin/backend.js" --node-executable "$(command -v node)" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" \
   --service pickleshell-memory-first-failure.service \
   --systemctl "$FIRST_FAILURE/bin/systemctl" --wrapper-dir "$FIRST_FAILURE/bin" \
   >"$TMP/first-failure.out" 2>&1; then
@@ -876,7 +926,7 @@ PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/mem
   --config-root "$FIRST_FAILURE/config" --state-root "$FIRST_FAILURE/state" --log-root "$FIRST_FAILURE/log" \
   --units-dir "$FIRST_FAILURE/units" --logrotate-dir "$FIRST_FAILURE/logrotate" \
   --backend-executable "$FIRST_FAILURE/bin/backend.js" --node-executable "$(command -v node)" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" \
   --service pickleshell-memory-first-failure.service \
   --systemctl "$FIRST_FAILURE/bin/systemctl" --wrapper-dir "$FIRST_FAILURE/bin"
 test -d "$FIRST_FAILURE/app/releases/$SHA1"
@@ -906,7 +956,7 @@ install_release "$SHA1" "$LINKED_FIXTURE"
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
 test -f "$PREFIX/enabled/pickleshell-memory-isolated.service"
 test "$(grep -c '^enable pickleshell-memory-isolated.service$' "$PREFIX/systemctl.calls")" -eq 1
-test "$(stat -c %a "$PREFIX/config/backend.env")" = 640
+test "$(stat -c %a "$PREFIX/config/backend.env")" = 600
 test "$(stat -c %a "$PREFIX/config/mcp.env")" = 640
 test "$(stat -c %a "$PREFIX/log/audit.jsonl")" = 660
 test "$(stat -c %a "$PREFIX/log")" = 750
@@ -918,6 +968,30 @@ grep -q 'rotate 14' "$PREFIX/logrotate/pickleshell-memory"
 grep -q 'create 0660 ' "$PREFIX/logrotate/pickleshell-memory"
 grep -q "$PREFIX/config/backend.env" "$PREFIX/units/pickleshell-memory-isolated.service"
 ! find "$PREFIX/app" "$PREFIX/units" "$PREFIX/bin" -type f -exec grep -l 'pickleshell-gateway\|gateway/' {} + | grep -q .
+grep -q '^After=pickleshell-memory-isolated.service$' "$PREFIX/units/isolated-memory-broker.service"
+grep -q '^Requires=pickleshell-memory-isolated.service$' "$PREFIX/units/isolated-memory-broker.service"
+grep -q '^User=nobody$' "$PREFIX/units/isolated-memory-broker.service"
+grep -q "^LoadCredential=backend.env:$PREFIX/config/backend.env$" "$PREFIX/units/isolated-memory-broker.service"
+grep -q '^Environment=PICKLESHELL_MEMORY_BACKEND_ENV_FILE=%d/backend.env$' "$PREFIX/units/isolated-memory-broker.service"
+# Regress the shared direct default and explicit Codex selection without changing
+# the package's older assertion that still expects the superseded global 8767.
+node --input-type=module - "$REPO" "$PREFIX/log/audit.jsonl" <<'JS'
+import assert from 'node:assert/strict';
+const { loadConfig } = await import(`${process.argv[2]}/pickleshell-memory-mcp/src/config.js`);
+const env = { PICKLESHELL_MEMORY_ROLE: 'admin', PICKLESHELL_MEMORY_ACTOR: 'admin', PICKLESHELL_MEMORY_AUDIT_LOG: process.argv[3], PICKLESHELL_MEMORY_BACKEND_TOKEN: 'admin-bearer' };
+assert.equal(loadConfig(env).backendUrl, 'http://127.0.0.1:8766');
+assert.equal(loadConfig(env).backendToken, 'admin-bearer');
+const codex = loadConfig({ ...env, PICKLESHELL_MEMORY_ROLE: 'agent', PICKLESHELL_MEMORY_SCOPE: 'codex-bos-v1', PICKLESHELL_MEMORY_BACKEND_URL: 'http://127.0.0.1:8767', PICKLESHELL_MEMORY_BACKEND_TOKEN: '' });
+assert.equal(codex.backendUrl, 'http://127.0.0.1:8767');
+assert.equal(codex.backendToken, null);
+JS
+# A shared-group-readable backend credential must fail before service calls.
+chmod 0640 "$PREFIX/config/backend.env"
+credential_calls=$(wc -l < "$PREFIX/systemctl.calls")
+if install_release "$SHA1" >"$TMP/credential-mode.out" 2>&1; then exit 1; fi
+grep -q 'backend.env must have mode 0600' "$TMP/credential-mode.out"
+test "$(wc -l < "$PREFIX/systemctl.calls")" = "$credential_calls"
+chmod 0600 "$PREFIX/config/backend.env"
 audit_lines=$(wc -l < "$PREFIX/log/audit.jsonl")
 "$PREFIX/bin/pickleshell-memory-ready"
 test "$(wc -l < "$PREFIX/log/audit.jsonl")" -gt "$audit_lines"
@@ -970,6 +1044,7 @@ run_referenced_cleanup_case() {
     'PICKLESHELL_MEMORY_SCOPE=reference-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
     "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
   chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  chmod 0600 "$case_root/config/backend.env"
   case $reference in
     active) injection="rm -f -- '$case_root/app/active'; ln -s 'releases/$SHA1' '$case_root/app/active'; false" ;;
     current) injection="printf 'releases/%s\\n' '$SHA1' > '$case_root/app/state/current-target'; false" ;;
@@ -983,7 +1058,7 @@ run_referenced_cleanup_case() {
     --config-root "$case_root/config" --state-root "$case_root/state" --log-root "$case_root/log" \
     --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" --wrapper-dir "$case_root/bin" \
     --backend-executable "$case_root/bin/node" --node-executable "$case_root/bin/node" \
-    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-reference.service \
+    --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-reference.service \
     --systemctl "$case_root/bin/systemctl" >"$case_root/output" 2>&1; then
     echo "referenced cleanup case $reference unexpectedly succeeded" >&2
     exit 1
@@ -1149,7 +1224,7 @@ assert_unsafe_rollback_target_rejected() {
     --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
     --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
     --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
-    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
+    --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
     --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin" --rollback > "$TMP/unsafe-rollback-$name.out" 2>&1; then
     echo "unsafe rollback target $name unexpectedly succeeded" >&2
     exit 1
@@ -1203,7 +1278,7 @@ if FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
   --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
   --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
   --systemctl "$PREFIX/bin/systemctl" \
   --wrapper-dir "$PREFIX/bin" --rollback >"$TMP/failed-rollback.out" 2>&1; then
   echo 'failed rollback unexpectedly succeeded' >&2
@@ -1230,7 +1305,7 @@ FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
   --units-dir "$PREFIX/units" --logrotate-dir "$PREFIX/logrotate" \
   --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
-  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
+  --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
   --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin" --rollback
 test "$(readlink "$PREFIX/app/active")" = "releases/$SHA1"
 test "$(<"$PREFIX/app/state/current-target")" = "releases/$SHA1"
@@ -1244,4 +1319,61 @@ kill -0 "$ROLLBACK_PID"
 "$PREFIX/bin/pickleshell-memory-ready"
 ! find "$PREFIX/app" "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -type f \( -name '.*.render.*' -o -name '.*.backup.*' -o -name '.*.switch.*' \) | grep -q .
 kill "$(<"$PREFIX/backend.pid")" 2>/dev/null || true
+# Stage the exact pre-broker release payload to exercise its real template ABI.
+BASE_SHA=$(git -C "$REPO" rev-parse 769ffde^{commit})
+BASE_RELEASE="$PREFIX/app/releases/$BASE_SHA"
+mkdir -- "$BASE_RELEASE"
+git -C "$REPO" archive "$BASE_SHA" deploy/systemd pickleshell-memory-mcp | tar -x -C "$BASE_RELEASE"
+npm --prefix "$BASE_RELEASE/pickleshell-memory-mcp" ci --omit=dev
+printf '%s\n' "$BASE_SHA" > "$BASE_RELEASE/.release-sha"
+find "$BASE_RELEASE" -type d -exec chmod 0555 {} +
+find "$BASE_RELEASE" -type f -exec chmod 0444 {} +
+test ! -e "$BASE_RELEASE/deploy/systemd/pickleshell-memory-broker.service.in"
+printf 'releases/%s\n' "$BASE_SHA" > "$PREFIX/app/state/previous-target"
+printf 'disabled disabled\n' > "$PREFIX/app/state/previous-enabled"
+rollback_release() {
+  PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
+    --profile isolated --root "$PREFIX/app" --config-root "$PREFIX/config" \
+    --state-root "$PREFIX/state" --log-root "$PREFIX/log" --units-dir "$PREFIX/units" \
+    --logrotate-dir "$PREFIX/logrotate" --wrapper-dir "$PREFIX/bin" \
+    --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
+    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-isolated.service \
+    --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" \
+    --systemctl "$PREFIX/bin/systemctl" --rollback
+}
+assert_base_recovered() {
+  test "$(readlink "$PREFIX/app/active")" = "releases/$BASE_SHA"
+  test ! -e "$PREFIX/units/isolated-memory-broker.service"
+  test ! -e "$PREFIX/bin/broker-wrapper"
+  test ! -e "$PREFIX/enabled/isolated-memory-broker.service"
+  test ! -e "$PREFIX/enabled/pickleshell-memory-isolated.service"
+  "$PREFIX/bin/pickleshell-memory-ready"
+}
+rollback_release
+assert_base_recovered
+if install_release "$FAILED_SHA" >"$TMP/base-failed-upgrade.out" 2>&1; then exit 1; fi
+grep -q 'previous deployment restored and verified' "$TMP/base-failed-upgrade.out"
+assert_base_recovered
+printf 'broker-upgrade\n' > "$FIXTURE/VERSION"
+git -C "$FIXTURE" add VERSION
+git -C "$FIXTURE" commit -qm broker-upgrade
+BROKER_UPGRADE_SHA=$(git -C "$FIXTURE" rev-parse HEAD)
+touch "$PREFIX/fail-enable"
+if install_release "$BROKER_UPGRADE_SHA" >"$TMP/base-failed-enable.out" 2>&1; then exit 1; fi
+rm "$PREFIX/fail-enable"
+grep -q 'previous deployment restored and verified' "$TMP/base-failed-enable.out"
+assert_base_recovered
+install_release "$BROKER_UPGRADE_SHA"
+test -f "$PREFIX/enabled/isolated-memory-broker.service"
+test ! -e "$PREFIX/enabled/pickleshell-memory-isolated.service"
+rollback_release
+assert_base_recovered
+# Reverse rollback restores the formerly enabled broker as well.
+rollback_release
+test "$(readlink "$PREFIX/app/active")" = "releases/$BROKER_UPGRADE_SHA"
+test -f "$PREFIX/enabled/isolated-memory-broker.service"
+test ! -e "$PREFIX/enabled/pickleshell-memory-isolated.service"
+rollback_release
+assert_base_recovered
+printf 'pre-broker 769ffde rollback, failed upgrade, failed enable and boot-state recovery: ok\n'
 printf 'memory deployment E2E: ok\n'

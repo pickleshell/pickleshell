@@ -80,10 +80,12 @@ and pinned dependency lock inside the independent Memory release. Its managed
 launcher is transactionally installed at
 `/usr/local/bin/pickleshell-memory-backend`; Gateway does not depend on it.
 Production Memory uses an authenticated backend on loopback port 8766 and a
-separate fixed-scope credential broker on loopback port 8767. Codex and the MCP
-client connect only to the broker; it reads the backend bearer credential from
+separate fixed-scope credential broker on loopback port 8767. Only explicitly
+wired Codex MCP clients connect to the broker. Shared/admin
+MCP keeps the authenticated 8766 backend and bearer auth. The distinct broker
+service reads a systemd credential projected from operator-only `0600`
 `backend.env`, rejects client authorization, and injects `user_id=codex-bos-v1`.
-`/var/lib/pickleshell-memory/backend` persistence root. Port 8765 and any BOS
+The backend uses `/var/lib/pickleshell-memory/backend` as its persistence root. Port 8765 and any BOS
 spike data remain outside this lifecycle. Review
 `pickleshell-memory-backend/README.md` and
 `pickleshell-memory-mcp/README.md` before provisioning.
@@ -424,12 +426,12 @@ The optional memory sidecar and Memory MCP are deployed independently with
 `deploy/memory-release.sh`; they are not inputs to Gateway, tunnel, Browser, or
 Terminal startup/readiness. Follow the complete configuration, credential,
 audit-retention, readiness, upgrade, and rollback contract in
-`pickleshell-memory-mcp/README.md`. Every identity launching the installed MCP
-wrapper must belong to the configured dedicated memory group, which grants
-read access to `mcp.env` and group-write access to the managed `0660` audit
-file inside its restricted `0750` log directory. Never grant those permissions
-outside the dedicated group or add memory dependencies to the core release
-units. Validate changes without privileges or host writes with:
+`pickleshell-memory-mcp/README.md`. Shared/admin identities launching the installed MCP
+wrapper need its dedicated service group to read `mcp.env`. Audit writers use
+a separate audit group for the managed `0660` file inside its `0750` directory.
+Codex gets audit access and explicit tokenless 8767 wiring only; never grant it
+the admin config group or read access to `backend.env`. Do not add memory
+dependencies to the core release units. Validate changes without privileges or host writes with:
 
 ```bash
 npm run test:memory-deployment

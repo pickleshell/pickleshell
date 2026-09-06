@@ -13,6 +13,8 @@ PYTHON_EXECUTABLE='/usr/bin/python3.12'; MANAGED_BACKEND=1
 ISOLATED_ROOT_SET=0; ISOLATED_CONFIG_SET=0; ISOLATED_STATE_SET=0; ISOLATED_LOG_SET=0
 ISOLATED_UNITS_SET=0; ISOLATED_LOGROTATE_SET=0; ISOLATED_WRAPPER_SET=0
 ISOLATED_USER_SET=0; ISOLATED_GROUP_SET=0; ISOLATED_SERVICE_SET=0
+BROKER_USER='pickleshell-memory-broker'; BROKER_GROUP='pickleshell-memory-broker'; AUDIT_GROUP='pickleshell-memory-audit'
+ISOLATED_BROKER_SET=0; ISOLATED_BROKER_USER_SET=0; ISOLATED_BROKER_GROUP_SET=0; ISOLATED_AUDIT_SET=0
 ISOLATED_BACKEND_SET=0; ISOLATED_SYSTEMCTL_SET=0
 while (($#)); do case "$1" in
   --source) SOURCE=${2:-}; shift 2;; --root) ROOT=${2:-}; ISOLATED_ROOT_SET=1; shift 2;; --commit) COMMIT=${2:-}; shift 2;;
@@ -23,17 +25,20 @@ while (($#)); do case "$1" in
   --python-executable) PYTHON_EXECUTABLE=${2:-}; shift 2;;
   --backend-executable) BACKEND_EXECUTABLE=${2:-}; MANAGED_BACKEND=0; ISOLATED_BACKEND_SET=1; shift 2;;
   --managed-backend-executable) BACKEND_EXECUTABLE=${2:-}; MANAGED_BACKEND=1; ISOLATED_BACKEND_SET=1; shift 2;;
-  --broker-service) BROKER_SERVICE=${2:-}; shift 2;; --systemctl) SYSTEMCTL=${2:-}; ISOLATED_SYSTEMCTL_SET=1; shift 2;; --rollback) ROLLBACK=1; shift;;
+  --broker-user) BROKER_USER=${2:-}; ISOLATED_BROKER_USER_SET=1; shift 2;;
+  --broker-group) BROKER_GROUP=${2:-}; ISOLATED_BROKER_GROUP_SET=1; shift 2;;
+  --audit-group) AUDIT_GROUP=${2:-}; ISOLATED_AUDIT_SET=1; shift 2;;
+  --broker-service) BROKER_SERVICE=${2:-}; ISOLATED_BROKER_SET=1; shift 2;; --systemctl) SYSTEMCTL=${2:-}; ISOLATED_SYSTEMCTL_SET=1; shift 2;; --rollback) ROLLBACK=1; shift;;
   -h|--help) usage; exit 0;; *) usage >&2; die "unknown option: $1";; esac done
 [[ $PROFILE == production || $PROFILE == isolated ]] || die 'profile must be production or isolated'
 if [[ $PROFILE == isolated ]]; then
-  ((ISOLATED_ROOT_SET && ISOLATED_CONFIG_SET && ISOLATED_STATE_SET && ISOLATED_LOG_SET && ISOLATED_UNITS_SET && ISOLATED_LOGROTATE_SET && ISOLATED_WRAPPER_SET && ISOLATED_USER_SET && ISOLATED_GROUP_SET && ISOLATED_SERVICE_SET && ISOLATED_BACKEND_SET && ISOLATED_SYSTEMCTL_SET)) || die 'isolated profile requires explicit dedicated deployment paths and service identity'
+  ((ISOLATED_BROKER_SET && ISOLATED_BROKER_USER_SET && ISOLATED_BROKER_GROUP_SET && ISOLATED_AUDIT_SET && ISOLATED_ROOT_SET && ISOLATED_CONFIG_SET && ISOLATED_STATE_SET && ISOLATED_LOG_SET && ISOLATED_UNITS_SET && ISOLATED_LOGROTATE_SET && ISOLATED_WRAPPER_SET && ISOLATED_USER_SET && ISOLATED_GROUP_SET && ISOLATED_SERVICE_SET && ISOLATED_BACKEND_SET && ISOLATED_SYSTEMCTL_SET)) || die 'isolated profile requires explicit dedicated deployment paths and service identity'
   ISOLATED_PREFIX=${ROOT%/*}
   [[ -n $ISOLATED_PREFIX && $ISOLATED_PREFIX != / && $ISOLATED_PREFIX != /opt && $ISOLATED_PREFIX != /etc && $ISOLATED_PREFIX != /var && $ISOLATED_PREFIX != /usr ]] || die 'isolated root must use a dedicated prefix'
   for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR" "$BACKEND_EXECUTABLE" "$SYSTEMCTL"; do
     [[ $path == "$ISOLATED_PREFIX"/* ]] || die 'isolated deployment paths must share the dedicated root prefix'
   done
-  [[ $SERVICE_USER != pickleshell-memory && $SERVICE_GROUP != pickleshell-memory && $SERVICE != pickleshell-memory-backend.service ]] || die 'isolated profile rejects production service identity'
+  [[ $BROKER_SERVICE != pickleshell-memory-broker.service && $BROKER_USER != pickleshell-memory-broker && $BROKER_GROUP != pickleshell-memory-broker && $AUDIT_GROUP != pickleshell-memory-audit && $SERVICE_USER != pickleshell-memory && $SERVICE_GROUP != pickleshell-memory && $SERVICE != pickleshell-memory-backend.service ]] || die 'isolated profile rejects production service identity'
 fi
 safe_path() { [[ $1 = /* && $1 != / && $1 != /etc && $1 != /opt && $1 != /var && $1 != /usr && $1 != /home && $1 != *'..'* && $1 != *[[:space:]@]* && $1 != *[\;\|\&\$\(\)\<\>\\\"\'\`\*\?\[\]]* ]] || die "$2 is unsafe"; }
 for pair in "$ROOT:root" "$CONFIG_ROOT:config root" "$STATE_ROOT:state root" "$LOG_ROOT:log root" "$UNITS_DIR:units directory" "$LOGROTATE_DIR:logrotate directory" "$WRAPPER_DIR:wrapper directory" "$NODE_EXECUTABLE:node executable" "$PYTHON_EXECUTABLE:python executable" "$BACKEND_EXECUTABLE:backend executable"; do safe_path "${pair%%:*}" "${pair#*:}"; done
@@ -51,6 +56,12 @@ for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGR
 [[ $SERVICE_USER =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_GROUP =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_USER != root ]] || die 'unsafe service identity'
 [[ $SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.service$ && $SERVICE != *..* ]] || die 'unsafe service name'
 [[ $BROKER_SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.service$ && $BROKER_SERVICE != *..* ]] || die 'unsafe broker service name'
+[[ $BROKER_SERVICE != "$SERVICE" ]] || die 'broker and backend service names must differ'
+[[ $BROKER_USER =~ ^[a-z_][a-z0-9_-]*$ && $BROKER_GROUP =~ ^[a-z_][a-z0-9_-]*$ && $AUDIT_GROUP =~ ^[a-z_][a-z0-9_-]*$ ]] || die 'unsafe broker or audit identity'
+broker_uid=$(id -u "$BROKER_USER") || die 'broker user does not exist'
+[[ $broker_uid != 0 && $broker_uid != "$(id -u "$SERVICE_USER")" ]] || die 'broker requires a distinct non-root service identity'
+getent group "$BROKER_GROUP" >/dev/null || die 'broker group does not exist'
+audit_gid=$(getent group "$AUDIT_GROUP" | cut -d: -f3); [[ -n $audit_gid ]] || die 'audit group does not exist'
 service_uid=$(id -u "$SERVICE_USER") || die 'service user does not exist'
 service_gid=$(getent group "$SERVICE_GROUP" | cut -d: -f3); [[ -n $service_gid ]] || die 'service group does not exist'
 validate_operator_config_path() {
@@ -122,7 +133,10 @@ operator_config_acl_allows_service_write() {
   done <<< "$acl"
   return 1
 }
-if [[ $PROFILE == production ]]; then validate_operator_config_path; fi
+if [[ $PROFILE == production ]]; then
+  validate_operator_config_path
+  [[ $audit_gid != "$service_gid" ]] || die 'audit access must use a separate group from admin configuration'
+fi
 for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"; do [[ ! -L $path ]] || die "sensitive path is a symlink: $path"; done
 RELEASES="$ROOT/releases"; ACTIVE="$ROOT/active"; DEPLOY_STATE="$ROOT/state"
 LOCK_FILE="${ROOT}.deploy.lock"; LOCK_FD=''; RELEASE_ID=''
@@ -161,7 +175,7 @@ validate_internal_paths() {
     [[ $path == "$RELEASES" ]] && label=releases || label=state
     [[ ! -L $path && ( ! -e $path || -d $path ) ]] || die "unsafe internal deployment path: $label"
   done
-  for path in "$DEPLOY_STATE/current-target" "$DEPLOY_STATE/previous-target"; do
+  for path in "$DEPLOY_STATE/current-target" "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/previous-enabled"; do
     label=${path##*/}
     [[ ! -L $path && ( ! -e $path || -f $path ) ]] || die "unsafe internal deployment path: $label"
   done
@@ -192,6 +206,12 @@ prevalidate_rollback() {
   current=$(managed_release_target "$current_value" current)
   previous=$(managed_release_target "$previous_value" previous)
   [[ $(active_target) == "$current" ]] || die 'rollback target is unavailable or inconsistent'
+  previous_backend_enabled=enabled; previous_broker_enabled=disabled
+  if [[ -f $DEPLOY_STATE/previous-enabled ]]; then
+    [[ $(stat -c %s "$DEPLOY_STATE/previous-enabled") -le 18 ]] || die 'invalid previous enabled state'
+    read -r previous_backend_enabled previous_broker_enabled < "$DEPLOY_STATE/previous-enabled" || die 'invalid previous enabled state'
+    [[ $previous_backend_enabled =~ ^(enabled|disabled)$ && $previous_broker_enabled =~ ^(enabled|disabled)$ ]] || die 'invalid previous enabled state'
+  fi
 }
 validate_internal_paths
 [[ -f $NODE_EXECUTABLE && -x $NODE_EXECUTABLE && ! -L $NODE_EXECUTABLE ]] || die 'node executable must be a regular executable'
@@ -205,11 +225,21 @@ fi
 BACKEND_ENV_FILE="$CONFIG_ROOT/backend.env"; MCP_ENV_FILE="$CONFIG_ROOT/mcp.env"; AUDIT_LOG="$LOG_ROOT/audit.jsonl"
 for file in "$BACKEND_ENV_FILE" "$MCP_ENV_FILE"; do
   [[ -f $file && ! -L $file ]] || die "required operator config is missing or a symlink: $file"
-  [[ $(stat -c %a "$file") == 640 ]] || die "operator config must have mode 0640: $file"
-  [[ $(stat -c %u "$file") == $(id -u) && $(stat -c %g "$file") == "$service_gid" ]] || die "operator config owner/group is unsafe: $file"
+  [[ $(stat -c %u "$file") == $(id -u) ]] || die "operator config owner is unsafe: $file"
 done
+[[ $(stat -c %a "$BACKEND_ENV_FILE") == 600 ]] || die 'backend.env must have mode 0600 (operator only)'
+[[ $(stat -c %a "$MCP_ENV_FILE") == 640 && $(stat -c %g "$MCP_ENV_FILE") == "$service_gid" ]] || die 'mcp.env must have mode 0640 and the admin service group'
+# Mode 0600 also masks named POSIX ACL entries; no service group receives the secret.
+if [[ $PROFILE == production ]]; then
+  # mcp.env may hold the admin token. Extended read ACLs would bypass its group.
+  config_acl=$("$ACL_INSPECTOR" -cpnEP -- "$MCP_ENV_FILE") || die 'cannot inspect admin config ACLs'
+  while IFS= read -r entry; do
+    case $entry in ''|user::rw-|group::r--|other::---) ;;
+      *) die 'admin config must not grant extended ACL access';;
+    esac
+  done <<< "$config_acl"
+fi
 [[ $(grep -c '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE") == 1 ]] || die 'mcp.env must define PICKLESHELL_MEMORY_AUDIT_LOG exactly once'
-[[ $(grep -c '^PICKLESHELL_MEMORY_BACKEND_TOKEN=' "$MCP_ENV_FILE") == 0 ]] || die 'mcp.env must not contain a backend credential; use the broker'
 configured_audit=$(grep '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE" | cut -d= -f2-)
 [[ $configured_audit == "$AUDIT_LOG" ]] || die 'mcp.env audit log must match the managed audit path'
 if ((MANAGED_BACKEND)); then
@@ -249,10 +279,10 @@ if ((MANAGED_BACKEND)); then
 fi
 validate_internal_paths
 chmod 0750 "$STATE_ROOT" "$LOG_ROOT"
-if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT" "$LOG_ROOT"; ((MANAGED_BACKEND)) && chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT/backend"; fi
+if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT"; chown "$SERVICE_USER:$AUDIT_GROUP" "$LOG_ROOT"; ((MANAGED_BACKEND)) && chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT/backend"; fi
 [[ ! -e $AUDIT_LOG || ( -f $AUDIT_LOG && ! -L $AUDIT_LOG ) ]] || die 'audit log path is unsafe'
 if [[ ! -e $AUDIT_LOG ]]; then install -m 0660 /dev/null "$AUDIT_LOG"; else chmod 0660 "$AUDIT_LOG"; fi
-if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$AUDIT_LOG"; fi
+if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$AUDIT_GROUP" "$AUDIT_LOG"; fi
 SWITCH_TEMP_PATHS=()
 switch() {
   local target=$1 previous=$2 previous_tmp current_tmp active_tmp="$ROOT/.active.switch.$$"
@@ -274,17 +304,19 @@ render_artifacts() {
   local -a targets=() staged_files=() backup_files=() had_prior=() committed=()
   local -a specs=(
     "pickleshell-memory-backend.service.in:$UNITS_DIR/$SERVICE:0644" \
-    "pickleshell-memory-broker.service.in:$UNITS_DIR/$BROKER_SERVICE:0644" \
     "pickleshell-memory-backend.sh.in:$WRAPPER_DIR/backend-wrapper:0755" \
-    "pickleshell-memory-broker.sh.in:$WRAPPER_DIR/broker-wrapper:0755" \
     "pickleshell-memory-mcp.sh.in:$WRAPPER_DIR/pickleshell-memory-mcp:0755" \
     "pickleshell-memory.logrotate.in:$LOGROTATE_DIR/pickleshell-memory:0644"
   )
+  if has_broker "$release"; then
+    specs+=("pickleshell-memory-broker.service.in:$UNITS_DIR/$BROKER_SERVICE:0644" "pickleshell-memory-broker.sh.in:$WRAPPER_DIR/broker-wrapper:0755")
+  fi
   ((MANAGED_BACKEND)) && specs+=("pickleshell-memory-backend-bin.sh.in:$BACKEND_EXECUTABLE:0755")
   for spec in "${specs[@]}"; do
     template="$release/deploy/systemd/${spec%%:*}"; target=${spec#*:}; mode=${target##*:}; target=${target%:*}; contents=$(<"$template") || return
-    for token in ACTIVE_ROOT CONFIG_ROOT STATE_ROOT LOG_ROOT BACKEND_ENV_FILE MCP_ENV_FILE AUDIT_LOG SERVICE_USER SERVICE_GROUP BACKEND_EXECUTABLE NODE_EXECUTABLE BACKEND_WRAPPER BROKER_WRAPPER PYTHON_EXECUTABLE; do
-      case $token in ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; PYTHON_EXECUTABLE) value=$PYTHON_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; BROKER_WRAPPER) value="$WRAPPER_DIR/broker-wrapper";; esac
+    for token in ACTIVE_ROOT CONFIG_ROOT STATE_ROOT LOG_ROOT BACKEND_ENV_FILE MCP_ENV_FILE AUDIT_LOG SERVICE_USER SERVICE_GROUP BACKEND_EXECUTABLE NODE_EXECUTABLE BACKEND_WRAPPER BROKER_WRAPPER PYTHON_EXECUTABLE BROKER_USER BROKER_GROUP BACKEND_SERVICE; do
+      case $token in BROKER_USER) value=$BROKER_USER;; BROKER_GROUP) value=$BROKER_GROUP;; BACKEND_SERVICE) value=$SERVICE;; ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; PYTHON_EXECUTABLE) value=$PYTHON_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; BROKER_WRAPPER) value="$WRAPPER_DIR/broker-wrapper";; esac
+      [[ $template != *.logrotate.in || $token != SERVICE_GROUP ]] || value=$AUDIT_GROUP
       contents=${contents//"@$token@"/"$value"}
     done
     if [[ $contents == *'@'* ]]; then
@@ -392,7 +424,26 @@ transactional_switch() {
   rm -rf -- "$backup_root" || { TRANSACTION_RECOVERY_FAILURES=backup-cleanup; return 2; }
   return 1
 }
-restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" restart "$BROKER_SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" "$BROKER_SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
+has_broker() { [[ -f $1/deploy/systemd/pickleshell-memory-broker.service.in ]]; }
+enabled_state() { if "$SYSTEMCTL" is-enabled "$1" >/dev/null 2>&1; then printf enabled; else printf disabled; fi; }
+restore_enabled() {
+  local backend=$1 broker=$2
+  if [[ $(enabled_state "$SERVICE") == "$backend" ]]; then :; elif [[ $backend == enabled ]]; then "$SYSTEMCTL" enable "$SERVICE"; else "$SYSTEMCTL" disable "$SERVICE"; fi || return
+  if [[ $(enabled_state "$BROKER_SERVICE") == "$broker" ]]; then :; elif [[ $broker == enabled ]]; then "$SYSTEMCTL" enable "$BROKER_SERVICE"; else "$SYSTEMCTL" disable "$BROKER_SERVICE"; fi
+}
+restart_verify() {
+  if ! has_broker "$ACTIVE" && [[ -e $UNITS_DIR/$BROKER_SERVICE ]]; then
+    # Retire the unit while systemd can still resolve it and its enable links.
+    "$SYSTEMCTL" stop "$BROKER_SERVICE" || return
+    if [[ $(enabled_state "$BROKER_SERVICE") == enabled ]]; then "$SYSTEMCTL" disable "$BROKER_SERVICE" || return; fi
+    rm -f -- "$UNITS_DIR/$BROKER_SERVICE" "$WRAPPER_DIR/broker-wrapper" || return
+  fi
+  "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" >/dev/null || return
+  if has_broker "$ACTIVE"; then
+    "$SYSTEMCTL" restart "$BROKER_SERVICE" && "$SYSTEMCTL" is-active "$BROKER_SERVICE" >/dev/null || return
+  fi
+  "$WRAPPER_DIR/pickleshell-memory-ready"
+}
 RESTORE_DISABLED_ON_FIRST_FAILURE=0
 FIRST_ACTIVATION_BACKUP_ROOT=''
 FIRST_ACTIVATION_PATHS=(
@@ -441,8 +492,7 @@ cleanup_failed_first_activation() {
   "$SYSTEMCTL" stop "$BROKER_SERVICE" >/dev/null 2>&1 || failures+=(broker-stop)
   "$SYSTEMCTL" stop "$SERVICE" >/dev/null 2>&1 || failures+=(service-stop)
   if ((RESTORE_DISABLED_ON_FIRST_FAILURE)); then
-    "$SYSTEMCTL" disable "$BROKER_SERVICE" >/dev/null 2>&1 || failures+=(broker-disable)
-    "$SYSTEMCTL" disable "$SERVICE" >/dev/null 2>&1 || failures+=(service-disable)
+    restore_enabled "$BACKEND_ENABLED_BEFORE" "$BROKER_ENABLED_BEFORE" >/dev/null 2>&1 || failures+=(enablement-restore)
   fi
   restore_first_activation_state || failures+=(state-restore)
   "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || failures+=(daemon-reload)
@@ -452,20 +502,24 @@ cleanup_failed_first_activation() {
   fi
 }
 if ((ROLLBACK)); then
+  BACKEND_ENABLED_BEFORE=$(enabled_state "$SERVICE")
+  BROKER_ENABLED_BEFORE=$(enabled_state "$BROKER_SERVICE")
   transaction_status=0; transactional_switch "$ROOT/$previous" "$previous" "$current" || transaction_status=$?
   if ((transaction_status)); then
     ((transaction_status == 2)) && die "rollback switch failed; current deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
     die 'rollback switch failed; current deployment restored'
   fi
-  if ! restart_verify; then
+  if ! restart_verify || ! restore_enabled "$previous_backend_enabled" "$previous_broker_enabled"; then
     transaction_status=0; transactional_switch "$ROOT/$current" "$current" "$previous" || transaction_status=$?
     if ((transaction_status)); then
       ((transaction_status == 2)) && die "rollback readiness failed; current deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
       die 'rollback readiness failed; current deployment switch recovery failed'
     fi
     restart_verify || die 'rollback readiness failed; current deployment recovery verification failed'
+    restore_enabled "$BACKEND_ENABLED_BEFORE" "$BROKER_ENABLED_BEFORE" || die 'rollback enablement recovery failed'
     die 'rollback readiness failed; current deployment restored and verified'
   fi
+  printf '%s %s\n' "$BACKEND_ENABLED_BEFORE" "$BROKER_ENABLED_BEFORE" > "$DEPLOY_STATE/previous-enabled"
   printf 'memory-release: rolled back to %s\n' "$previous"; exit 0
 fi
 RELEASE_CREATED=0; ACTIVATION_SUCCEEDED=0
@@ -554,13 +608,15 @@ validate_internal_paths
 if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then
   prior_previous=$(optional_managed_release_target "$(<"$DEPLOY_STATE/previous-target")" previous)
 fi
+BACKEND_ENABLED_BEFORE=$(enabled_state "$SERVICE")
+BROKER_ENABLED_BEFORE=$(enabled_state "$BROKER_SERVICE")
 if [[ -z $previous ]]; then capture_first_activation_state || die 'cannot preserve pre-existing first-activation state'; fi
 transaction_status=0; transactional_switch "$RELEASE" "releases/$RESOLVED" "$previous" || transaction_status=$?
 if ((transaction_status)); then
   ((transaction_status == 2)) && die "deployment switch failed; previous deployment recovery failed (${TRANSACTION_RECOVERY_FAILURES:-unknown})"
   die 'deployment switch failed; previous deployment restored'
 fi
-if ! restart_verify; then
+if ! restart_verify || { [[ -n $previous ]] && ! has_broker "$ROOT/$previous" && ! "$SYSTEMCTL" enable "$BROKER_SERVICE"; }; then
   if [[ -n $previous ]]; then
     transaction_status=0; transactional_switch "$ROOT/$previous" "$previous" "$prior_previous" || transaction_status=$?
     if ((transaction_status)); then
@@ -568,6 +624,7 @@ if ! restart_verify; then
       die 'activation readiness failed; previous deployment switch recovery failed'
     fi
     restart_verify || die 'activation readiness failed; previous deployment recovery verification failed'
+    restore_enabled "$BACKEND_ENABLED_BEFORE" "$BROKER_ENABLED_BEFORE" || die 'activation enablement recovery failed'
     die 'activation readiness failed; previous deployment restored and verified'
   fi
   if ! cleanup_failed_first_activation; then
@@ -577,7 +634,7 @@ if ! restart_verify; then
 fi
 if [[ -z $previous ]]; then
   if ! "$SYSTEMCTL" is-enabled "$SERVICE" >/dev/null 2>&1 || ! "$SYSTEMCTL" is-enabled "$BROKER_SERVICE" >/dev/null 2>&1; then RESTORE_DISABLED_ON_FIRST_FAILURE=1; fi
-  if ! "$SYSTEMCTL" enable "$SERVICE" "$BROKER_SERVICE"; then
+  if ! "$SYSTEMCTL" enable "$SERVICE" || ! "$SYSTEMCTL" enable "$BROKER_SERVICE"; then
     if ! cleanup_failed_first_activation; then
       die "activation enablement failed; first-activation cleanup failed (${FIRST_ACTIVATION_CLEANUP_FAILURES:-unknown})"
     fi
@@ -586,5 +643,6 @@ if [[ -z $previous ]]; then
   rm -rf -- "$FIRST_ACTIVATION_BACKUP_ROOT" || die 'cannot remove first-activation backup'
   FIRST_ACTIVATION_BACKUP_ROOT=''
 fi
+printf '%s %s\n' "$BACKEND_ENABLED_BEFORE" "$BROKER_ENABLED_BEFORE" > "$DEPLOY_STATE/previous-enabled"
 ACTIVATION_SUCCEEDED=1
 printf 'memory-release: active release: releases/%s\n' "$RESOLVED"

@@ -53,8 +53,8 @@ class BrokerTests(unittest.TestCase):
         # The production config deliberately requires 8766; use the module handler
         # directly for this deterministic protocol test with a test backend port.
         self.proc = subprocess.Popen(["python3", "-c", (
-            "from pickleshell_memory_broker.server import BrokerHandler,ThreadingHTTPServer; "
-            f"s=ThreadingHTTPServer(('127.0.0.1',{self.port}),BrokerHandler); "
+            "from pickleshell_memory_broker.server import BrokerHandler,BoundedHTTPServer; "
+            f"s=BoundedHTTPServer(('127.0.0.1',{self.port}),BrokerHandler,max_connections=4); s.read_deadline=0.4; "
             f"s.broker_config=('127.0.0.1',{self.port},'http://127.0.0.1:{self.backend.server_port}','{TOKEN}'); s.serve_forever()"
         )], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.wait_ready()
@@ -102,6 +102,41 @@ class BrokerTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/health", headers={"Authorization": "Bearer client"})[0], 400)
         self.assertEqual(self.request("PATCH", "/health")[0], 405)
         self.assertEqual(self.request("GET", "/not-allowed")[0], 404)
+
+    def test_partial_clients_and_absolute_deadline(self):
+        for partial in (b"", b"GET /health HTTP/1.1\r\nHost: x", b"POST /search HTTP/1.1\r\nHost: x\r\nContent-Length: 20\r\n\r\n{"):
+            with socket.create_connection(("127.0.0.1", self.port), timeout=2) as sock:
+                sock.sendall(partial)
+                started = time.monotonic()
+                while time.monotonic() - started < 0.8:
+                    try:
+                        sock.sendall(b" ")
+                    except OSError:
+                        break
+                    time.sleep(0.05)
+                try:
+                    self.assertEqual(sock.recv(4096), b"")
+                except ConnectionResetError:
+                    pass
+                self.assertLess(time.monotonic() - started, 1)
+            self.assertEqual(self.request("GET", "/health")[0], 200)
+
+    def test_concurrency_is_bounded_and_recovers(self):
+        sockets = [socket.create_connection(("127.0.0.1", self.port), timeout=2) for _ in range(4)]
+        try:
+            time.sleep(0.05)
+            with socket.create_connection(("127.0.0.1", self.port), timeout=2) as extra:
+                try:
+                    self.assertEqual(extra.recv(1), b"")
+                except ConnectionResetError:
+                    pass
+            task_count = len(list(Path(f"/proc/{self.proc.pid}/task").iterdir()))
+            self.assertLessEqual(task_count, 5)
+            time.sleep(0.5)
+            self.assertEqual(self.request("GET", "/health")[0], 200)
+        finally:
+            for sock in sockets:
+                sock.close()
 
     def test_size_bounds_and_no_local_leakage(self):
         status, _ = self.request("POST", "/search", b"x" * (64 * 1024 + 1), {"Content-Length": str(64 * 1024 + 1)})
