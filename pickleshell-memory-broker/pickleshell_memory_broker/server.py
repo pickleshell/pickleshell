@@ -84,6 +84,7 @@ class BoundedHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = MAX_CONNECTIONS
     read_deadline = READ_DEADLINE_SECONDS
+    upstream_timeout = 10
 
     def __init__(self, *args, max_connections=MAX_CONNECTIONS, **kwargs):
         self.slots = threading.BoundedSemaphore(max_connections)
@@ -212,12 +213,19 @@ class BrokerHandler(BaseHTTPRequestHandler):
             target += "?" + urlencode([(key, value) for key, values in query.items() for value in values])
         _, _, backend, token = self.server.broker_config
         parsed = urlsplit(backend)
-        connection = HTTPConnection(parsed.hostname, parsed.port, timeout=10)
+        connection = HTTPConnection(parsed.hostname, parsed.port, timeout=self.server.upstream_timeout)
+        response_started = False
         try:
             connection.request(method, target, body=body or None, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"})
             response = connection.getresponse()
             data = response.read(MAX_RESPONSE_BYTES + 1)
-            if len(data) > MAX_RESPONSE_BYTES: return self.send_error_json(502, "response_too_large")
+            if len(data) > MAX_RESPONSE_BYTES:
+                response_started = True
+                return self.send_error_json(502, "response_too_large")
+            if response.length not in (None, 0):
+                raise ValueError("incomplete upstream response")
+            # Mark before any headers can reach the client, including partial writes.
+            response_started = True
             self.send_response(response.status)
             content_type = response.getheader("Content-Type")
             if content_type: self.send_header("Content-Type", content_type)
@@ -226,7 +234,9 @@ class BrokerHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         except Exception:
-            self.send_error_json(503, "backend_unavailable")
+            self.close_connection = True
+            if not response_started:
+                self.send_error_json(503, "backend_unavailable")
         finally: connection.close()
 
     do_GET = do_REQUEST

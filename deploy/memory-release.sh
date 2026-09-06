@@ -427,9 +427,10 @@ transactional_switch() {
 has_broker() { [[ -f $1/deploy/systemd/pickleshell-memory-broker.service.in ]]; }
 enabled_state() { if "$SYSTEMCTL" is-enabled "$1" >/dev/null 2>&1; then printf enabled; else printf disabled; fi; }
 restore_enabled() {
-  local backend=$1 broker=$2
-  if [[ $(enabled_state "$SERVICE") == "$backend" ]]; then :; elif [[ $backend == enabled ]]; then "$SYSTEMCTL" enable "$SERVICE"; else "$SYSTEMCTL" disable "$SERVICE"; fi || return
-  if [[ $(enabled_state "$BROKER_SERVICE") == "$broker" ]]; then :; elif [[ $broker == enabled ]]; then "$SYSTEMCTL" enable "$BROKER_SERVICE"; else "$SYSTEMCTL" disable "$BROKER_SERVICE"; fi
+  local backend=$1 broker=$2 failed=0
+  if [[ $(enabled_state "$SERVICE") == "$backend" ]]; then :; elif [[ $backend == enabled ]]; then "$SYSTEMCTL" enable "$SERVICE"; else "$SYSTEMCTL" disable "$SERVICE"; fi || failed=1
+  if [[ $(enabled_state "$BROKER_SERVICE") == "$broker" ]]; then :; elif [[ $broker == enabled ]]; then "$SYSTEMCTL" enable "$BROKER_SERVICE"; else "$SYSTEMCTL" disable "$BROKER_SERVICE"; fi || failed=1
+  return "$failed"
 }
 restart_verify() {
   if ! has_broker "$ACTIVE" && [[ -e $UNITS_DIR/$BROKER_SERVICE ]]; then
@@ -444,7 +445,6 @@ restart_verify() {
   fi
   "$WRAPPER_DIR/pickleshell-memory-ready"
 }
-RESTORE_DISABLED_ON_FIRST_FAILURE=0
 FIRST_ACTIVATION_BACKUP_ROOT=''
 FIRST_ACTIVATION_PATHS=(
   "$UNITS_DIR/$SERVICE" "$UNITS_DIR/$BROKER_SERVICE" "$WRAPPER_DIR/backend-wrapper" "$WRAPPER_DIR/broker-wrapper" "$WRAPPER_DIR/pickleshell-memory-mcp"
@@ -491,9 +491,7 @@ cleanup_failed_first_activation() {
   local failures=()
   "$SYSTEMCTL" stop "$BROKER_SERVICE" >/dev/null 2>&1 || failures+=(broker-stop)
   "$SYSTEMCTL" stop "$SERVICE" >/dev/null 2>&1 || failures+=(service-stop)
-  if ((RESTORE_DISABLED_ON_FIRST_FAILURE)); then
-    restore_enabled "$BACKEND_ENABLED_BEFORE" "$BROKER_ENABLED_BEFORE" >/dev/null 2>&1 || failures+=(enablement-restore)
-  fi
+  restore_enabled "$BACKEND_ENABLED_BEFORE" "$BROKER_ENABLED_BEFORE" >/dev/null 2>&1 || failures+=(enablement-restore)
   restore_first_activation_state || failures+=(state-restore)
   "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || failures+=(daemon-reload)
   if ((${#failures[@]})); then
@@ -633,7 +631,6 @@ if ! restart_verify || { [[ -n $previous ]] && ! has_broker "$ROOT/$previous" &&
   die 'activation readiness failed; first-activation state restored'
 fi
 if [[ -z $previous ]]; then
-  if ! "$SYSTEMCTL" is-enabled "$SERVICE" >/dev/null 2>&1 || ! "$SYSTEMCTL" is-enabled "$BROKER_SERVICE" >/dev/null 2>&1; then RESTORE_DISABLED_ON_FIRST_FAILURE=1; fi
   if ! "$SYSTEMCTL" enable "$SERVICE" || ! "$SYSTEMCTL" enable "$BROKER_SERVICE"; then
     if ! cleanup_failed_first_activation; then
       die "activation enablement failed; first-activation cleanup failed (${FIRST_ACTIVATION_CLEANUP_FAILURES:-unknown})"

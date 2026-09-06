@@ -463,9 +463,10 @@ case "$1" in
   enable)
     mkdir -p -- "${FAKE_SYSTEMD_ROOT:?}/enabled"
     touch "${FAKE_SYSTEMD_ROOT}/enabled/$2"
-    [[ ! -f ${FAKE_SYSTEMD_ROOT}/fail-enable ]]
+    [[ ! -f ${FAKE_SYSTEMD_ROOT}/fail-enable && ! -f ${FAKE_SYSTEMD_ROOT}/fail-enable-$2 ]]
     ;;
   disable)
+    [[ ! -f ${FAKE_SYSTEMD_ROOT:?}/fail-disable-$2 ]] || exit 1
     rm -f -- "${FAKE_SYSTEMD_ROOT:?}/enabled/$2"
     ;;
   stop)
@@ -506,6 +507,25 @@ case "$1" in
 esac
 EOF
 chmod 0755 "$PREFIX/bin/systemctl"
+# Exercise the real restoration helper when one service cannot be restored.
+# Failure must be reported, but must not skip restoring the other service.
+(
+  source <(sed -n '/^enabled_state()/,/^restart_verify()/p' "$FIXTURE/deploy/memory-release.sh" | sed '$d')
+  export FAKE_SYSTEMD_ROOT="$TMP/restore-failure"
+  mkdir -p "$FAKE_SYSTEMD_ROOT/enabled"
+  SYSTEMCTL="$PREFIX/bin/systemctl"
+  SERVICE=fixture-backend.service
+  BROKER_SERVICE=fixture-broker.service
+  touch "$FAKE_SYSTEMD_ROOT/enabled/$SERVICE" "$FAKE_SYSTEMD_ROOT/enabled/$BROKER_SERVICE"
+  touch "$FAKE_SYSTEMD_ROOT/fail-disable-$SERVICE"
+  if restore_enabled disabled disabled; then
+    echo 'enablement recovery failure was ignored' >&2
+    exit 1
+  fi
+  test -f "$FAKE_SYSTEMD_ROOT/enabled/$SERVICE"
+  test ! -e "$FAKE_SYSTEMD_ROOT/enabled/$BROKER_SERVICE"
+  grep -q "^disable $BROKER_SERVICE$" "$FAKE_SYSTEMD_ROOT/systemctl.calls"
+)
 
 REAL_MV=$(command -v mv)
 cat > "$PREFIX/bin/mv" <<EOF
@@ -873,7 +893,14 @@ printf '%s\n' \
   "PICKLESHELL_MEMORY_AUDIT_LOG=$FIRST_FAILURE/log/audit.jsonl" > "$FIRST_FAILURE/config/mcp.env"
 chmod 0640 "$FIRST_FAILURE/config/backend.env" "$FIRST_FAILURE/config/mcp.env"
 chmod 0600 "$FIRST_FAILURE/config/backend.env"
-touch "$FIRST_FAILURE/fail-enable"
+for prior_states in 'disabled disabled' 'enabled disabled' 'disabled enabled'; do
+read -r prior_backend prior_broker <<< "$prior_states"
+mkdir -p "$FIRST_FAILURE/enabled"
+rm -f "$FIRST_FAILURE/enabled/pickleshell-memory-first-failure.service" "$FIRST_FAILURE/enabled/isolated-memory-broker.service"
+[[ $prior_backend != enabled ]] || touch "$FIRST_FAILURE/enabled/pickleshell-memory-first-failure.service"
+[[ $prior_broker != enabled ]] || touch "$FIRST_FAILURE/enabled/isolated-memory-broker.service"
+: > "$FIRST_FAILURE/systemctl.calls"
+touch "$FIRST_FAILURE/fail-enable-isolated-memory-broker.service"
 if PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --source "$FIXTURE" --root "$FIRST_FAILURE/app" --commit "$SHA1" \
   --config-root "$FIRST_FAILURE/config" --state-root "$FIRST_FAILURE/state" --log-root "$FIRST_FAILURE/log" \
@@ -916,11 +943,20 @@ test -f "$FIRST_FAILURE/config/mcp.env"
 test -f "$FIRST_FAILURE/log/audit.jsonl"
 test "$(grep -c '^daemon-reload$' "$FIRST_FAILURE/systemctl.calls")" -eq 2
 grep -q '^stop pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
-test ! -e "$FIRST_FAILURE/enabled/pickleshell-memory-first-failure.service"
-grep -q '^disable pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
+grep -q '^enable pickleshell-memory-first-failure.service$' "$FIRST_FAILURE/systemctl.calls"
+grep -q '^enable isolated-memory-broker.service$' "$FIRST_FAILURE/systemctl.calls"
+for service_state in "pickleshell-memory-first-failure.service:$prior_backend" "isolated-memory-broker.service:$prior_broker"; do
+  if [[ ${service_state##*:} == enabled ]]; then
+    test -f "$FIRST_FAILURE/enabled/${service_state%:*}"
+  else
+    test ! -e "$FIRST_FAILURE/enabled/${service_state%:*}"
+    grep -q "^disable ${service_state%:*}$" "$FIRST_FAILURE/systemctl.calls"
+  fi
+done
 test ! -e "$FIRST_FAILURE/app/releases/$SHA1"
 
-rm -- "$FIRST_FAILURE/fail-enable"
+done
+rm -- "$FIRST_FAILURE/fail-enable-isolated-memory-broker.service"
 PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --source "$FIXTURE" --root "$FIRST_FAILURE/app" --commit "$SHA1" \
   --config-root "$FIRST_FAILURE/config" --state-root "$FIRST_FAILURE/state" --log-root "$FIRST_FAILURE/log" \
@@ -1358,11 +1394,18 @@ printf 'broker-upgrade\n' > "$FIXTURE/VERSION"
 git -C "$FIXTURE" add VERSION
 git -C "$FIXTURE" commit -qm broker-upgrade
 BROKER_UPGRADE_SHA=$(git -C "$FIXTURE" rev-parse HEAD)
-touch "$PREFIX/fail-enable"
+for prior_backend in disabled enabled; do
+[[ $prior_backend != enabled ]] || touch "$PREFIX/enabled/pickleshell-memory-isolated.service"
+touch "$PREFIX/fail-enable-isolated-memory-broker.service"
 if install_release "$BROKER_UPGRADE_SHA" >"$TMP/base-failed-enable.out" 2>&1; then exit 1; fi
-rm "$PREFIX/fail-enable"
+rm "$PREFIX/fail-enable-isolated-memory-broker.service"
 grep -q 'previous deployment restored and verified' "$TMP/base-failed-enable.out"
+if [[ $prior_backend == enabled ]]; then
+  test -f "$PREFIX/enabled/pickleshell-memory-isolated.service"
+  rm "$PREFIX/enabled/pickleshell-memory-isolated.service"
+fi
 assert_base_recovered
+done
 install_release "$BROKER_UPGRADE_SHA"
 test -f "$PREFIX/enabled/isolated-memory-broker.service"
 test ! -e "$PREFIX/enabled/pickleshell-memory-isolated.service"
