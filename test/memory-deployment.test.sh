@@ -135,6 +135,7 @@ EOF
 chmod 0755 "$ACL_BIN/stat"
 run_production_acl_case() {
   local name=$1 acl=$2 expected=$3 case_root
+  local -a action_args=(--rollback)
   case_root="$ACL_TMP/$name"
   mkdir -p -- "$case_root/config"
   printf 'BACKEND_TEST=1\n' > "$case_root/config/backend.env"
@@ -145,6 +146,7 @@ run_production_acl_case() {
   chgrp plugdev "$case_root/config/backend.env" "$case_root/config/mcp.env"
   chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
   setfacl -m "$acl" "$case_root/config"
+  [[ $expected != allow ]] || action_args=()
   if PATH="$ACL_BIN:$PATH" "$FIXTURE/deploy/memory-release.sh" \
     --profile production --root "$case_root/app" --config-root "$case_root/config" \
     --state-root "$case_root/state" --log-root "$case_root/log" \
@@ -152,7 +154,7 @@ run_production_acl_case() {
     --wrapper-dir "$case_root/wrappers" --backend-executable "$PREFLIGHT/bin/node" \
     --node-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl" \
     --service-user usbmux --service-group plugdev \
-    --service pickleshell-memory-acl.service --rollback > "$case_root/output" 2>&1; then
+    --service pickleshell-memory-acl.service "${action_args[@]}" > "$case_root/output" 2>&1; then
     echo "production ACL case $name unexpectedly succeeded" >&2
     exit 1
   fi
@@ -181,13 +183,50 @@ chmod 0755 "$ACL_BIN/getfacl"
 run_production_acl_case unavailable 'u:usbmux:r-x' unavailable
 cat > "$ACL_BIN/getfacl" <<EOF
 #!/usr/bin/env bash
-exec '$REAL_GETFACL' "\$@"
+case "\${*: -1}" in
+  "$ACL_TMP"/*/config) exec '$REAL_GETFACL' "\$@" ;;
+  *) printf 'user::rwx\ngroup::r-x\nother::r-x\n' ;;
+esac
 EOF
 chmod 0755 "$ACL_BIN/getfacl"
 run_production_acl_case named-user 'u:usbmux:rwx' reject
 run_production_acl_case named-group 'g:plugdev:rwx' reject
+run_production_acl_case other 'o:rwx' reject
 run_production_acl_case default-named-user 'd:u:usbmux:rwx' reject
+run_production_acl_case default-named-group 'd:g:plugdev:rwx' reject
+run_production_acl_case default-other 'd:o:rwx' reject
 run_production_acl_case safe 'u:usbmux:r-x,d:u:usbmux:r-x' allow
+grep -q 'source and full commit are required' "$ACL_TMP/safe/output"
+
+# Recreate the prior safe-ACL fallthrough: without the explicit successful
+# return, production mode under errexit exits 1 without reaching the next gate
+# or emitting an error.
+BROKEN_ACL_SCRIPT="$TMP/memory-release-broken-acl-return.sh"
+sed '/^  return 0$/d' "$FIXTURE/deploy/memory-release.sh" > "$BROKEN_ACL_SCRIPT"
+chmod 0755 "$BROKEN_ACL_SCRIPT"
+BROKEN_ACL_CASE="$ACL_TMP/broken-safe"
+mkdir -p -- "$BROKEN_ACL_CASE/config"
+printf 'BACKEND_TEST=1\n' > "$BROKEN_ACL_CASE/config/backend.env"
+printf '%s\n' \
+  'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
+  'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$BROKEN_ACL_CASE/log/audit.jsonl" > "$BROKEN_ACL_CASE/config/mcp.env"
+chgrp plugdev "$BROKEN_ACL_CASE/config/backend.env" "$BROKEN_ACL_CASE/config/mcp.env"
+chmod 0640 "$BROKEN_ACL_CASE/config/backend.env" "$BROKEN_ACL_CASE/config/mcp.env"
+setfacl -m 'u:usbmux:r-x,d:u:usbmux:r-x' "$BROKEN_ACL_CASE/config"
+if PATH="$ACL_BIN:$PATH" "$BROKEN_ACL_SCRIPT" \
+  --profile production --root "$BROKEN_ACL_CASE/app" --config-root "$BROKEN_ACL_CASE/config" \
+  --state-root "$BROKEN_ACL_CASE/state" --log-root "$BROKEN_ACL_CASE/log" \
+  --units-dir "$BROKEN_ACL_CASE/units" --logrotate-dir "$BROKEN_ACL_CASE/logrotate" \
+  --wrapper-dir "$BROKEN_ACL_CASE/wrappers" --backend-executable "$PREFLIGHT/bin/node" \
+  --node-executable "$PREFLIGHT/bin/node" --systemctl "$PREFLIGHT/bin/systemctl" \
+  --service-user usbmux --service-group plugdev \
+  --service pickleshell-memory-acl.service > "$BROKEN_ACL_CASE/output" 2>&1; then
+  echo 'broken safe ACL validator unexpectedly succeeded' >&2
+  exit 1
+fi
+test ! -s "$BROKEN_ACL_CASE/output"
+test ! -e "$BROKEN_ACL_CASE/app"
 
 for artifact in "$FIXTURE"/deploy/systemd/*.in; do
   printf '\n# release-marker: v1\n' >> "$artifact"

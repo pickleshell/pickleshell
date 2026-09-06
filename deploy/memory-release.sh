@@ -81,6 +81,7 @@ validate_operator_config_path() {
     operator_config_acl_allows_service_write "$acl" "$owner" "$group" "${service_gids[*]}" &&
       die 'operator config path is writable by the service identity'
   done
+  return 0
 }
 operator_config_acl_allows_service_write() {
   local acl=$1 owner=$2 owning_group=$3 gids=$4 line entry scope kind qualifier perms extra
