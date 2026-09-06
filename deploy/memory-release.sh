@@ -124,6 +124,36 @@ operator_config_acl_allows_service_write() {
 if [[ $PROFILE == production ]]; then validate_operator_config_path; fi
 for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"; do [[ ! -L $path ]] || die "sensitive path is a symlink: $path"; done
 RELEASES="$ROOT/releases"; ACTIVE="$ROOT/active"; DEPLOY_STATE="$ROOT/state"
+LOCK_FILE="${ROOT}.deploy.lock"; LOCK_FD=''; RELEASE_ID=''
+validate_operator_owned_directory() {
+  local path=$1 label=$2 owner mode
+  [[ -d $path && ! -L $path ]] || die "$label must be a real directory"
+  read -r owner mode < <(stat -Lc '%u %a' -- "$path") || die "cannot inspect $label"
+  [[ $owner == 0 && $((8#$mode & 0022)) == 0 ]] || die "$label must be root-owned and not group/other writable"
+}
+acquire_deployment_lock() {
+  local parent owner mode path_id fd_id expected_owner
+  parent=$(dirname -- "$LOCK_FILE")
+  if [[ $PROFILE == production ]]; then validate_operator_owned_directory "$parent" 'deployment lock parent'; fi
+  if [[ ! -e $LOCK_FILE && ! -L $LOCK_FILE ]]; then
+    (umask 077; set -o noclobber; : > "$LOCK_FILE") 2>/dev/null || true
+  fi
+  [[ -f $LOCK_FILE && ! -L $LOCK_FILE ]] || die 'deployment lock path is unsafe'
+  read -r owner mode < <(stat -Lc '%u %a' -- "$LOCK_FILE") || die 'cannot inspect deployment lock'
+  expected_owner=$(id -u); [[ $PROFILE != production ]] || expected_owner=0
+  [[ $owner == "$expected_owner" && $((8#$mode & 0022)) == 0 ]] || die 'deployment lock owner/mode is unsafe'
+  exec {LOCK_FD}<>"$LOCK_FILE" || die 'cannot open deployment lock'
+  path_id=$(stat -Lc '%d:%i' -- "$LOCK_FILE") || die 'cannot inspect deployment lock'
+  fd_id=$(stat -Lc '%d:%i' -- "/proc/$$/fd/$LOCK_FD") || die 'cannot inspect open deployment lock'
+  [[ $path_id == "$fd_id" ]] || die 'deployment lock changed while opening'
+  flock -n "$LOCK_FD" || die 'another memory deployment is already running'
+}
+validate_release_identity() {
+  local current
+  [[ -d $RELEASE && ! -L $RELEASE ]] || return 1
+  current=$(stat -Lc '%d:%i' -- "$RELEASE") || return 1
+  [[ -n $RELEASE_ID && $current == "$RELEASE_ID" ]]
+}
 validate_internal_paths() {
   local path label
   for path in "$RELEASES" "$DEPLOY_STATE"; do
@@ -185,9 +215,7 @@ if ((MANAGED_BACKEND)); then
   configured_backend_data=$(grep '^MEM0_DATA_DIR=' "$BACKEND_ENV_FILE" | cut -d= -f2-)
   [[ $configured_backend_data == "$STATE_ROOT/backend" ]] || die 'backend.env data directory must match the managed backend path'
 fi
-if ((ROLLBACK)); then
-  prevalidate_rollback
-else
+if ((!ROLLBACK)); then
   [[ -n $SOURCE && $COMMIT =~ ^[0-9a-fA-F]{40}$ ]] || die 'source and full commit are required'
   SOURCE=$(realpath -e -- "$SOURCE") || die 'source does not exist'
   SOURCE_TOPLEVEL=$(git -C "$SOURCE" rev-parse --show-toplevel 2>/dev/null) || die 'source must be a different Git worktree'
@@ -196,13 +224,22 @@ else
   [[ -z $(git -C "$SOURCE" status --porcelain=v1 --untracked-files=all) ]] || die 'source worktree is dirty'
   RESOLVED=$(git -C "$SOURCE" rev-parse --verify "$COMMIT^{commit}") || die 'commit does not resolve'
   [[ $RESOLVED == "$COMMIT" ]] || die 'commit is not exact'
-  RELEASE="$RELEASES/$RESOLVED"; STAGING="$RELEASES/.staging-$RESOLVED-$$"
+  RELEASE="$RELEASES/$RESOLVED"; STAGING=''
+  [[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
+fi
+acquire_deployment_lock
+if ((ROLLBACK)); then prevalidate_rollback; else
   [[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
 fi
 mkdir -p -- "$ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"
 if ((MANAGED_BACKEND)); then mkdir -p -- "$(dirname -- "$BACKEND_EXECUTABLE")"; fi
 ensure_internal_directory "$RELEASES" releases
 ensure_internal_directory "$DEPLOY_STATE" state
+if [[ $PROFILE == production ]]; then
+  validate_operator_owned_directory "$ROOT" 'deployment root'
+  validate_operator_owned_directory "$RELEASES" 'releases directory'
+  validate_operator_owned_directory "$DEPLOY_STATE" 'deployment state directory'
+fi
 if ((MANAGED_BACKEND)); then
   [[ ! -e $STATE_ROOT/backend && ! -L $STATE_ROOT/backend ]] && mkdir -- "$STATE_ROOT/backend"
   [[ -d $STATE_ROOT/backend && ! -L $STATE_ROOT/backend ]] || die 'managed backend data path is unsafe'
@@ -426,20 +463,42 @@ if ((ROLLBACK)); then
   printf 'memory-release: rolled back to %s\n' "$previous"; exit 0
 fi
 RELEASE_CREATED=0; ACTIVATION_SUCCEEDED=0
+release_reference_status() {
+  local expected="releases/$RESOLVED" path value
+  if [[ -L $ACTIVE ]]; then
+    value=$(readlink -- "$ACTIVE") || return 2
+    [[ $value == "$expected" ]] && return 0
+    [[ $value =~ ^releases/[0-9a-f]{40}$ ]] || return 2
+  elif [[ -e $ACTIVE ]]; then
+    return 2
+  fi
+  for path in "$DEPLOY_STATE/current-target" "$DEPLOY_STATE/previous-target"; do
+    if [[ -L $path ]]; then return 2; fi
+    if [[ -e $path ]]; then
+      [[ -f $path ]] || return 2
+      value=$(<"$path") || return 2
+      [[ $value == "$expected" ]] && return 0
+      [[ -z $value || $value =~ ^releases/[0-9a-f]{40}$ ]] || return 2
+    fi
+  done
+  return 1
+}
 cleanup_exit() {
-  local status=$? active_now='' release_cleanup_safe=1
+  local status=$? reference_status=0
   trap - EXIT
   [[ -z ${STAGING:-} ]] || rm -rf -- "$STAGING"
   [[ -z ${FIRST_ACTIVATION_BACKUP_ROOT:-} ]] || rm -rf -- "$FIRST_ACTIVATION_BACKUP_ROOT"
   if ((RELEASE_CREATED && ! ACTIVATION_SUCCEEDED)); then
-    if [[ -L $ACTIVE ]]; then
-      active_now=$(active_target) || release_cleanup_safe=0
-      [[ $active_now != "releases/$RESOLVED" ]] || release_cleanup_safe=0
-    elif [[ -e $ACTIVE ]]; then
-      release_cleanup_safe=0
+    if ! validate_release_identity; then
+      printf 'memory-release: error: preserving unsuccessful release because its identity changed: %s\n' "$RELEASE" >&2
+      exit 1
     fi
-    if ((!release_cleanup_safe)); then
-      printf 'memory-release: error: failed release cleanup; release may be active: %s\n' "$RELEASE" >&2
+    release_reference_status || reference_status=$?
+    if ((reference_status == 0)); then
+      printf 'memory-release: error: preserving unsuccessful release because deployment state references it: %s\n' "$RELEASE" >&2
+      status=1
+    elif ((reference_status == 2)); then
+      printf 'memory-release: error: preserving unsuccessful release because deployment references are unsafe: %s\n' "$RELEASE" >&2
       status=1
     elif ! find -P "$RELEASE" -type d -exec chmod u+w {} + || ! rm -rf -- "$RELEASE"; then
       printf 'memory-release: error: failed to remove unsuccessful release: %s\n' "$RELEASE" >&2
@@ -451,25 +510,40 @@ cleanup_exit() {
 trap cleanup_exit EXIT
 archive_paths=(deploy/systemd/pickleshell-memory-backend.service.in deploy/systemd/pickleshell-memory-backend.sh.in deploy/systemd/pickleshell-memory-mcp.sh.in deploy/systemd/pickleshell-memory.logrotate.in pickleshell-memory-mcp)
 ((MANAGED_BACKEND)) && archive_paths+=(deploy/systemd/pickleshell-memory-backend-bin.sh.in pickleshell-memory-backend)
-mkdir -- "$STAGING"; git -C "$SOURCE" archive "$RESOLVED" "${archive_paths[@]}" | tar -x -C "$STAGING"
-printf '%s\n' "$RESOLVED" > "$STAGING/.release-sha"; npm --prefix "$STAGING/pickleshell-memory-mcp" ci --omit=dev
+mkdir -- "$RELEASE" || die 'cannot atomically claim final release path without overwrite'
+RELEASE_CREATED=1
+RELEASE_ID=$(stat -Lc '%d:%i' -- "$RELEASE") || die 'cannot inspect claimed final release path'
+validate_release_identity || die 'final release path identity changed'
+git -C "$SOURCE" archive "$RESOLVED" "${archive_paths[@]}" | tar -x -C "$RELEASE"
+validate_release_identity || die 'final release path identity changed'
+printf '%s\n' "$RESOLVED" > "$RELEASE/.release-sha"; npm --prefix "$RELEASE/pickleshell-memory-mcp" ci --omit=dev
+validate_release_identity || die 'final release path identity changed'
 if ((MANAGED_BACKEND)); then
-  "$PYTHON_EXECUTABLE" -m venv --copies "$STAGING/pickleshell-memory-backend/.venv"
-  "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --require-hashes --no-deps -r "$STAGING/pickleshell-memory-backend/requirements.lock"
-  "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --no-build-isolation --no-deps "$STAGING/pickleshell-memory-backend"
-  "$STAGING/pickleshell-memory-backend/.venv/bin/pip" check
+  VENV="$RELEASE/pickleshell-memory-backend/.venv"
+  "$PYTHON_EXECUTABLE" -m venv --copies "$VENV"
+  "$VENV/bin/python" -m pip install --disable-pip-version-check --require-hashes --no-deps -r "$RELEASE/pickleshell-memory-backend/requirements.lock"
+  validate_release_identity || die 'final release path identity changed'
+  "$VENV/bin/python" -m pip install --disable-pip-version-check --no-build-isolation --no-deps "$RELEASE/pickleshell-memory-backend"
+  validate_release_identity || die 'final release path identity changed'
+  "$VENV/bin/python" -m pip check
+  if grep -R -F -l -- '.staging-' "$VENV/bin" >/dev/null; then
+    die 'final backend virtual environment contains a staging-path reference'
+  fi
 fi
+validate_release_identity || die 'final release path identity changed'
 while IFS= read -r -d '' link; do
   resolved_link=$(realpath -e -- "$link") || die 'release contains a broken symlink'
-  [[ $resolved_link == "$STAGING/pickleshell-memory-mcp"/* ||
-     $resolved_link == "$STAGING/pickleshell-memory-backend"/* ]] || die 'release symlink escapes a memory package'
-done < <(find -P "$STAGING" -type l -print0)
-find -P "$STAGING" -type d -exec chmod 0555 {} +; find -P "$STAGING" -type f -exec chmod 0444 {} +
+  [[ $resolved_link == "$RELEASE/pickleshell-memory-mcp"/* ||
+     $resolved_link == "$RELEASE/pickleshell-memory-backend"/* ]] || die 'release symlink escapes a memory package'
+done < <(find -P "$RELEASE" -type l -print0)
+validate_release_identity || die 'final release path identity changed'
+find -P "$RELEASE" -type d -exec chmod 0555 {} +; find -P "$RELEASE" -type f -exec chmod 0444 {} +
 if ((MANAGED_BACKEND)); then
-  find -P "$STAGING/pickleshell-memory-backend/.venv/bin" -type f -exec chmod 0555 {} +
-  chmod 0555 "$STAGING/pickleshell-memory-backend/bin/pickleshell-memory-backend"
+  find -P "$RELEASE/pickleshell-memory-backend/.venv/bin" -type f -exec chmod 0555 {} +
+  chmod 0555 "$RELEASE/pickleshell-memory-backend/bin/pickleshell-memory-backend"
 fi
-mv -T "$STAGING" "$RELEASE"; STAGING=''; RELEASE_CREATED=1; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
+validate_release_identity || die 'final release path identity changed'
+previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
 validate_internal_paths
 if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then
   prior_previous=$(optional_managed_release_target "$(<"$DEPLOY_STATE/previous-target")" previous)

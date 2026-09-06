@@ -242,6 +242,154 @@ LINKED_FIXTURE="$TMP/linked-source"
 git -C "$FIXTURE" worktree add -q --detach "$LINKED_FIXTURE" "$SHA1"
 test -f "$LINKED_FIXTURE/.git"
 
+LOCK_CASE="$TMP/deployment-lock"
+mkdir -p -- "$LOCK_CASE"/{app/releases,app/state,bin,config,log,logrotate,state,units}
+cp -- "$(command -v node)" "$LOCK_CASE/bin/node"
+printf '#!/usr/bin/env bash\ntouch %q\nexit 1\n' "$LOCK_CASE/systemctl-called" > "$LOCK_CASE/bin/systemctl"
+chmod 0755 "$LOCK_CASE/bin/node" "$LOCK_CASE/bin/systemctl"
+printf 'BACKEND_TEST=1\n' > "$LOCK_CASE/config/backend.env"
+printf '%s\n' 'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=lock-fixture' \
+  'PICKLESHELL_MEMORY_SCOPE=lock-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$LOCK_CASE/log/audit.jsonl" > "$LOCK_CASE/config/mcp.env"
+chmod 0640 "$LOCK_CASE/config/backend.env" "$LOCK_CASE/config/mcp.env"
+prior_sha=1111111111111111111111111111111111111111
+mkdir -- "$LOCK_CASE/app/releases/$prior_sha"
+printf '%s\n' "$prior_sha" > "$LOCK_CASE/app/releases/$prior_sha/.release-sha"
+printf 'prior-safe\n' > "$LOCK_CASE/app/releases/$prior_sha/sentinel"
+ln -s "releases/$prior_sha" "$LOCK_CASE/app/active"
+printf 'releases/%s\n' "$prior_sha" > "$LOCK_CASE/app/state/current-target"
+: > "$LOCK_CASE/app/state/previous-target"
+LOCK_PATH="$LOCK_CASE/app.deploy.lock"; : > "$LOCK_PATH"; chmod 0600 "$LOCK_PATH"
+exec {HELD_LOCK_FD}<>"$LOCK_PATH"; flock -n "$HELD_LOCK_FD"
+lock_before=$(find -P "$LOCK_CASE/app" -printf '%P|%y|%s|%m\n' | sort | sha256sum)
+for action in deploy rollback; do
+  args=(--profile isolated --root "$LOCK_CASE/app" --config-root "$LOCK_CASE/config" --state-root "$LOCK_CASE/state"
+    --log-root "$LOCK_CASE/log" --units-dir "$LOCK_CASE/units" --logrotate-dir "$LOCK_CASE/logrotate"
+    --wrapper-dir "$LOCK_CASE/bin" --backend-executable "$LOCK_CASE/bin/node" --node-executable "$LOCK_CASE/bin/node"
+    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-lock.service
+    --systemctl "$LOCK_CASE/bin/systemctl")
+  [[ $action == deploy ]] && args+=(--source "$FIXTURE" --commit "$SHA1") || args+=(--rollback)
+  if "$FIXTURE/deploy/memory-release.sh" "${args[@]}" >"$LOCK_CASE/$action.out" 2>&1; then
+    echo "contending $action unexpectedly acquired deployment lock" >&2; exit 1
+  fi
+  grep -q 'another memory deployment is already running' "$LOCK_CASE/$action.out"
+done
+exec {HELD_LOCK_FD}>&-
+test "$(find -P "$LOCK_CASE/app" -printf '%P|%y|%s|%m\n' | sort | sha256sum)" = "$lock_before"
+test "$(<"$LOCK_CASE/app/releases/$prior_sha/sentinel")" = prior-safe
+test ! -e "$LOCK_CASE/systemctl-called"
+
+for kind in symlink directory mode owner; do
+  unsafe="$TMP/unsafe-lock-$kind"; mkdir -p -- "$unsafe"/{bin,config,log,logrotate,state,units}
+  cp -- "$(command -v node)" "$unsafe/bin/node"; cp -- "$LOCK_CASE/bin/systemctl" "$unsafe/bin/systemctl"
+  chmod 0755 "$unsafe/bin/node" "$unsafe/bin/systemctl"
+  cp -- "$LOCK_CASE/config/backend.env" "$unsafe/config/backend.env"
+  sed "s|$LOCK_CASE/log|$unsafe/log|" "$LOCK_CASE/config/mcp.env" > "$unsafe/config/mcp.env"
+  chmod 0640 "$unsafe/config/"*.env
+  case $kind in
+    symlink) ln -s "$unsafe/config" "$unsafe/app.deploy.lock" ;;
+    directory) mkdir "$unsafe/app.deploy.lock" ;;
+    mode) : > "$unsafe/app.deploy.lock"; chmod 0666 "$unsafe/app.deploy.lock" ;;
+    owner)
+      : > "$unsafe/app.deploy.lock"; chmod 0600 "$unsafe/app.deploy.lock"
+      cat > "$unsafe/bin/stat" <<EOF
+#!/usr/bin/env bash
+if [[ \${*: -1} == '$unsafe/app.deploy.lock' && \$* == *"%u %a"* ]]; then printf '99999 600\\n'; exit 0; fi
+exec '$(command -v stat)' "\$@"
+EOF
+      chmod 0755 "$unsafe/bin/stat"
+      ;;
+  esac
+  if PATH="$unsafe/bin:$PATH" "$FIXTURE/deploy/memory-release.sh" --profile isolated --source "$FIXTURE" --root "$unsafe/app" --commit "$SHA1" \
+    --config-root "$unsafe/config" --state-root "$unsafe/state" --log-root "$unsafe/log" --units-dir "$unsafe/units" \
+    --logrotate-dir "$unsafe/logrotate" --wrapper-dir "$unsafe/bin" --backend-executable "$unsafe/bin/node" \
+    --node-executable "$unsafe/bin/node" --service-user "$(id -un)" --service-group "$(id -gn)" \
+    --service pickleshell-memory-unsafe-lock.service --systemctl "$unsafe/bin/systemctl" >"$unsafe/output" 2>&1; then
+    echo "unsafe lock $kind unexpectedly accepted" >&2; exit 1
+  fi
+  grep -Eq 'deployment lock path is unsafe|deployment lock owner/mode is unsafe' "$unsafe/output"
+  test ! -e "$unsafe/app"; test ! -e "$unsafe/systemctl-called"
+done
+
+# Atomically claiming the final release directory must not replace a file,
+# directory, or symlink that appears at the destination at claim time.
+COLLISION="$TMP/final-path-collision"
+COLLISION_VICTIM="$TMP/final-path-collision-victim"
+mkdir -p -- "$COLLISION"/{app,bin,config,log,logrotate,state,units} "$COLLISION_VICTIM"
+cp -- "$(command -v node)" "$COLLISION/bin/node"
+printf 'victim-safe\n' > "$COLLISION_VICTIM/sentinel"
+printf 'BACKEND_TEST=1\n' > "$COLLISION/config/backend.env"
+printf '%s\n' \
+  'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=collision-fixture' \
+  'PICKLESHELL_MEMORY_SCOPE=collision-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$COLLISION/log/audit.jsonl" > "$COLLISION/config/mcp.env"
+chmod 0640 "$COLLISION/config/backend.env" "$COLLISION/config/mcp.env"
+REAL_MKDIR=$(command -v mkdir)
+cat > "$COLLISION/bin/mkdir" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+target=\${*: -1}
+if [[ \$target == '$COLLISION/app/releases/$SHA1' ]]; then
+  ln -s '$COLLISION_VICTIM' "\$target"
+fi
+exec '$REAL_MKDIR' "\$@"
+EOF
+printf '#!/usr/bin/env bash\ntouch %q\nexit 1\n' "$COLLISION/systemctl-called" > "$COLLISION/bin/systemctl"
+chmod 0755 "$COLLISION/bin/node" "$COLLISION/bin/mkdir" "$COLLISION/bin/systemctl"
+if PATH="$COLLISION/bin:$PATH" "$FIXTURE/deploy/memory-release.sh" \
+  --profile isolated --source "$FIXTURE" --root "$COLLISION/app" --commit "$SHA1" \
+  --config-root "$COLLISION/config" --state-root "$COLLISION/state" --log-root "$COLLISION/log" \
+  --units-dir "$COLLISION/units" --logrotate-dir "$COLLISION/logrotate" --wrapper-dir "$COLLISION/bin" \
+  --backend-executable "$COLLISION/bin/node" --node-executable "$COLLISION/bin/node" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-collision.service \
+  --systemctl "$COLLISION/bin/systemctl" >"$COLLISION/output" 2>&1; then
+  echo 'atomic final release collision unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'cannot atomically claim final release path without overwrite' "$COLLISION/output"
+test -L "$COLLISION/app/releases/$SHA1"
+test "$(readlink "$COLLISION/app/releases/$SHA1")" = "$COLLISION_VICTIM"
+test "$(<"$COLLISION_VICTIM/sentinel")" = victim-safe
+test ! -e "$COLLISION/app/active"
+test ! -e "$COLLISION/app/state/current-target"
+test ! -e "$COLLISION/app/state/previous-target"
+test ! -e "$COLLISION/systemctl-called"
+
+REPLACEMENT="$TMP/final-path-replacement"
+REPLACEMENT_VICTIM="$TMP/final-path-replacement-victim"
+mkdir -p -- "$REPLACEMENT"/{bin,config,log,logrotate,state,units} "$REPLACEMENT_VICTIM"
+cp -- "$(command -v node)" "$REPLACEMENT/bin/node"
+printf 'victim-safe\n' > "$REPLACEMENT_VICTIM/sentinel"
+printf 'BACKEND_TEST=1\n' > "$REPLACEMENT/config/backend.env"
+printf '%s\n' 'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=replacement-fixture' \
+  'PICKLESHELL_MEMORY_SCOPE=replacement-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$REPLACEMENT/log/audit.jsonl" > "$REPLACEMENT/config/mcp.env"
+chmod 0640 "$REPLACEMENT/config/"*.env
+REAL_NPM=$(command -v npm)
+cat > "$REPLACEMENT/bin/npm" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+'$REAL_NPM' "\$@"
+mv -- '$REPLACEMENT/app/releases/$SHA1' '$REPLACEMENT/preserved-claimed-release'
+ln -s '$REPLACEMENT_VICTIM' '$REPLACEMENT/app/releases/$SHA1'
+EOF
+printf '#!/usr/bin/env bash\ntouch %q\nexit 1\n' "$REPLACEMENT/systemctl-called" > "$REPLACEMENT/bin/systemctl"
+chmod 0755 "$REPLACEMENT/bin/npm" "$REPLACEMENT/bin/node" "$REPLACEMENT/bin/systemctl"
+if PATH="$REPLACEMENT/bin:$PATH" "$FIXTURE/deploy/memory-release.sh" --profile isolated --source "$FIXTURE" \
+  --root "$REPLACEMENT/app" --commit "$SHA1" --config-root "$REPLACEMENT/config" --state-root "$REPLACEMENT/state" \
+  --log-root "$REPLACEMENT/log" --units-dir "$REPLACEMENT/units" --logrotate-dir "$REPLACEMENT/logrotate" \
+  --wrapper-dir "$REPLACEMENT/bin" --backend-executable "$REPLACEMENT/bin/node" --node-executable "$REPLACEMENT/bin/node" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-replacement.service \
+  --systemctl "$REPLACEMENT/bin/systemctl" >"$REPLACEMENT/output" 2>&1; then
+  echo 'post-claim release replacement unexpectedly succeeded' >&2; exit 1
+fi
+grep -q 'final release path identity changed' "$REPLACEMENT/output"
+grep -q 'preserving unsuccessful release because its identity changed' "$REPLACEMENT/output"
+test -L "$REPLACEMENT/app/releases/$SHA1"
+test "$(<"$REPLACEMENT_VICTIM/sentinel")" = victim-safe
+test -d "$REPLACEMENT/preserved-claimed-release"
+test ! -e "$REPLACEMENT/systemctl-called"
+
 cat > "$PREFIX/bin/backend.js" <<'EOF'
 #!/usr/bin/env node
 const http = require('node:http');
@@ -288,11 +436,14 @@ case "$1" in
   restart)
     pidfile=${FAKE_SYSTEMD_ROOT:?}/backend.pid
     if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; wait "$(<"$pidfile")" 2>/dev/null || true; fi
-    if [[ $2 == pickleshell-memory-isolated.service || $2 == pickleshell-memory-first-failure.service || $2 == pickleshell-memory-managed.service ]]; then
+    if [[ $2 == pickleshell-memory-isolated.service || $2 == pickleshell-memory-first-failure.service ||
+          $2 == pickleshell-memory-managed.service || $2 == pickleshell-memory-real.service ||
+          $2 == pickleshell-memory-parent-real.service ]]; then
       set -a
       source "${FAKE_SYSTEMD_ROOT}/config/backend.env"
       set +a
-      "${FAKE_SYSTEMD_ROOT}/bin/backend-wrapper" >/dev/null 2>&1 & echo $! > "$pidfile"
+      for inherited_fd in {10..64}; do eval "exec ${inherited_fd}>&-" 2>/dev/null || true; done
+      "${FAKE_BACKEND_COMMAND:-${FAKE_SYSTEMD_ROOT}/bin/backend-wrapper}" >/dev/null 2>&1 & echo $! > "$pidfile"
       for _ in {1..50}; do
         kill -0 "$!" 2>/dev/null || exit 1
         if curl --fail --silent --max-time 0.2 "http://127.0.0.1:${FAKE_BACKEND_PORT}/health" >/dev/null; then
@@ -430,6 +581,10 @@ set -Eeuo pipefail
 if [[ ${1:-} == -c ]]; then
   exit 0
 fi
+if [[ ${1:-} == -m && ${2:-} == pip ]]; then
+  shift 2
+  exec "$(dirname -- "$0")/pip" "$@"
+fi
 if [[ ${1:-} == -m && ${2:-} == venv ]]; then
   target=${*: -1}
   mkdir -p -- "$target/bin"
@@ -518,6 +673,70 @@ test "$(stat -c %a "$MANAGED/state/backend")" = 750
 "$MANAGED/bin/pickleshell-memory-ready"
 kill "$(<"$MANAGED/backend.pid")" 2>/dev/null || true
 
+REAL_PYTHON=/usr/bin/python3.12
+[[ -f $REAL_PYTHON && -x $REAL_PYTHON && ! -L $REAL_PYTHON ]] || {
+  echo 'real CPython 3.12 is required for managed deployment relocation coverage' >&2
+  exit 1
+}
+run_real_managed_install() {
+  local script=$1 case_root=$2 service=$3 port
+  port=$((39001 + RANDOM % 5000))
+  mkdir -p -- "$case_root"/{bin,config,log,logrotate,state,units}
+  cp -- "$PREFIX/bin/backend.js" "$PREFIX/bin/systemctl" "$case_root/bin/"
+  chmod 0755 "$case_root/bin/backend.js" "$case_root/bin/systemctl"
+  printf 'FAKE_BACKEND_PORT=%s\nMEM0_DATA_DIR=%s\n' "$port" "$case_root/state/backend" > "$case_root/config/backend.env"
+  printf '%s\n' \
+    'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=real-managed-fixture' \
+    'PICKLESHELL_MEMORY_SCOPE=real-managed-fixture-scope' "PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:$port" \
+    "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
+  chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$case_root" FAKE_BACKEND_COMMAND="$case_root/bin/backend.js" "$script" \
+    --profile isolated --source "$FIXTURE" --root "$case_root/app" --commit "$SHA1" \
+    --config-root "$case_root/config" --state-root "$case_root/state" --log-root "$case_root/log" \
+    --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" --wrapper-dir "$case_root/bin" \
+    --managed-backend-executable "$case_root/bin/pickleshell-memory-backend" \
+    --python-executable "$REAL_PYTHON" --node-executable "$(command -v node)" \
+    --service-user "$(id -un)" --service-group "$(id -gn)" --service "$service" \
+    --systemctl "$case_root/bin/systemctl"
+}
+
+# Prove the parent installer creates console entrypoints that retain the
+# deleted staging path after its final release rename.
+PARENT_INSTALLER="$TMP/memory-release-parent.sh"
+git -C "$REPO" show 4956dec93ab06fc033c75e8c4afbb97f69e62f90:deploy/memory-release.sh > "$PARENT_INSTALLER"
+chmod 0755 "$PARENT_INSTALLER"
+PARENT_REAL="$TMP/parent-real-managed"
+run_real_managed_install "$PARENT_INSTALLER" "$PARENT_REAL" pickleshell-memory-parent-real.service
+PARENT_VENV="$PARENT_REAL/app/releases/$SHA1/pickleshell-memory-backend/.venv"
+if "$PARENT_VENV/bin/pip" check >"$PARENT_REAL/stale-pip.out" 2>&1; then
+  echo 'parent relocated pip unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -F '/releases/.staging-' "$PARENT_VENV/bin/pip" >/dev/null
+! compgen -G "$PARENT_REAL/app/releases/.staging-*" >/dev/null
+"$PARENT_VENV/bin/python" -m pip check
+kill "$(<"$PARENT_REAL/backend.pid")" 2>/dev/null || true
+
+REAL_MANAGED="$TMP/real-managed"
+run_real_managed_install "$FIXTURE/deploy/memory-release.sh" "$REAL_MANAGED" pickleshell-memory-real.service
+REAL_VENV="$REAL_MANAGED/app/releases/$SHA1/pickleshell-memory-backend/.venv"
+"$REAL_VENV/bin/pip" check
+"$REAL_VENV/bin/pip3" --version >/dev/null
+"$REAL_VENV/bin/uvicorn" --version >/dev/null
+if env -i PATH=/usr/bin:/bin "$REAL_VENV/bin/pickleshell-memory-backend" >"$REAL_MANAGED/backend-entrypoint.out" 2>&1; then
+  echo 'backend console entrypoint unexpectedly started without configuration' >&2
+  exit 1
+fi
+grep -q 'configuration error: backend bearer token is required' "$REAL_MANAGED/backend-entrypoint.out"
+"$REAL_VENV/bin/python" -m pip check
+if grep -R -F -l -- '.staging-' "$REAL_VENV/bin" >"$REAL_MANAGED/staging-references.out"; then
+  echo 'final virtual environment contains a staging-path reference' >&2
+  exit 1
+fi
+test ! -s "$REAL_MANAGED/staging-references.out"
+! compgen -G "$REAL_MANAGED/app/releases/.staging-*" >/dev/null
+kill "$(<"$REAL_MANAGED/backend.pid")" 2>/dev/null || true
+
 run_unsafe_internal_path_case() {
   local name=$1 path_kind=$2 case_root victim expected_entries=1
   case_root="$TMP/unsafe-$name"; victim="$TMP/unsafe-$name-victim"
@@ -582,8 +801,8 @@ for artifact in \
   chmod 0600 "$artifact"
   FIRST_FAILURE_PRIOR_MODES["$artifact"]=$(stat -c %a "$artifact")
 done
-printf 'pre-existing-current\n' > "$FIRST_FAILURE/app/state/current-target"
-printf 'pre-existing-previous\n' > "$FIRST_FAILURE/app/state/previous-target"
+printf 'releases/%040d\n' 2 > "$FIRST_FAILURE/app/state/current-target"
+printf 'releases/%040d\n' 3 > "$FIRST_FAILURE/app/state/previous-target"
 FIRST_FAILURE_PRIOR_HASHES=$(sha256sum \
   "$FIRST_FAILURE/units/pickleshell-memory-first-failure.service" \
   "$FIRST_FAILURE/bin/backend-wrapper" \
@@ -620,8 +839,8 @@ test -f "$FIRST_FAILURE/backend.pid" || { cat "$TMP/first-failure.out" >&2; exit
 FIRST_FAILURE_PID=$(<"$FIRST_FAILURE/backend.pid")
 ! kill -0 "$FIRST_FAILURE_PID" 2>/dev/null
 test ! -e "$FIRST_FAILURE/app/active"
-test "$(<"$FIRST_FAILURE/app/state/current-target")" = pre-existing-current
-test "$(<"$FIRST_FAILURE/app/state/previous-target")" = pre-existing-previous
+test "$(<"$FIRST_FAILURE/app/state/current-target")" = "releases/$(printf '%040d' 2)"
+test "$(<"$FIRST_FAILURE/app/state/previous-target")" = "releases/$(printf '%040d' 3)"
 for artifact in \
   "$FIRST_FAILURE/units/pickleshell-memory-first-failure.service" \
   "$FIRST_FAILURE/bin/backend-wrapper" \
@@ -727,6 +946,58 @@ assert_v1_preserved() {
   "$PREFIX/bin/pickleshell-memory-ready"
   ! find "$PREFIX/app" "$PREFIX/units" "$PREFIX/bin" "$PREFIX/logrotate" -type f \( -name '.*.render.*' -o -name '.*.backup.*' -o -name '.*.switch.*' \) | grep -q .
 }
+
+# Model partial transaction recovery that leaves each managed reference on the
+# unsuccessful release. EXIT cleanup must preserve every referenced release.
+run_referenced_cleanup_case() {
+  local reference=$1 case_root="$TMP/referenced-cleanup-$1" prior_sha injection script
+  prior_sha=1111111111111111111111111111111111111111
+  mkdir -p -- "$case_root"/{app/releases/$prior_sha,app/state,bin,config,log,logrotate,state,units}
+  printf '%s\n' "$prior_sha" > "$case_root/app/releases/$prior_sha/.release-sha"
+  printf 'prior-safe\n' > "$case_root/app/releases/$prior_sha/sentinel"
+  ln -s "releases/$prior_sha" "$case_root/app/active"
+  printf 'releases/%s\n' "$prior_sha" > "$case_root/app/state/current-target"
+  : > "$case_root/app/state/previous-target"
+  cp -- "$(command -v node)" "$case_root/bin/node"
+  printf '#!/usr/bin/env bash\ntouch %q\nexit 1\n' "$case_root/systemctl-called" > "$case_root/bin/systemctl"
+  chmod 0755 "$case_root/bin/node" "$case_root/bin/systemctl"
+  printf 'BACKEND_TEST=1\n' > "$case_root/config/backend.env"
+  printf '%s\n' \
+    'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=reference-fixture' \
+    'PICKLESHELL_MEMORY_SCOPE=reference-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+    "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
+  chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  case $reference in
+    active) injection="rm -f -- '$case_root/app/active'; ln -s 'releases/$SHA1' '$case_root/app/active'; false" ;;
+    current) injection="printf 'releases/%s\\n' '$SHA1' > '$case_root/app/state/current-target'; false" ;;
+    previous) injection="printf 'releases/%s\\n' '$SHA1' > '$case_root/app/state/previous-target'; false" ;;
+  esac
+  script="$case_root/memory-release-$reference.sh"
+  sed "/^previous=''/i $injection" "$FIXTURE/deploy/memory-release.sh" > "$script"
+  chmod 0755 "$script"
+  if "$script" \
+    --profile isolated --source "$FIXTURE" --root "$case_root/app" --commit "$SHA1" \
+    --config-root "$case_root/config" --state-root "$case_root/state" --log-root "$case_root/log" \
+    --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" --wrapper-dir "$case_root/bin" \
+    --backend-executable "$case_root/bin/node" --node-executable "$case_root/bin/node" \
+    --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-reference.service \
+    --systemctl "$case_root/bin/systemctl" >"$case_root/output" 2>&1; then
+    echo "referenced cleanup case $reference unexpectedly succeeded" >&2
+    exit 1
+  fi
+  grep -q 'preserving unsuccessful release because deployment state references it' "$case_root/output"
+  test -d "$case_root/app/releases/$SHA1"
+  test "$(<"$case_root/app/releases/$SHA1/.release-sha")" = "$SHA1"
+  test "$(<"$case_root/app/releases/$prior_sha/sentinel")" = prior-safe
+  test ! -e "$case_root/systemctl-called"
+  ! compgen -G "$case_root/app/releases/.staging-*" >/dev/null
+  if [[ $reference != active ]]; then
+    test "$(readlink "$case_root/app/active")" = "releases/$prior_sha"
+  fi
+}
+run_referenced_cleanup_case active
+run_referenced_cleanup_case current
+run_referenced_cleanup_case previous
 
 for failure in current-state active; do
   git -C "$FIXTURE" checkout -q "$SHA1" -- deploy/systemd

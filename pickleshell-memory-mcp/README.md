@@ -87,6 +87,14 @@ MCP stdio initialize, tool discovery, and `memory_capabilities` backend health
 call. On failure the activation is rejected. To switch back to the recorded
 previous release, repeat the path/identity options with `--rollback`.
 
+Normal deployment and rollback serialize on the operator-owned per-root lock
+`<root>.deploy.lock`. In production, the lock parent, deployment root,
+`releases`, and deployment `state` directory must be root-owned and not
+group/other writable. Together with final-release inode checks, this prevents
+the service identity and other unprivileged users from replacing releases or
+racing state cleanup. A hostile root process can bypass these controls and is
+outside this deployment threat model.
+
 The audit contract is `/var/log/pickleshell-memory/audit.jsonl`, owned by the
 memory service identity and group-writable mode `0660`, in a `0750` directory.
 The configured memory group gives wrapper-launching identities access without
