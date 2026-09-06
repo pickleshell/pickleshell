@@ -7,7 +7,7 @@ usage() { printf '%s\n' 'Usage: memory-release.sh --source REPO --root ROOT --co
 SOURCE=''; ROOT='/opt/pickleshell-memory'; COMMIT=''; PROFILE=production
 CONFIG_ROOT='/etc/pickleshell-memory'; STATE_ROOT='/var/lib/pickleshell-memory'; LOG_ROOT='/var/log/pickleshell-memory'
 UNITS_DIR='/etc/systemd/system'; LOGROTATE_DIR='/etc/logrotate.d'; WRAPPER_DIR='/usr/local/libexec'
-SERVICE_USER='pickleshell-memory'; SERVICE_GROUP='pickleshell-memory'; SERVICE='pickleshell-memory-backend.service'
+SERVICE_USER='pickleshell-memory'; SERVICE_GROUP='pickleshell-memory'; SERVICE='pickleshell-memory-backend.service'; BROKER_SERVICE='pickleshell-memory-broker.service'
 NODE_EXECUTABLE='/usr/bin/node'; BACKEND_EXECUTABLE='/usr/local/bin/pickleshell-memory-backend'; SYSTEMCTL=systemctl; ROLLBACK=0
 PYTHON_EXECUTABLE='/usr/bin/python3.12'; MANAGED_BACKEND=1
 ISOLATED_ROOT_SET=0; ISOLATED_CONFIG_SET=0; ISOLATED_STATE_SET=0; ISOLATED_LOG_SET=0
@@ -23,7 +23,7 @@ while (($#)); do case "$1" in
   --python-executable) PYTHON_EXECUTABLE=${2:-}; shift 2;;
   --backend-executable) BACKEND_EXECUTABLE=${2:-}; MANAGED_BACKEND=0; ISOLATED_BACKEND_SET=1; shift 2;;
   --managed-backend-executable) BACKEND_EXECUTABLE=${2:-}; MANAGED_BACKEND=1; ISOLATED_BACKEND_SET=1; shift 2;;
-  --systemctl) SYSTEMCTL=${2:-}; ISOLATED_SYSTEMCTL_SET=1; shift 2;; --rollback) ROLLBACK=1; shift;;
+  --broker-service) BROKER_SERVICE=${2:-}; shift 2;; --systemctl) SYSTEMCTL=${2:-}; ISOLATED_SYSTEMCTL_SET=1; shift 2;; --rollback) ROLLBACK=1; shift;;
   -h|--help) usage; exit 0;; *) usage >&2; die "unknown option: $1";; esac done
 [[ $PROFILE == production || $PROFILE == isolated ]] || die 'profile must be production or isolated'
 if [[ $PROFILE == isolated ]]; then
@@ -50,6 +50,7 @@ validate_no_symlink_components() {
 for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR" "$NODE_EXECUTABLE" "$PYTHON_EXECUTABLE" "$BACKEND_EXECUTABLE"; do validate_no_symlink_components "$path"; done
 [[ $SERVICE_USER =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_GROUP =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_USER != root ]] || die 'unsafe service identity'
 [[ $SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.service$ && $SERVICE != *..* ]] || die 'unsafe service name'
+[[ $BROKER_SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.service$ && $BROKER_SERVICE != *..* ]] || die 'unsafe broker service name'
 service_uid=$(id -u "$SERVICE_USER") || die 'service user does not exist'
 service_gid=$(getent group "$SERVICE_GROUP" | cut -d: -f3); [[ -n $service_gid ]] || die 'service group does not exist'
 validate_operator_config_path() {
@@ -208,6 +209,7 @@ for file in "$BACKEND_ENV_FILE" "$MCP_ENV_FILE"; do
   [[ $(stat -c %u "$file") == $(id -u) && $(stat -c %g "$file") == "$service_gid" ]] || die "operator config owner/group is unsafe: $file"
 done
 [[ $(grep -c '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE") == 1 ]] || die 'mcp.env must define PICKLESHELL_MEMORY_AUDIT_LOG exactly once'
+[[ $(grep -c '^PICKLESHELL_MEMORY_BACKEND_TOKEN=' "$MCP_ENV_FILE") == 0 ]] || die 'mcp.env must not contain a backend credential; use the broker'
 configured_audit=$(grep '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE" | cut -d= -f2-)
 [[ $configured_audit == "$AUDIT_LOG" ]] || die 'mcp.env audit log must match the managed audit path'
 if ((MANAGED_BACKEND)); then
@@ -272,15 +274,17 @@ render_artifacts() {
   local -a targets=() staged_files=() backup_files=() had_prior=() committed=()
   local -a specs=(
     "pickleshell-memory-backend.service.in:$UNITS_DIR/$SERVICE:0644" \
+    "pickleshell-memory-broker.service.in:$UNITS_DIR/$BROKER_SERVICE:0644" \
     "pickleshell-memory-backend.sh.in:$WRAPPER_DIR/backend-wrapper:0755" \
+    "pickleshell-memory-broker.sh.in:$WRAPPER_DIR/broker-wrapper:0755" \
     "pickleshell-memory-mcp.sh.in:$WRAPPER_DIR/pickleshell-memory-mcp:0755" \
     "pickleshell-memory.logrotate.in:$LOGROTATE_DIR/pickleshell-memory:0644"
   )
   ((MANAGED_BACKEND)) && specs+=("pickleshell-memory-backend-bin.sh.in:$BACKEND_EXECUTABLE:0755")
   for spec in "${specs[@]}"; do
     template="$release/deploy/systemd/${spec%%:*}"; target=${spec#*:}; mode=${target##*:}; target=${target%:*}; contents=$(<"$template") || return
-    for token in ACTIVE_ROOT CONFIG_ROOT STATE_ROOT LOG_ROOT BACKEND_ENV_FILE MCP_ENV_FILE AUDIT_LOG SERVICE_USER SERVICE_GROUP BACKEND_EXECUTABLE NODE_EXECUTABLE BACKEND_WRAPPER; do
-      case $token in ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; esac
+    for token in ACTIVE_ROOT CONFIG_ROOT STATE_ROOT LOG_ROOT BACKEND_ENV_FILE MCP_ENV_FILE AUDIT_LOG SERVICE_USER SERVICE_GROUP BACKEND_EXECUTABLE NODE_EXECUTABLE BACKEND_WRAPPER BROKER_WRAPPER PYTHON_EXECUTABLE; do
+      case $token in ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; PYTHON_EXECUTABLE) value=$PYTHON_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; BROKER_WRAPPER) value="$WRAPPER_DIR/broker-wrapper";; esac
       contents=${contents//"@$token@"/"$value"}
     done
     if [[ $contents == *'@'* ]]; then
@@ -340,7 +344,7 @@ TRANSACTION_RECOVERY_FAILURES=''
 transactional_switch() {
   local release=$1 target=$2 previous=$3 backup_root="$ROOT/.switch-backup.$$" index path temp active_before=''
   local -a paths=(
-    "$UNITS_DIR/$SERVICE" "$WRAPPER_DIR/backend-wrapper" "$WRAPPER_DIR/pickleshell-memory-mcp"
+    "$UNITS_DIR/$SERVICE" "$UNITS_DIR/$BROKER_SERVICE" "$WRAPPER_DIR/backend-wrapper" "$WRAPPER_DIR/broker-wrapper" "$WRAPPER_DIR/pickleshell-memory-mcp"
     "$WRAPPER_DIR/pickleshell-memory-ready" "$LOGROTATE_DIR/pickleshell-memory"
     "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/current-target"
   ) had_prior=() failures=()
@@ -388,11 +392,11 @@ transactional_switch() {
   rm -rf -- "$backup_root" || { TRANSACTION_RECOVERY_FAILURES=backup-cleanup; return 2; }
   return 1
 }
-restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
+restart_verify() { "$SYSTEMCTL" daemon-reload && "$SYSTEMCTL" restart "$SERVICE" && "$SYSTEMCTL" restart "$BROKER_SERVICE" && "$SYSTEMCTL" is-active "$SERVICE" "$BROKER_SERVICE" >/dev/null && "$WRAPPER_DIR/pickleshell-memory-ready"; }
 RESTORE_DISABLED_ON_FIRST_FAILURE=0
 FIRST_ACTIVATION_BACKUP_ROOT=''
 FIRST_ACTIVATION_PATHS=(
-  "$UNITS_DIR/$SERVICE" "$WRAPPER_DIR/backend-wrapper" "$WRAPPER_DIR/pickleshell-memory-mcp"
+  "$UNITS_DIR/$SERVICE" "$UNITS_DIR/$BROKER_SERVICE" "$WRAPPER_DIR/backend-wrapper" "$WRAPPER_DIR/broker-wrapper" "$WRAPPER_DIR/pickleshell-memory-mcp"
   "$WRAPPER_DIR/pickleshell-memory-ready" "$LOGROTATE_DIR/pickleshell-memory"
   "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/current-target"
 )
@@ -434,8 +438,10 @@ restore_first_activation_state() {
 }
 cleanup_failed_first_activation() {
   local failures=()
+  "$SYSTEMCTL" stop "$BROKER_SERVICE" >/dev/null 2>&1 || failures+=(broker-stop)
   "$SYSTEMCTL" stop "$SERVICE" >/dev/null 2>&1 || failures+=(service-stop)
   if ((RESTORE_DISABLED_ON_FIRST_FAILURE)); then
+    "$SYSTEMCTL" disable "$BROKER_SERVICE" >/dev/null 2>&1 || failures+=(broker-disable)
     "$SYSTEMCTL" disable "$SERVICE" >/dev/null 2>&1 || failures+=(service-disable)
   fi
   restore_first_activation_state || failures+=(state-restore)
@@ -508,7 +514,7 @@ cleanup_exit() {
   exit "$status"
 }
 trap cleanup_exit EXIT
-archive_paths=(deploy/systemd/pickleshell-memory-backend.service.in deploy/systemd/pickleshell-memory-backend.sh.in deploy/systemd/pickleshell-memory-mcp.sh.in deploy/systemd/pickleshell-memory.logrotate.in pickleshell-memory-mcp)
+archive_paths=(deploy/systemd/pickleshell-memory-backend.service.in deploy/systemd/pickleshell-memory-broker.service.in deploy/systemd/pickleshell-memory-backend.sh.in deploy/systemd/pickleshell-memory-broker.sh.in deploy/systemd/pickleshell-memory-mcp.sh.in deploy/systemd/pickleshell-memory.logrotate.in pickleshell-memory-mcp pickleshell-memory-broker)
 ((MANAGED_BACKEND)) && archive_paths+=(deploy/systemd/pickleshell-memory-backend-bin.sh.in pickleshell-memory-backend)
 mkdir -- "$RELEASE" || die 'cannot atomically claim final release path without overwrite'
 RELEASE_CREATED=1
@@ -570,8 +576,8 @@ if ! restart_verify; then
   die 'activation readiness failed; first-activation state restored'
 fi
 if [[ -z $previous ]]; then
-  if ! "$SYSTEMCTL" is-enabled "$SERVICE" >/dev/null 2>&1; then RESTORE_DISABLED_ON_FIRST_FAILURE=1; fi
-  if ! "$SYSTEMCTL" enable "$SERVICE"; then
+  if ! "$SYSTEMCTL" is-enabled "$SERVICE" >/dev/null 2>&1 || ! "$SYSTEMCTL" is-enabled "$BROKER_SERVICE" >/dev/null 2>&1; then RESTORE_DISABLED_ON_FIRST_FAILURE=1; fi
+  if ! "$SYSTEMCTL" enable "$SERVICE" "$BROKER_SERVICE"; then
     if ! cleanup_failed_first_activation; then
       die "activation enablement failed; first-activation cleanup failed (${FIRST_ACTIVATION_CLEANUP_FAILURES:-unknown})"
     fi

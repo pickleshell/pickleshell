@@ -38,8 +38,8 @@ Optional variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PICKLESHELL_MEMORY_BACKEND_URL` | `http://127.0.0.1:8766` | Credential-free Mem0 HTTP base URL |
-| `PICKLESHELL_MEMORY_BACKEND_TOKEN` | unset | Bearer credential sent only to the backend |
+| `PICKLESHELL_MEMORY_BACKEND_URL` | `http://127.0.0.1:8767` | Credential-free scoped broker HTTP base URL |
+| `PICKLESHELL_MEMORY_BACKEND_TOKEN` | unset | Legacy direct-backend test option; omit when using the broker |
 | `PICKLESHELL_MEMORY_TIMEOUT_MS` | `10000` | Request timeout, 1–120000 ms |
 
 ## Optional immutable deployment profile
@@ -60,10 +60,11 @@ Before installation, create the dedicated `pickleshell-memory` user/group and
 operator-owned `/etc/pickleshell-memory/backend.env` and `mcp.env` files. Both
 files must be regular, non-symlink files owned by the invoking operator, group
 `pickleshell-memory`, mode `0640`. Put backend process configuration in
-`backend.env`; put the MCP variables below and any backend bearer token in
-`mcp.env`. Secrets are never passed on a command line. The backend executable
-is a credential-free, fixed path and receives its configuration through the
-service environment. Every OS identity whose MCP client launches the installed
+`backend.env`; put only non-secret MCP variables in `mcp.env`. The host-side
+fixed-scope broker reads the backend bearer token from `backend.env`; Codex and
+the MCP client never receive that credential. The backend executable is a
+credential-free, fixed path and receives its configuration through the service
+environment. Every OS identity whose MCP client launches the installed
 `pickleshell-memory-mcp` wrapper must be a member of the configured memory
 service group. That dedicated group is the shared boundary for reading
 `mcp.env` and writing the managed audit log; do not grant access to other

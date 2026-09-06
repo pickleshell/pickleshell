@@ -79,7 +79,10 @@ The optional Memory deployment stages its repository-owned Python Mem0 backend
 and pinned dependency lock inside the independent Memory release. Its managed
 launcher is transactionally installed at
 `/usr/local/bin/pickleshell-memory-backend`; Gateway does not depend on it.
-Production Memory uses authenticated loopback port 8766 and the separate
+Production Memory uses an authenticated backend on loopback port 8766 and a
+separate fixed-scope credential broker on loopback port 8767. Codex and the MCP
+client connect only to the broker; it reads the backend bearer credential from
+`backend.env`, rejects client authorization, and injects `user_id=codex-bos-v1`.
 `/var/lib/pickleshell-memory/backend` persistence root. Port 8765 and any BOS
 spike data remain outside this lifecycle. Review
 `pickleshell-memory-backend/README.md` and

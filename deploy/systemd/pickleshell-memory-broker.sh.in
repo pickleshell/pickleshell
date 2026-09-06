@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec env PYTHONPATH=@ACTIVE_ROOT@/pickleshell-memory-broker @PYTHON_EXECUTABLE@ -m pickleshell_memory_broker.server
