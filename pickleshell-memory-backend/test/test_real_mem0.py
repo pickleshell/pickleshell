@@ -1,5 +1,7 @@
 import gc
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,6 +57,22 @@ class RealMem0Tests(unittest.TestCase):
         self.assertIsNone(telemetry._oss_telemetry_instance)
         self.assertEqual(os.environ["MEM0_TELEMETRY"], "false")
         self.close(memory)
+
+    def test_telemetry_emission_traps_in_fresh_subprocess(self):
+        test_root = Path(__file__).parent
+        package_root = test_root.parent
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = os.pathsep.join((str(test_root), str(package_root)))
+        completed = subprocess.run(
+            [sys.executable, str(test_root / "telemetry_probe.py")],
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, "telemetry subprocess regression: ok\n")
 
 
 if __name__ == "__main__":
