@@ -31,8 +31,9 @@ coding sessions, delegate to an operator-approved model, and transfer files
 into a controlled workspace.
 
 An independently installed [Memory MCP](pickleshell-memory-mcp/README.md) is
-available as an optional workstation sidecar integration. It is not a fourth
-core service and never participates in Gateway startup or readiness.
+available with a repository-owned [self-hosted Mem0 backend](pickleshell-memory-backend/README.md)
+as an optional workstation sidecar integration. It is not a fourth core
+service and never participates in Gateway startup or readiness.
 
 ## Philosophy
 

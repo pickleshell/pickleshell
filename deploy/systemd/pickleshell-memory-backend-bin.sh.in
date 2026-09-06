@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec @ACTIVE_ROOT@/pickleshell-memory-backend/.venv/bin/python -m pickleshell_memory_backend

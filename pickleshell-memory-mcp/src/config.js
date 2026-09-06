@@ -9,7 +9,7 @@ export function loadConfig(env = process.env) {
   const auditLog = env.PICKLESHELL_MEMORY_AUDIT_LOG;
   let backendUrl;
   try {
-    backendUrl = new URL(env.PICKLESHELL_MEMORY_BACKEND_URL || "http://127.0.0.1:8765");
+    backendUrl = new URL(env.PICKLESHELL_MEMORY_BACKEND_URL || "http://127.0.0.1:8766");
   } catch {
     throw new Error("PICKLESHELL_MEMORY_BACKEND_URL must be a valid HTTP(S) URL");
   }

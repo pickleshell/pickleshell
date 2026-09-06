@@ -9,6 +9,7 @@ CONFIG_ROOT='/etc/pickleshell-memory'; STATE_ROOT='/var/lib/pickleshell-memory';
 UNITS_DIR='/etc/systemd/system'; LOGROTATE_DIR='/etc/logrotate.d'; WRAPPER_DIR='/usr/local/libexec'
 SERVICE_USER='pickleshell-memory'; SERVICE_GROUP='pickleshell-memory'; SERVICE='pickleshell-memory-backend.service'
 NODE_EXECUTABLE='/usr/bin/node'; BACKEND_EXECUTABLE='/usr/local/bin/pickleshell-memory-backend'; SYSTEMCTL=systemctl; ROLLBACK=0
+PYTHON_EXECUTABLE='/usr/bin/python3.12'; MANAGED_BACKEND=1
 ISOLATED_ROOT_SET=0; ISOLATED_CONFIG_SET=0; ISOLATED_STATE_SET=0; ISOLATED_LOG_SET=0
 ISOLATED_UNITS_SET=0; ISOLATED_LOGROTATE_SET=0; ISOLATED_WRAPPER_SET=0
 ISOLATED_USER_SET=0; ISOLATED_GROUP_SET=0; ISOLATED_SERVICE_SET=0
@@ -19,7 +20,10 @@ while (($#)); do case "$1" in
   --log-root) LOG_ROOT=${2:-}; ISOLATED_LOG_SET=1; shift 2;; --units-dir) UNITS_DIR=${2:-}; ISOLATED_UNITS_SET=1; shift 2;; --logrotate-dir) LOGROTATE_DIR=${2:-}; ISOLATED_LOGROTATE_SET=1; shift 2;;
   --wrapper-dir) WRAPPER_DIR=${2:-}; ISOLATED_WRAPPER_SET=1; shift 2;; --service-user) SERVICE_USER=${2:-}; ISOLATED_USER_SET=1; shift 2;; --service-group) SERVICE_GROUP=${2:-}; ISOLATED_GROUP_SET=1; shift 2;;
   --service) SERVICE=${2:-}; ISOLATED_SERVICE_SET=1; shift 2;; --node-executable) NODE_EXECUTABLE=${2:-}; shift 2;;
-  --backend-executable) BACKEND_EXECUTABLE=${2:-}; ISOLATED_BACKEND_SET=1; shift 2;; --systemctl) SYSTEMCTL=${2:-}; ISOLATED_SYSTEMCTL_SET=1; shift 2;; --rollback) ROLLBACK=1; shift;;
+  --python-executable) PYTHON_EXECUTABLE=${2:-}; shift 2;;
+  --backend-executable) BACKEND_EXECUTABLE=${2:-}; MANAGED_BACKEND=0; ISOLATED_BACKEND_SET=1; shift 2;;
+  --managed-backend-executable) BACKEND_EXECUTABLE=${2:-}; MANAGED_BACKEND=1; ISOLATED_BACKEND_SET=1; shift 2;;
+  --systemctl) SYSTEMCTL=${2:-}; ISOLATED_SYSTEMCTL_SET=1; shift 2;; --rollback) ROLLBACK=1; shift;;
   -h|--help) usage; exit 0;; *) usage >&2; die "unknown option: $1";; esac done
 [[ $PROFILE == production || $PROFILE == isolated ]] || die 'profile must be production or isolated'
 if [[ $PROFILE == isolated ]]; then
@@ -32,7 +36,7 @@ if [[ $PROFILE == isolated ]]; then
   [[ $SERVICE_USER != pickleshell-memory && $SERVICE_GROUP != pickleshell-memory && $SERVICE != pickleshell-memory-backend.service ]] || die 'isolated profile rejects production service identity'
 fi
 safe_path() { [[ $1 = /* && $1 != / && $1 != /etc && $1 != /opt && $1 != /var && $1 != /usr && $1 != /home && $1 != *'..'* && $1 != *[[:space:]@]* && $1 != *[\;\|\&\$\(\)\<\>\\\"\'\`\*\?\[\]]* ]] || die "$2 is unsafe"; }
-for pair in "$ROOT:root" "$CONFIG_ROOT:config root" "$STATE_ROOT:state root" "$LOG_ROOT:log root" "$UNITS_DIR:units directory" "$LOGROTATE_DIR:logrotate directory" "$WRAPPER_DIR:wrapper directory" "$NODE_EXECUTABLE:node executable" "$BACKEND_EXECUTABLE:backend executable"; do safe_path "${pair%%:*}" "${pair#*:}"; done
+for pair in "$ROOT:root" "$CONFIG_ROOT:config root" "$STATE_ROOT:state root" "$LOG_ROOT:log root" "$UNITS_DIR:units directory" "$LOGROTATE_DIR:logrotate directory" "$WRAPPER_DIR:wrapper directory" "$NODE_EXECUTABLE:node executable" "$PYTHON_EXECUTABLE:python executable" "$BACKEND_EXECUTABLE:backend executable"; do safe_path "${pair%%:*}" "${pair#*:}"; done
 validate_no_symlink_components() {
   local path=$1 component current=''
   local -a components
@@ -43,7 +47,7 @@ validate_no_symlink_components() {
     [[ ! -L $current ]] || die "configured deployment path has a symlink component: $path"
   done
 }
-for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"; do validate_no_symlink_components "$path"; done
+for path in "$ROOT" "$CONFIG_ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR" "$NODE_EXECUTABLE" "$PYTHON_EXECUTABLE" "$BACKEND_EXECUTABLE"; do validate_no_symlink_components "$path"; done
 [[ $SERVICE_USER =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_GROUP =~ ^[a-z_][a-z0-9_-]*$ && $SERVICE_USER != root ]] || die 'unsafe service identity'
 [[ $SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.service$ && $SERVICE != *..* ]] || die 'unsafe service name'
 service_uid=$(id -u "$SERVICE_USER") || die 'service user does not exist'
@@ -159,7 +163,13 @@ prevalidate_rollback() {
 }
 validate_internal_paths
 [[ -f $NODE_EXECUTABLE && -x $NODE_EXECUTABLE && ! -L $NODE_EXECUTABLE ]] || die 'node executable must be a regular executable'
-[[ -f $BACKEND_EXECUTABLE && -x $BACKEND_EXECUTABLE && ! -L $BACKEND_EXECUTABLE ]] || die 'backend executable must be a regular executable'
+if ((MANAGED_BACKEND)); then
+  [[ -f $PYTHON_EXECUTABLE && -x $PYTHON_EXECUTABLE && ! -L $PYTHON_EXECUTABLE ]] || die 'python executable must be a regular executable'
+  "$PYTHON_EXECUTABLE" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || die 'python executable must be version 3.11 or newer'
+  [[ ! -L $BACKEND_EXECUTABLE && ( ! -e $BACKEND_EXECUTABLE || -f $BACKEND_EXECUTABLE ) ]] || die 'backend executable path is unsafe'
+else
+  [[ -f $BACKEND_EXECUTABLE && -x $BACKEND_EXECUTABLE && ! -L $BACKEND_EXECUTABLE ]] || die 'backend executable must be a regular executable'
+fi
 BACKEND_ENV_FILE="$CONFIG_ROOT/backend.env"; MCP_ENV_FILE="$CONFIG_ROOT/mcp.env"; AUDIT_LOG="$LOG_ROOT/audit.jsonl"
 for file in "$BACKEND_ENV_FILE" "$MCP_ENV_FILE"; do
   [[ -f $file && ! -L $file ]] || die "required operator config is missing or a symlink: $file"
@@ -169,13 +179,24 @@ done
 [[ $(grep -c '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE") == 1 ]] || die 'mcp.env must define PICKLESHELL_MEMORY_AUDIT_LOG exactly once'
 configured_audit=$(grep '^PICKLESHELL_MEMORY_AUDIT_LOG=' "$MCP_ENV_FILE" | cut -d= -f2-)
 [[ $configured_audit == "$AUDIT_LOG" ]] || die 'mcp.env audit log must match the managed audit path'
+if ((MANAGED_BACKEND)); then
+  [[ $(grep -c '^MEM0_DATA_DIR=' "$BACKEND_ENV_FILE") == 1 ]] || die 'backend.env must define MEM0_DATA_DIR exactly once'
+  configured_backend_data=$(grep '^MEM0_DATA_DIR=' "$BACKEND_ENV_FILE" | cut -d= -f2-)
+  [[ $configured_backend_data == "$STATE_ROOT/backend" ]] || die 'backend.env data directory must match the managed backend path'
+fi
 if ((ROLLBACK)); then prevalidate_rollback; fi
 mkdir -p -- "$ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"
+if ((MANAGED_BACKEND)); then mkdir -p -- "$(dirname -- "$BACKEND_EXECUTABLE")"; fi
 ensure_internal_directory "$RELEASES" releases
 ensure_internal_directory "$DEPLOY_STATE" state
+if ((MANAGED_BACKEND)); then
+  [[ ! -e $STATE_ROOT/backend && ! -L $STATE_ROOT/backend ]] && mkdir -- "$STATE_ROOT/backend"
+  [[ -d $STATE_ROOT/backend && ! -L $STATE_ROOT/backend ]] || die 'managed backend data path is unsafe'
+  chmod 0750 "$STATE_ROOT/backend"
+fi
 validate_internal_paths
 chmod 0750 "$STATE_ROOT" "$LOG_ROOT"
-if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT" "$LOG_ROOT"; fi
+if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT" "$LOG_ROOT"; ((MANAGED_BACKEND)) && chown "$SERVICE_USER:$SERVICE_GROUP" "$STATE_ROOT/backend"; fi
 [[ ! -e $AUDIT_LOG || ( -f $AUDIT_LOG && ! -L $AUDIT_LOG ) ]] || die 'audit log path is unsafe'
 if [[ ! -e $AUDIT_LOG ]]; then install -m 0660 /dev/null "$AUDIT_LOG"; else chmod 0660 "$AUDIT_LOG"; fi
 if [[ $(id -u) -eq 0 ]]; then chown "$SERVICE_USER:$SERVICE_GROUP" "$AUDIT_LOG"; fi
@@ -198,11 +219,14 @@ switch() {
 render_artifacts() {
   local release=$1 contents token value template target mode staged backup index restore_index
   local -a targets=() staged_files=() backup_files=() had_prior=() committed=()
-  for spec in \
+  local -a specs=(
     "pickleshell-memory-backend.service.in:$UNITS_DIR/$SERVICE:0644" \
     "pickleshell-memory-backend.sh.in:$WRAPPER_DIR/backend-wrapper:0755" \
     "pickleshell-memory-mcp.sh.in:$WRAPPER_DIR/pickleshell-memory-mcp:0755" \
-    "pickleshell-memory.logrotate.in:$LOGROTATE_DIR/pickleshell-memory:0644"; do
+    "pickleshell-memory.logrotate.in:$LOGROTATE_DIR/pickleshell-memory:0644"
+  )
+  ((MANAGED_BACKEND)) && specs+=("pickleshell-memory-backend-bin.sh.in:$BACKEND_EXECUTABLE:0755")
+  for spec in "${specs[@]}"; do
     template="$release/deploy/systemd/${spec%%:*}"; target=${spec#*:}; mode=${target##*:}; target=${target%:*}; contents=$(<"$template") || return
     for token in ACTIVE_ROOT CONFIG_ROOT STATE_ROOT LOG_ROOT BACKEND_ENV_FILE MCP_ENV_FILE AUDIT_LOG SERVICE_USER SERVICE_GROUP BACKEND_EXECUTABLE NODE_EXECUTABLE BACKEND_WRAPPER; do
       case $token in ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; esac
@@ -269,6 +293,7 @@ transactional_switch() {
     "$WRAPPER_DIR/pickleshell-memory-ready" "$LOGROTATE_DIR/pickleshell-memory"
     "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/current-target"
   ) had_prior=() failures=()
+  ((MANAGED_BACKEND)) && paths+=("$BACKEND_EXECUTABLE")
   validate_internal_paths
   target=$(managed_release_target "$target" target)
   previous=$(optional_managed_release_target "$previous" previous)
@@ -320,6 +345,7 @@ FIRST_ACTIVATION_PATHS=(
   "$WRAPPER_DIR/pickleshell-memory-ready" "$LOGROTATE_DIR/pickleshell-memory"
   "$DEPLOY_STATE/previous-target" "$DEPLOY_STATE/current-target"
 )
+((MANAGED_BACKEND)) && FIRST_ACTIVATION_PATHS+=("$BACKEND_EXECUTABLE")
 FIRST_ACTIVATION_HAD_PRIOR=()
 capture_first_activation_state() {
   local index path
@@ -418,13 +444,25 @@ cleanup_exit() {
 }
 trap cleanup_exit EXIT
 [[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
-mkdir -- "$STAGING"; git -C "$SOURCE" archive "$RESOLVED" deploy/systemd/pickleshell-memory-backend.service.in deploy/systemd/pickleshell-memory-backend.sh.in deploy/systemd/pickleshell-memory-mcp.sh.in deploy/systemd/pickleshell-memory.logrotate.in pickleshell-memory-mcp | tar -x -C "$STAGING"
+archive_paths=(deploy/systemd/pickleshell-memory-backend.service.in deploy/systemd/pickleshell-memory-backend.sh.in deploy/systemd/pickleshell-memory-mcp.sh.in deploy/systemd/pickleshell-memory.logrotate.in pickleshell-memory-mcp)
+((MANAGED_BACKEND)) && archive_paths+=(deploy/systemd/pickleshell-memory-backend-bin.sh.in pickleshell-memory-backend)
+mkdir -- "$STAGING"; git -C "$SOURCE" archive "$RESOLVED" "${archive_paths[@]}" | tar -x -C "$STAGING"
 printf '%s\n' "$RESOLVED" > "$STAGING/.release-sha"; npm --prefix "$STAGING/pickleshell-memory-mcp" ci --omit=dev
+if ((MANAGED_BACKEND)); then
+  "$PYTHON_EXECUTABLE" -m venv --copies "$STAGING/pickleshell-memory-backend/.venv"
+  "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --no-deps -r "$STAGING/pickleshell-memory-backend/requirements.lock"
+  "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --no-build-isolation --no-deps "$STAGING/pickleshell-memory-backend"
+fi
 while IFS= read -r -d '' link; do
   resolved_link=$(realpath -e -- "$link") || die 'release contains a broken symlink'
-  [[ $resolved_link == "$STAGING/pickleshell-memory-mcp"/* ]] || die 'release symlink escapes the memory package'
+  [[ $resolved_link == "$STAGING/pickleshell-memory-mcp"/* ||
+     $resolved_link == "$STAGING/pickleshell-memory-backend"/* ]] || die 'release symlink escapes a memory package'
 done < <(find -P "$STAGING" -type l -print0)
 find -P "$STAGING" -type d -exec chmod 0555 {} +; find -P "$STAGING" -type f -exec chmod 0444 {} +
+if ((MANAGED_BACKEND)); then
+  find -P "$STAGING/pickleshell-memory-backend/.venv/bin" -type f -exec chmod 0555 {} +
+  chmod 0555 "$STAGING/pickleshell-memory-backend/bin/pickleshell-memory-backend"
+fi
 mv -T "$STAGING" "$RELEASE"; STAGING=''; RELEASE_CREATED=1; previous=''; prior_previous=''; [[ ! -e $ACTIVE && ! -L $ACTIVE ]] || previous=$(active_target)
 validate_internal_paths
 if [[ -n $previous && -f $DEPLOY_STATE/previous-target && ! -L $DEPLOY_STATE/previous-target ]]; then

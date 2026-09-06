@@ -9,10 +9,13 @@ PREFIX="$TMP/isolated"
 mkdir -p -- "$FIXTURE/deploy/systemd" "$FIXTURE/pickleshell-memory-mcp" "$PREFIX/bin" "$PREFIX/config" "$PREFIX/log" "$PREFIX/units" "$PREFIX/logrotate"
 cp -a -- "$REPO/pickleshell-memory-mcp/." "$FIXTURE/pickleshell-memory-mcp/"
 rm -rf -- "$FIXTURE/pickleshell-memory-mcp/node_modules"
+cp -a -- "$REPO/pickleshell-memory-backend" "$FIXTURE/"
+rm -rf -- "$FIXTURE/pickleshell-memory-backend/.venv"
 cp -- "$REPO/deploy/memory-release.sh" "$FIXTURE/deploy/"
 cp -- "$REPO/deploy/systemd/pickleshell-memory-backend.service.in" "$FIXTURE/deploy/systemd/"
 cp -- "$REPO/deploy/systemd/pickleshell-memory-mcp.sh.in" "$FIXTURE/deploy/systemd/"
 cp -- "$REPO/deploy/systemd/pickleshell-memory-backend.sh.in" "$FIXTURE/deploy/systemd/"
+cp -- "$REPO/deploy/systemd/pickleshell-memory-backend-bin.sh.in" "$FIXTURE/deploy/systemd/"
 cp -- "$REPO/deploy/systemd/pickleshell-memory.logrotate.in" "$FIXTURE/deploy/systemd/"
 
 if "$FIXTURE/deploy/memory-release.sh" --profile isolated >"$TMP/isolated-defaults.out" 2>&1; then
@@ -246,7 +249,7 @@ case "$1" in
   restart)
     pidfile=${FAKE_SYSTEMD_ROOT:?}/backend.pid
     if [[ -f $pidfile ]]; then kill "$(<"$pidfile")" 2>/dev/null || true; wait "$(<"$pidfile")" 2>/dev/null || true; fi
-    if [[ $2 == pickleshell-memory-isolated.service || $2 == pickleshell-memory-first-failure.service ]]; then
+    if [[ $2 == pickleshell-memory-isolated.service || $2 == pickleshell-memory-first-failure.service || $2 == pickleshell-memory-managed.service ]]; then
       set -a
       source "${FAKE_SYSTEMD_ROOT}/config/backend.env"
       set +a
@@ -325,6 +328,53 @@ install_release() {
     --service pickleshell-memory-isolated.service \
     --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin"
 }
+
+MANAGED="$TMP/managed"
+mkdir -p -- "$MANAGED"/{bin,config,log,logrotate,state,units}
+cp -- "$PREFIX/bin/backend.js" "$PREFIX/bin/systemctl" "$MANAGED/bin/"
+chmod 0755 "$MANAGED/bin/backend.js" "$MANAGED/bin/systemctl"
+MANAGED_PORT=$((30001 + RANDOM % 9000))
+printf 'FAKE_BACKEND_PORT=%s\nMEM0_DATA_DIR=%s\n' "$MANAGED_PORT" "$MANAGED/state/backend" > "$MANAGED/config/backend.env"
+printf '%s\n' \
+  'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=managed-fixture' \
+  'PICKLESHELL_MEMORY_SCOPE=managed-fixture-scope' "PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:$MANAGED_PORT" \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$MANAGED/log/audit.jsonl" > "$MANAGED/config/mcp.env"
+chmod 0640 "$MANAGED/config/backend.env" "$MANAGED/config/mcp.env"
+cat > "$MANAGED/bin/python-fixture" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ ${1:-} == -c ]]; then
+  exit 0
+fi
+if [[ ${1:-} == -m && ${2:-} == venv ]]; then
+  target=${*: -1}
+  mkdir -p -- "$target/bin"
+  cp -- "$0" "$target/bin/python"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$target/bin/pip"
+  chmod 0755 "$target/bin/python" "$target/bin/pip"
+  exit 0
+fi
+if [[ ${1:-} == -m && ${2:-} == pickleshell_memory_backend ]]; then
+  exec "${FAKE_SYSTEMD_ROOT:?}/bin/backend.js"
+fi
+exit 2
+EOF
+chmod 0755 "$MANAGED/bin/python-fixture"
+FAKE_SYSTEMD_ROOT="$MANAGED" "$FIXTURE/deploy/memory-release.sh" \
+  --profile isolated --source "$FIXTURE" --root "$MANAGED/app" --commit "$SHA1" \
+  --config-root "$MANAGED/config" --state-root "$MANAGED/state" --log-root "$MANAGED/log" \
+  --units-dir "$MANAGED/units" --logrotate-dir "$MANAGED/logrotate" --wrapper-dir "$MANAGED/bin" \
+  --managed-backend-executable "$MANAGED/bin/pickleshell-memory-backend" \
+  --python-executable "$MANAGED/bin/python-fixture" --node-executable "$(command -v node)" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-managed.service \
+  --systemctl "$MANAGED/bin/systemctl"
+test -x "$MANAGED/bin/pickleshell-memory-backend"
+test -x "$MANAGED/app/active/pickleshell-memory-backend/.venv/bin/python"
+test -f "$MANAGED/app/active/pickleshell-memory-backend/requirements.lock"
+test -d "$MANAGED/state/backend"
+test "$(stat -c %a "$MANAGED/state/backend")" = 750
+"$MANAGED/bin/pickleshell-memory-ready"
+kill "$(<"$MANAGED/backend.pid")" 2>/dev/null || true
 
 run_unsafe_internal_path_case() {
   local name=$1 path_kind=$2 case_root victim expected_entries=1

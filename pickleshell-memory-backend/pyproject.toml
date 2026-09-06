@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pickleshell-memory-backend"
+version = "0.1.0"
+description = "Production Mem0 HTTP backend for PickleShell"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.141.1",
+  "mem0ai==2.0.19",
+  "ollama==0.6.0",
+  "qdrant-client==1.15.1",
+  "uvicorn==0.35.0",
+  "starlette==1.6.0",
+]
+
+[project.scripts]
+pickleshell-memory-backend = "pickleshell_memory_backend.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pickleshell_memory_backend*"]

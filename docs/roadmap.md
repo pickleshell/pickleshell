@@ -122,10 +122,11 @@ content-free auditing, structured errors, and discovery while preserving Mem0
 semantics and metadata. Assistant Notebook and associative memory remain
 complementary rather than synchronized.
 
-The next memory milestone is an independently reviewed deployment profile for
-the sidecar and MCP process, including operator-owned credentials, log
-rotation/retention, readiness, rollback, and a clean-host end-to-end test. It
-must remain optional and may not weaken agent scope policy.
+The deployment profile now includes a repository-owned, pinned self-hosted
+Mem0 backend, operator-owned credentials, log rotation/retention, readiness,
+rollback, and clean-host tests. It remains optional and does not weaken agent
+scope policy. Production deployment and any ChatGPT manifest remain gated on
+independent review and an explicit operator deployment transaction.
 
 ## Path to a 10/10 agent platform
 

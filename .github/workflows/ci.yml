@@ -30,6 +30,11 @@ jobs:
             mcp-server/package-lock.json
             pickleshell-memory-mcp/package-lock.json
             terminal/package-lock.json
+      - name: Set up Python for Memory backend
+        if: matrix.node == '20'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install dependencies
         run: |
           npm --prefix gateway ci
@@ -42,6 +47,13 @@ jobs:
         run: npm run build
       - name: Native PTY smoke test
         run: npm --prefix terminal run test:native-smoke
+      - name: Memory backend tests and dependency audit
+        if: matrix.node == '20'
+        run: |
+          bash test/memory-backend.test.sh
+          bash test/memory-backend-e2e.test.sh
+          pickleshell-memory-backend/.venv/bin/pip install --disable-pip-version-check pip-audit==2.9.0
+          npm run audit:memory-backend
       - name: Stage trusted Node for deployment tests
         shell: bash
         run: |

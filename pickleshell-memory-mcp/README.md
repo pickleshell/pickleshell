@@ -38,7 +38,7 @@ Optional variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PICKLESHELL_MEMORY_BACKEND_URL` | `http://127.0.0.1:8765` | Credential-free Mem0 HTTP base URL |
+| `PICKLESHELL_MEMORY_BACKEND_URL` | `http://127.0.0.1:8766` | Credential-free Mem0 HTTP base URL |
 | `PICKLESHELL_MEMORY_BACKEND_TOKEN` | unset | Bearer credential sent only to the backend |
 | `PICKLESHELL_MEMORY_TIMEOUT_MS` | `10000` | Request timeout, 1–120000 ms |
 
@@ -52,7 +52,8 @@ sudo deploy/memory-release.sh \
   --source /path/to/clean/checkout \
   --root /opt/pickleshell-memory \
   --commit <full-git-sha> \
-  --backend-executable /usr/local/bin/pickleshell-memory-backend
+  --node-executable /path/to/node-20-or-newer \
+  --python-executable /path/to/regular-python-3.11-or-newer
 ```
 
 Before installation, create the dedicated `pickleshell-memory` user/group and
@@ -67,6 +68,17 @@ service environment. Every OS identity whose MCP client launches the installed
 service group. That dedicated group is the shared boundary for reading
 `mcp.env` and writing the managed audit log; do not grant access to other
 groups or users.
+
+By default the installer stages the repository-owned
+`pickleshell-memory-backend` package and its fully pinned Python dependency
+set inside the immutable release, then transactionally installs the managed
+launcher at `/usr/local/bin/pickleshell-memory-backend`. `backend.env` must set
+`MEM0_DATA_DIR=/var/lib/pickleshell-memory/backend`; the installer creates that
+separate service-owned directory. The backend defaults to authenticated
+loopback port 8766 and rejects 8765, so it never reads, shares, or replaces BOS
+spike state. See `pickleshell-memory-backend/README.md` for configuration names
+and security requirements. `--backend-executable` is an explicit external
+backend escape hatch; using it opts out of repository-managed backend staging.
 
 The installer stages only this package and its memory deployment assets under
 `releases/<sha>`, atomically switches `active`, installs a hardened backend

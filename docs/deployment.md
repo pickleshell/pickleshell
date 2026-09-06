@@ -75,6 +75,16 @@ targets. It does not print environment files, credentials, profiles, or other
 secret contents. Backups of replaced unit files are kept under the deployment
 state directory before `daemon-reload`.
 
+The optional Memory deployment stages its repository-owned Python Mem0 backend
+and pinned dependency lock inside the independent Memory release. Its managed
+launcher is transactionally installed at
+`/usr/local/bin/pickleshell-memory-backend`; Gateway does not depend on it.
+Production Memory uses authenticated loopback port 8766 and the separate
+`/var/lib/pickleshell-memory/backend` persistence root. Port 8765 and any BOS
+spike data remain outside this lifecycle. Review
+`pickleshell-memory-backend/README.md` and
+`pickleshell-memory-mcp/README.md` before provisioning.
+
 ### Immutable migration notes
 
 - Back up operator-managed unit files, environment files, and tunnel profiles

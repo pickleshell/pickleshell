@@ -18,6 +18,7 @@ const baseEnv = {
 
 test("configuration makes admin global scope explicit and agents fixed-scope", () => {
   assert.equal(loadConfig(baseEnv).scope, "agent-codex");
+  assert.equal(loadConfig(baseEnv).backendUrl, "http://127.0.0.1:8766");
   assert.throws(() => loadConfig({ ...baseEnv, PICKLESHELL_MEMORY_ROLE: "admin" }), /must be unset/);
   const admin = loadConfig({ ...baseEnv, PICKLESHELL_MEMORY_ROLE: "admin", PICKLESHELL_MEMORY_SCOPE: undefined });
   assert.equal(admin.scope, null);

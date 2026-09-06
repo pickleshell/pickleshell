@@ -147,6 +147,9 @@ npm --prefix mcp-server audit --omit=dev
 npm --prefix pickleshell-memory-mcp ci
 npm --prefix pickleshell-memory-mcp test
 npm --prefix pickleshell-memory-mcp audit --omit=dev
+bash test/memory-backend.test.sh
+bash test/memory-backend-e2e.test.sh
+npm run audit:memory-backend
 git diff --check
 ```
 
