@@ -329,6 +329,51 @@ install_release() {
     --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin"
 }
 
+run_normal_preflight_no_mutation_case() {
+  local name=$1 source=$2 commit=$3 existing_release=${4:-0} case_root before after
+  case_root="$TMP/normal-preflight-$name"
+  mkdir -p -- "$case_root"/{app,config,log,logrotate,state,units,wrappers}
+  printf 'BACKEND_TEST=1\n' > "$case_root/config/backend.env"
+  printf '%s\n' \
+    'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=fixture-agent' \
+    'PICKLESHELL_MEMORY_SCOPE=fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+    "PICKLESHELL_MEMORY_AUDIT_LOG=$case_root/log/audit.jsonl" > "$case_root/config/mcp.env"
+  chmod 0640 "$case_root/config/backend.env" "$case_root/config/mcp.env"
+  printf 'unchanged\n' > "$case_root/state/sentinel"
+  cp -- "$(command -v node)" "$case_root/wrappers/node"
+  cp -- "$(command -v node)" "$case_root/wrappers/backend"
+  printf '#!/usr/bin/env bash\ntouch %q\nexit 1\n' "$case_root/service-called" > "$case_root/wrappers/systemctl"
+  chmod 0755 "$case_root/wrappers/node" "$case_root/wrappers/backend" "$case_root/wrappers/systemctl"
+  chmod 0711 "$case_root/app" "$case_root/state" "$case_root/log"
+  if ((existing_release)); then
+    mkdir -p -- "$case_root/app/releases/$commit"
+    printf '%s\n' "$commit" > "$case_root/app/releases/$commit/.release-sha"
+  fi
+  before=$(find -P "$case_root" -printf '%P|%y|%s|%T@|%m|%u|%g\n' | sort | sha256sum | cut -d' ' -f1)
+  if PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
+    --profile isolated --source "$source" --root "$case_root/app" --commit "$commit" \
+    --config-root "$case_root/config" --state-root "$case_root/state" --log-root "$case_root/log" \
+    --units-dir "$case_root/units" --logrotate-dir "$case_root/logrotate" \
+    --backend-executable "$case_root/wrappers/backend" --node-executable "$case_root/wrappers/node" \
+    --service-user "$(id -un)" --service-group "$(id -gn)" \
+    --service pickleshell-memory-preflight.service --systemctl "$case_root/wrappers/systemctl" \
+    --wrapper-dir "$case_root/wrappers" >"$TMP/normal-preflight-$name.out" 2>&1; then
+    echo "normal preflight $name unexpectedly succeeded" >&2
+    exit 1
+  fi
+  after=$(find -P "$case_root" -printf '%P|%y|%s|%T@|%m|%u|%g\n' | sort | sha256sum | cut -d' ' -f1)
+  test "$after" = "$before"
+  test "$(<"$case_root/state/sentinel")" = unchanged
+}
+
+DIRTY_SOURCE="$TMP/dirty-normal-source"
+git clone -q --no-local "$FIXTURE" "$DIRTY_SOURCE"
+printf 'dirty\n' > "$DIRTY_SOURCE/untracked"
+run_normal_preflight_no_mutation_case missing-source "$TMP/does-not-exist" "$SHA1"
+run_normal_preflight_no_mutation_case dirty-source "$DIRTY_SOURCE" "$SHA1"
+run_normal_preflight_no_mutation_case invalid-commit "$FIXTURE" 0000000000000000000000000000000000000000
+run_normal_preflight_no_mutation_case existing-release "$FIXTURE" "$SHA1" 1
+
 MANAGED="$TMP/managed"
 mkdir -p -- "$MANAGED"/{bin,config,log,logrotate,state,units}
 cp -- "$PREFIX/bin/backend.js" "$PREFIX/bin/systemctl" "$MANAGED/bin/"
@@ -350,7 +395,12 @@ if [[ ${1:-} == -m && ${2:-} == venv ]]; then
   target=${*: -1}
   mkdir -p -- "$target/bin"
   cp -- "$0" "$target/bin/python"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$target/bin/pip"
+  cat > "$target/bin/pip" <<'PIP'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ " $* " == *' -r '* && " $* " != *' --require-hashes '* ]]; then exit 99; fi
+exit 0
+PIP
   chmod 0755 "$target/bin/python" "$target/bin/pip"
   exit 0
 fi

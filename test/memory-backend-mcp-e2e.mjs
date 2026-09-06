@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
 import { Client } from "../pickleshell-memory-mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js";
 import { StdioClientTransport } from "../pickleshell-memory-mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js";
 
@@ -19,17 +20,26 @@ try {
   const capabilities = await call("memory_capabilities");
   assert.deepEqual(capabilities.backend, { status: "ok", provider: "mem0", version: "0.1.0" });
   assert.equal(capabilities.scope, "backend-e2e-scope");
-  const added = await call("memory_add", { text: "Disposable backend E2E fact", infer: false });
-  const memoryId = added.results[0].id;
-  assert.equal(added.results[0].metadata.source, "fake");
-  assert.equal((await call("memory_search", { query: "Disposable", limit: 5 })).results[0].id, memoryId);
-  assert.equal((await call("memory_list", { limit: 20 })).results[0].id, memoryId);
+  if (process.env.MEMORY_E2E_PHASE === "seed") {
+    const added = await call("memory_add", { text: "Disposable backend E2E fact", infer: false });
+    const memoryId = added.results[0].id;
+    assert.equal(added.results[0].memory, "Disposable backend E2E fact");
+    await call("memory_add", { text: "Second disposable fact", infer: false });
+    await call("memory_add", { text: "Third disposable fact", infer: false });
+    assert.equal((await call("memory_search", { query: "disposable fact", limit: 1 })).results.length, 1);
+    assert.equal((await call("memory_search", { query: "disposable fact", limit: 2 })).results.length, 2);
+    assert.equal((await call("memory_list", { limit: 20 })).results.length, 3);
+    await writeFile(process.env.MEMORY_E2E_STATE, memoryId, { mode: 0o600 });
+  } else {
+    const memoryId = await readFile(process.env.MEMORY_E2E_STATE, "utf8");
   assert.equal((await call("memory_get", { memory_id: memoryId })).id, memoryId);
   assert.equal((await call("memory_update", { memory_id: memoryId, text: "Updated disposable fact" })).memory.memory,
                "Updated disposable fact");
-  assert.deepEqual((await call("memory_history", { memory_id: memoryId })).results,
-                   [{ memory: "Updated disposable fact" }]);
-  assert.equal((await call("memory_delete", { memory_id: memoryId })).message, "Memory deleted successfully");
+  const history = (await call("memory_history", { memory_id: memoryId })).results;
+  assert.equal(history.at(-1).event, "UPDATE");
+  assert.equal(history.at(-1).new_memory, "Updated disposable fact");
+  assert.equal((await call("memory_delete", { memory_id: memoryId })).message, "Memory deleted successfully!");
+  }
 } finally {
   await client.close();
 }

@@ -5,12 +5,16 @@ the optional PickleShell Memory MCP. It is independent of Gateway startup and
 never derives or authorizes MCP agent scope; the MCP remains the authorization
 boundary.
 
-Runtime dependencies are pinned in `requirements.lock`. The deterministic
+Runtime and build dependencies are pinned with artifact hashes in
+`requirements.lock` for CPython 3.12 on Linux x86-64. Initial release staging
+requires access to the configured Python package index unless every locked
+artifact is already cached. Rollback only switches and verifies an already
+staged immutable release, so it performs no package download. The deterministic
 launcher expects a package-local `.venv` and starts Uvicorn without access logs.
-The default bind is `127.0.0.1:8766`; port 8765 is rejected because it is
-reserved for the BOS spike. Non-loopback binding is rejected unless
-`PICKLESHELL_MEMORY_ALLOW_NON_LOOPBACK=true`; doing so requires a separately
-reviewed network-authentication and firewall design.
+The default bind is `127.0.0.1:8766`; only literal loopback binds are accepted,
+and port 8765 is rejected because it is reserved for the BOS spike. Plain HTTP
+provider URLs are accepted only for literal loopback addresses. Remote provider
+URLs must use HTTPS; hostnames over HTTP are rejected to avoid DNS ambiguity.
 
 Required configuration names:
 
@@ -27,13 +31,15 @@ Optional configuration names:
 
 - `PICKLESHELL_MEMORY_BACKEND_HOST` (default `127.0.0.1`)
 - `PICKLESHELL_MEMORY_BACKEND_PORT` (default `8766`)
-- `PICKLESHELL_MEMORY_ALLOW_NON_LOOPBACK` (default unset/false)
 - `MEM0_DATA_DIR` (default `/var/lib/pickleshell-memory/backend`)
 - `MEM0_COLLECTION` (default `pickleshell_memory_v1`)
 - `MEM0_EMBEDDING_DIMS` (default `768`)
 
 The data directory must already exist, have no symlink components, be owned by
-the running service identity, and not be group/other writable. Never point it
-at the BOS spike data directory. `/health` returns only `status`, `provider`,
+the running service identity, and not be group/other writable. Requests are
+limited to a 64 KiB body, 16 KiB of headers, and a 4 KiB request target before
+application parsing. Never point it at the BOS spike data directory. `/health` returns only `status`, `provider`,
 and `version`. All endpoints require the bearer token and return bounded error
-objects without provider details or request content.
+objects without provider details or request content. The backend forces Mem0
+telemetry off before importing Mem0 and refuses startup if the effective Mem0
+telemetry client is active; operator environment settings cannot re-enable it.

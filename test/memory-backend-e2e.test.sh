@@ -41,17 +41,20 @@ export MEM0_LLM_BASE_URL=http://127.0.0.1:9
 export MEM0_EMBED_PROVIDER=ollama
 export MEM0_EMBED_MODEL=fixture-embed
 export MEM0_EMBED_BASE_URL=http://127.0.0.1:9
-PYTHONPATH="$REPO/pickleshell-memory-backend/test:$REPO/pickleshell-memory-backend" \
-  "$REPO/pickleshell-memory-backend/.venv/bin/python" -m uvicorn fake_server:app \
-  --app-dir "$REPO/pickleshell-memory-backend/test" --host 127.0.0.1 --port "$PORT" \
-  --no-access-log --log-level warning >"$TMP/backend.out" 2>&1 &
-BACKEND_PID=$!
-for _ in {1..100}; do
-  kill -0 "$BACKEND_PID" 2>/dev/null || { echo 'backend E2E process exited' >&2; exit 1; }
-  curl -fsS --max-time 0.2 -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
-  sleep 0.02
-done
-curl -fsS --max-time 1 -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/health" >/dev/null
+start_backend() {
+  PYTHONPATH="$REPO/pickleshell-memory-backend/test:$REPO/pickleshell-memory-backend" \
+    "$REPO/pickleshell-memory-backend/.venv/bin/python" -m uvicorn real_server:app \
+    --app-dir "$REPO/pickleshell-memory-backend/test" --host 127.0.0.1 --port "$PORT" \
+    --no-access-log --log-level warning >"$TMP/backend.out" 2>&1 &
+  BACKEND_PID=$!
+  for _ in {1..100}; do
+    kill -0 "$BACKEND_PID" 2>/dev/null || { echo 'backend E2E process exited' >&2; exit 1; }
+    curl -fsS --max-time 0.2 -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && return
+    sleep 0.02
+  done
+  return 1
+}
+start_backend
 printf '%s\n' \
   'PICKLESHELL_MEMORY_ROLE=agent' \
   'PICKLESHELL_MEMORY_ACTOR=backend-e2e' \
@@ -63,8 +66,13 @@ chmod 0600 "$TMP/mcp.env"
 printf '#!/usr/bin/env bash\nexec %q --env-file=%q %q\n' \
   "$(command -v node)" "$TMP/mcp.env" "$REPO/pickleshell-memory-mcp/src/index.js" > "$TMP/mcp-wrapper"
 chmod 0700 "$TMP/mcp-wrapper"
-MEMORY_MCP_WRAPPER="$TMP/mcp-wrapper" node "$REPO/test/memory-backend-mcp-e2e.mjs"
-test "$(wc -l < "$TMP/audit.jsonl")" -eq 8
+MEMORY_MCP_WRAPPER="$TMP/mcp-wrapper" MEMORY_E2E_PHASE=seed MEMORY_E2E_STATE="$TMP/memory-id" \
+  node "$REPO/test/memory-backend-mcp-e2e.mjs"
+kill "$BACKEND_PID"; wait "$BACKEND_PID" || true; BACKEND_PID=''
+start_backend
+MEMORY_MCP_WRAPPER="$TMP/mcp-wrapper" MEMORY_E2E_PHASE=resume MEMORY_E2E_STATE="$TMP/memory-id" \
+  node "$REPO/test/memory-backend-mcp-e2e.mjs"
+test "$(wc -l < "$TMP/audit.jsonl")" -eq 12
 if [[ $spike_before == absent ]]; then
   ! curl -fsS --max-time 2 http://127.0.0.1:8765/health >/dev/null 2>&1
 else

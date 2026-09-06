@@ -184,7 +184,20 @@ if ((MANAGED_BACKEND)); then
   configured_backend_data=$(grep '^MEM0_DATA_DIR=' "$BACKEND_ENV_FILE" | cut -d= -f2-)
   [[ $configured_backend_data == "$STATE_ROOT/backend" ]] || die 'backend.env data directory must match the managed backend path'
 fi
-if ((ROLLBACK)); then prevalidate_rollback; fi
+if ((ROLLBACK)); then
+  prevalidate_rollback
+else
+  [[ -n $SOURCE && $COMMIT =~ ^[0-9a-fA-F]{40}$ ]] || die 'source and full commit are required'
+  SOURCE=$(realpath -e -- "$SOURCE") || die 'source does not exist'
+  SOURCE_TOPLEVEL=$(git -C "$SOURCE" rev-parse --show-toplevel 2>/dev/null) || die 'source must be a different Git worktree'
+  SOURCE_TOPLEVEL=$(realpath -e -- "$SOURCE_TOPLEVEL") || die 'source must be a different Git worktree'
+  [[ $SOURCE_TOPLEVEL == "$SOURCE" && $SOURCE != "$ROOT" ]] || die 'source must be a different Git worktree'
+  [[ -z $(git -C "$SOURCE" status --porcelain=v1 --untracked-files=all) ]] || die 'source worktree is dirty'
+  RESOLVED=$(git -C "$SOURCE" rev-parse --verify "$COMMIT^{commit}") || die 'commit does not resolve'
+  [[ $RESOLVED == "$COMMIT" ]] || die 'commit is not exact'
+  RELEASE="$RELEASES/$RESOLVED"; STAGING="$RELEASES/.staging-$RESOLVED-$$"
+  [[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
+fi
 mkdir -p -- "$ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"
 if ((MANAGED_BACKEND)); then mkdir -p -- "$(dirname -- "$BACKEND_EXECUTABLE")"; fi
 ensure_internal_directory "$RELEASES" releases
@@ -411,14 +424,6 @@ if ((ROLLBACK)); then
   fi
   printf 'memory-release: rolled back to %s\n' "$previous"; exit 0
 fi
-[[ -n $SOURCE && $COMMIT =~ ^[0-9a-fA-F]{40}$ ]] || die 'source and full commit are required'
-SOURCE=$(realpath -e -- "$SOURCE") || die 'source does not exist'
-SOURCE_TOPLEVEL=$(git -C "$SOURCE" rev-parse --show-toplevel 2>/dev/null) || die 'source must be a different Git worktree'
-SOURCE_TOPLEVEL=$(realpath -e -- "$SOURCE_TOPLEVEL") || die 'source must be a different Git worktree'
-[[ $SOURCE_TOPLEVEL == "$SOURCE" && $SOURCE != "$ROOT" ]] || die 'source must be a different Git worktree'
-[[ -z $(git -C "$SOURCE" status --porcelain=v1 --untracked-files=all) ]] || die 'source worktree is dirty'
-RESOLVED=$(git -C "$SOURCE" rev-parse --verify "$COMMIT^{commit}") || die 'commit does not resolve'; [[ $RESOLVED == "$COMMIT" ]] || die 'commit is not exact'
-RELEASE="$RELEASES/$RESOLVED"; STAGING="$RELEASES/.staging-$RESOLVED-$$"
 RELEASE_CREATED=0; ACTIVATION_SUCCEEDED=0
 cleanup_exit() {
   local status=$? active_now='' release_cleanup_safe=1
@@ -443,14 +448,13 @@ cleanup_exit() {
   exit "$status"
 }
 trap cleanup_exit EXIT
-[[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
 archive_paths=(deploy/systemd/pickleshell-memory-backend.service.in deploy/systemd/pickleshell-memory-backend.sh.in deploy/systemd/pickleshell-memory-mcp.sh.in deploy/systemd/pickleshell-memory.logrotate.in pickleshell-memory-mcp)
 ((MANAGED_BACKEND)) && archive_paths+=(deploy/systemd/pickleshell-memory-backend-bin.sh.in pickleshell-memory-backend)
 mkdir -- "$STAGING"; git -C "$SOURCE" archive "$RESOLVED" "${archive_paths[@]}" | tar -x -C "$STAGING"
 printf '%s\n' "$RESOLVED" > "$STAGING/.release-sha"; npm --prefix "$STAGING/pickleshell-memory-mcp" ci --omit=dev
 if ((MANAGED_BACKEND)); then
   "$PYTHON_EXECUTABLE" -m venv --copies "$STAGING/pickleshell-memory-backend/.venv"
-  "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --no-deps -r "$STAGING/pickleshell-memory-backend/requirements.lock"
+  "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --require-hashes --no-deps -r "$STAGING/pickleshell-memory-backend/requirements.lock"
   "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --no-build-isolation --no-deps "$STAGING/pickleshell-memory-backend"
 fi
 while IFS= read -r -d '' link; do

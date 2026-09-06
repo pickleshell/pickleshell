@@ -1,5 +1,6 @@
 import json
 import os
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,10 +29,10 @@ class PersistentFakeMemory:
         self.save()
         return {"results": [item], "relations": []}
 
-    def search(self, query, *, filters, limit):
+    def search(self, query, *, filters, top_k):
         items = [item for item in self.memories.values()
                  if item["user_id"] == filters["user_id"] and query.lower() in item["memory"].lower()]
-        return {"results": items[:limit]}
+        return {"results": items[:top_k]}
 
     def get_all(self, *, filters, top_k):
         return {"results": [item for item in self.memories.values()
@@ -87,12 +88,16 @@ class ConfigTests(unittest.TestCase):
                 {"MEM0_LLM_PROVIDER": ""},
                 {"MEM0_LLM_PROVIDER": "unknown"},
                 {"MEM0_LLM_BASE_URL": "http://user:secret@localhost:1"},
+                {"MEM0_LLM_BASE_URL": "http://localhost:11434"},
+                {"MEM0_LLM_BASE_URL": "http://192.0.2.1:11434"},
                 {"MEM0_EMBED_PROVIDER": "unknown"},
             ]
             for override in cases:
                 with self.subTest(override=next(iter(override))):
                     with self.assertRaises(ValueError):
                         load_config(config_env(root, **override))
+            remote = load_config(config_env(root, MEM0_LLM_BASE_URL="https://provider.example"))
+            self.assertEqual(remote.llm_base_url, "https://provider.example")
 
     def test_data_path_rejects_symlinks_and_unsafe_mode(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -172,7 +177,7 @@ class HttpContractTests(unittest.TestCase):
 
     def test_provider_exception_is_normalized_without_detail(self):
         class FailingMemory(PersistentFakeMemory):
-            def search(self, query, *, filters, limit):
+            def search(self, query, *, filters, top_k):
                 raise RuntimeError("provider secret diagnostic")
 
         context = TestClient(create_app(self.config, FailingMemory), raise_server_exceptions=False)
@@ -183,6 +188,53 @@ class HttpContractTests(unittest.TestCase):
         self.assertEqual(response.json(), {"error": "backend_failure", "status": 500})
         self.assertNotIn("provider secret diagnostic", response.text)
         self.assertNotIn("query text", response.text)
+
+    def test_request_bounds_precede_body_parsing_and_unauthorized_consumption(self):
+        async def invoke(headers, chunks, path=b"/memories"):
+            sent = []
+            consumed = 0
+            messages = [
+                {"type": "http.request", "body": chunk, "more_body": index < len(chunks) - 1}
+                for index, chunk in enumerate(chunks)
+            ]
+
+            async def receive():
+                nonlocal consumed
+                consumed += 1
+                return messages.pop(0)
+
+            async def send(message):
+                sent.append(message)
+
+            scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+                     "method": "POST", "scheme": "http", "path": path.decode(), "raw_path": path,
+                     "query_string": b"", "root_path": "", "headers": headers,
+                     "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 8766)}
+            await create_app(self.config, PersistentFakeMemory)(scope, receive, send)
+            status = next(message["status"] for message in sent if message["type"] == "http.response.start")
+            body = b"".join(message.get("body", b"") for message in sent
+                            if message["type"] == "http.response.body")
+            return status, json.loads(body), consumed
+
+        auth = (b"authorization", f"Bearer {TOKEN}".encode())
+        oversized = b"x" * (64 * 1024 + 1)
+        status, body, consumed = asyncio.run(invoke([], [oversized]))
+        self.assertEqual((status, body, consumed), (401, {"error": "backend_unauthorized", "status": 401}, 0))
+        status, body, _ = asyncio.run(invoke([auth], [oversized[:40000], oversized[40000:]]))
+        self.assertEqual((status, body), (413, {"error": "request_too_large", "status": 413}))
+        status, body, _ = asyncio.run(invoke([auth, (b"content-length", b"1")], [oversized]))
+        self.assertEqual((status, body), (413, {"error": "request_too_large", "status": 413}))
+        status, body, consumed = asyncio.run(invoke([auth, (b"content-length", str(len(oversized)).encode())],
+                                                     [oversized]))
+        self.assertEqual((status, body, consumed),
+                         (413, {"error": "request_too_large", "status": 413}, 0))
+        status, body, consumed = asyncio.run(invoke([auth, (b"x-padding", b"x" * (16 * 1024))], [b"ignored"]))
+        self.assertEqual((status, body, consumed),
+                         (431, {"error": "request_headers_too_large", "status": 431}, 0))
+
+    def test_docs_and_openapi_are_not_exposed(self):
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            self.assertEqual(self.client.get(path, headers=self.headers).status_code, 404)
 
 
 if __name__ == "__main__":

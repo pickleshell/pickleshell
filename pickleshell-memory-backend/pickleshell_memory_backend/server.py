@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import re
 import secrets
@@ -15,6 +16,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__
 
+os.environ["MEM0_TELEMETRY"] = "false"
+os.environ["ANONYMIZED_TELEMETRY"] = "false"
+
+MAX_BODY_BYTES = 64 * 1024
+MAX_HEADER_BYTES = 16 * 1024
+MAX_REQUEST_TARGET_BYTES = 4 * 1024
 
 EXTRACTION_PROMPT = """Extract durable facts and preferences stated in the new messages.
 Return JSON only, using this exact shape:
@@ -42,8 +49,8 @@ class Config:
 
 def load_config(env: dict[str, str] | os._Environ[str] = os.environ) -> Config:
     host = env.get("PICKLESHELL_MEMORY_BACKEND_HOST", "127.0.0.1")
-    if host not in {"127.0.0.1", "::1"} and env.get("PICKLESHELL_MEMORY_ALLOW_NON_LOOPBACK") != "true":
-        raise ValueError("non-loopback bind requires explicit operator approval")
+    if host not in {"127.0.0.1", "::1"}:
+        raise ValueError("backend host must be a literal loopback address")
     port = bounded_int(env.get("PICKLESHELL_MEMORY_BACKEND_PORT", "8766"), "backend port", 1, 65535)
     if port == 8765:
         raise ValueError("backend port 8765 is reserved for the BOS spike")
@@ -96,6 +103,13 @@ def safe_http_url(value: str, name: str) -> str:
         raise ValueError(f"{name} must be a credential-free HTTP(S) URL")
     if parsed.query or parsed.fragment:
         raise ValueError(f"{name} must not contain a query or fragment")
+    if parsed.scheme == "http":
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            raise ValueError(f"{name} requires HTTPS unless the host is a literal loopback address") from None
+        if not address.is_loopback:
+            raise ValueError(f"{name} requires HTTPS unless the host is a literal loopback address")
     return value.rstrip("/")
 
 
@@ -121,9 +135,10 @@ def validate_data_dir(path: Path) -> None:
 def create_mem0(config: Config):
     from mem0 import Memory
     from mem0.memory import main as mem0_memory_main
+    from mem0.memory import telemetry as mem0_telemetry
 
-    os.environ["MEM0_TELEMETRY"] = "false"
-    os.environ["ANONYMIZED_TELEMETRY"] = "false"
+    if mem0_telemetry.MEM0_TELEMETRY or mem0_telemetry.client_telemetry.posthog is not None:
+        raise RuntimeError("Mem0 telemetry is not disabled")
     mem0_memory_main.ADDITIVE_EXTRACTION_PROMPT = EXTRACTION_PROMPT
     if config.llm_provider == "ollama":
         llm = {"provider": "ollama", "config": {"model": config.llm_model, "temperature": 0,
@@ -136,7 +151,8 @@ def create_mem0(config: Config):
                          "path": str(config.data_dir / "qdrant"), "embedding_model_dims": config.embedding_dims}},
         "llm": llm,
         "embedder": {"provider": "ollama", "config": {"model": config.embed_model,
-                     "ollama_base_url": config.embed_base_url}},
+                     "ollama_base_url": config.embed_base_url,
+                     "embedding_dims": config.embedding_dims}},
         "history_db_path": str(config.data_dir / "history.db"),
         "version": "v1.1",
     })
@@ -163,6 +179,74 @@ class UpdateRequest(StrictModel):
     text: str = Field(min_length=1, max_length=32000)
 
 
+class RequestBoundsMiddleware:
+    def __init__(self, app, token: str):
+        self.app = app
+        self.expected_auth = f"Bearer {token}".encode()
+
+    @staticmethod
+    async def reject(send, status: int, error: str):
+        body = ('{"error":"%s","status":%d}' % (error, status)).encode()
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-type", b"application/json"),
+                                (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = scope.get("headers", [])
+        if sum(len(name) + len(value) + 4 for name, value in headers) > MAX_HEADER_BYTES:
+            await self.reject(send, 431, "request_headers_too_large")
+            return
+        target_size = len(scope.get("raw_path", b"")) + len(scope.get("query_string", b""))
+        if target_size > MAX_REQUEST_TARGET_BYTES:
+            await self.reject(send, 414, "request_target_too_large")
+            return
+        authorization = [value for name, value in headers if name.lower() == b"authorization"]
+        if len(authorization) != 1 or not secrets.compare_digest(authorization[0], self.expected_auth):
+            await self.reject(send, 401, "backend_unauthorized")
+            return
+        lengths = [value for name, value in headers if name.lower() == b"content-length"]
+        if len(lengths) > 1:
+            await self.reject(send, 400, "invalid_request")
+            return
+        if lengths:
+            try:
+                declared = int(lengths[0])
+            except ValueError:
+                declared = -1
+            if declared < 0:
+                await self.reject(send, 400, "invalid_request")
+                return
+            if declared > MAX_BODY_BYTES:
+                await self.reject(send, 413, "request_too_large")
+                return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                await self.reject(send, 400, "invalid_request")
+                return
+            body.extend(message.get("body", b""))
+            if len(body) > MAX_BODY_BYTES:
+                await self.reject(send, 413, "request_too_large")
+                return
+            if not message.get("more_body", False):
+                break
+        replayed = False
+
+        async def replay_receive():
+            nonlocal replayed
+            if replayed:
+                return {"type": "http.disconnect"}
+            replayed = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay_receive, send)
+
+
 def create_app(config: Config, engine_factory: Callable[[Config], object] = create_mem0) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -171,6 +255,7 @@ def create_app(config: Config, engine_factory: Callable[[Config], object] = crea
 
     app = FastAPI(title="PickleShell Memory Backend", docs_url=None, redoc_url=None, openapi_url=None,
                   lifespan=lifespan)
+    app.add_middleware(RequestBoundsMiddleware, token=config.token)
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request, _error):
@@ -209,7 +294,7 @@ def create_app(config: Config, engine_factory: Callable[[Config], object] = crea
 
     @app.post("/search", dependencies=[Depends(authorize)])
     def search(request: SearchRequest):
-        return app.state.memory.search(request.query, filters={"user_id": request.user_id}, limit=request.limit)
+        return app.state.memory.search(request.query, filters={"user_id": request.user_id}, top_k=request.limit)
 
     @app.get("/memories", dependencies=[Depends(authorize)])
     def list_memories(user_id: str = Query(min_length=1, max_length=200),
@@ -249,7 +334,8 @@ def main() -> None:
     except ValueError as error:
         raise SystemExit(f"pickleshell-memory-backend: configuration error: {error}") from None
     uvicorn.run(app, host=config.host, port=config.port, access_log=False, log_level="warning",
-                server_header=False, date_header=False)
+                server_header=False, date_header=False,
+                h11_max_incomplete_event_size=MAX_HEADER_BYTES + MAX_REQUEST_TARGET_BYTES)
 
 
 if __name__ == "__main__":
