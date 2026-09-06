@@ -457,6 +457,7 @@ if ((MANAGED_BACKEND)); then
   "$PYTHON_EXECUTABLE" -m venv --copies "$STAGING/pickleshell-memory-backend/.venv"
   "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --require-hashes --no-deps -r "$STAGING/pickleshell-memory-backend/requirements.lock"
   "$STAGING/pickleshell-memory-backend/.venv/bin/pip" install --disable-pip-version-check --no-build-isolation --no-deps "$STAGING/pickleshell-memory-backend"
+  "$STAGING/pickleshell-memory-backend/.venv/bin/pip" check
 fi
 while IFS= read -r -d '' link; do
   resolved_link=$(realpath -e -- "$link") || die 'release contains a broken symlink'

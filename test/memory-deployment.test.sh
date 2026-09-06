@@ -438,6 +438,19 @@ if [[ ${1:-} == -m && ${2:-} == venv ]]; then
 #!/usr/bin/env bash
 set -Eeuo pipefail
 if [[ " $* " == *' -r '* && " $* " != *' --require-hashes '* ]]; then exit 99; fi
+if [[ ${1:-} == install ]]; then
+  lock=''
+  while (($#)); do
+    if [[ $1 == -r ]]; then lock=${2:-}; break; fi
+    shift
+  done
+  if [[ -n $lock ]] && ! grep -q '^packaging==' "$lock"; then
+    touch "$(dirname -- "$0")/../dependency-incomplete"
+  fi
+fi
+if [[ ${1:-} == check && -f $(dirname -- "$0")/../dependency-incomplete ]]; then
+  exit 1
+fi
 exit 0
 PIP
   chmod 0755 "$target/bin/python" "$target/bin/pip"
@@ -449,6 +462,46 @@ fi
 exit 2
 EOF
 chmod 0755 "$MANAGED/bin/python-fixture"
+
+INCOMPLETE_SOURCE="$TMP/incomplete-managed-source"
+git clone -q --no-local "$FIXTURE" "$INCOMPLETE_SOURCE"
+sed -i '/^packaging==/,+1d' "$INCOMPLETE_SOURCE/pickleshell-memory-backend/requirements.lock"
+git -C "$INCOMPLETE_SOURCE" add pickleshell-memory-backend/requirements.lock
+git -C "$INCOMPLETE_SOURCE" commit -qm 'fixture: incomplete backend lock'
+INCOMPLETE_SHA=$(git -C "$INCOMPLETE_SOURCE" rev-parse HEAD)
+INCOMPLETE="$TMP/incomplete-managed"
+mkdir -p -- "$INCOMPLETE"/{bin,config,log,logrotate,state,units}
+cp -- "$MANAGED/bin/python-fixture" "$INCOMPLETE/bin/"
+printf '#!/usr/bin/env bash\ntouch %q\nexit 1\n' "$INCOMPLETE/systemctl-called" > "$INCOMPLETE/bin/systemctl"
+chmod 0755 "$INCOMPLETE/bin/python-fixture" "$INCOMPLETE/bin/systemctl"
+printf 'MEM0_DATA_DIR=%s\n' "$INCOMPLETE/state/backend" > "$INCOMPLETE/config/backend.env"
+printf '%s\n' \
+  'PICKLESHELL_MEMORY_ROLE=agent' 'PICKLESHELL_MEMORY_ACTOR=incomplete-fixture' \
+  'PICKLESHELL_MEMORY_SCOPE=incomplete-fixture-scope' 'PICKLESHELL_MEMORY_BACKEND_URL=http://127.0.0.1:9' \
+  "PICKLESHELL_MEMORY_AUDIT_LOG=$INCOMPLETE/log/audit.jsonl" > "$INCOMPLETE/config/mcp.env"
+chmod 0640 "$INCOMPLETE/config/backend.env" "$INCOMPLETE/config/mcp.env"
+if "$FIXTURE/deploy/memory-release.sh" \
+  --profile isolated --source "$INCOMPLETE_SOURCE" --root "$INCOMPLETE/app" --commit "$INCOMPLETE_SHA" \
+  --config-root "$INCOMPLETE/config" --state-root "$INCOMPLETE/state" --log-root "$INCOMPLETE/log" \
+  --units-dir "$INCOMPLETE/units" --logrotate-dir "$INCOMPLETE/logrotate" --wrapper-dir "$INCOMPLETE/bin" \
+  --managed-backend-executable "$INCOMPLETE/bin/pickleshell-memory-backend" \
+  --python-executable "$INCOMPLETE/bin/python-fixture" --node-executable "$(command -v node)" \
+  --service-user "$(id -un)" --service-group "$(id -gn)" --service pickleshell-memory-incomplete.service \
+  --systemctl "$INCOMPLETE/bin/systemctl" > "$INCOMPLETE/output" 2>&1; then
+  echo 'dependency-incomplete managed release unexpectedly succeeded' >&2
+  exit 1
+fi
+if [[ -e $INCOMPLETE/systemctl-called ]]; then
+  echo 'dependency-incomplete managed release reached service activation' >&2
+  exit 1
+fi
+test ! -e "$INCOMPLETE/app/active"
+test ! -e "$INCOMPLETE/app/state/current-target"
+test ! -e "$INCOMPLETE/app/state/previous-target"
+test ! -e "$INCOMPLETE/bin/pickleshell-memory-backend"
+test ! -e "$INCOMPLETE/units/pickleshell-memory-incomplete.service"
+test -z "$(find "$INCOMPLETE/app/releases" -mindepth 1 -maxdepth 1 -print -quit)"
+
 FAKE_SYSTEMD_ROOT="$MANAGED" "$FIXTURE/deploy/memory-release.sh" \
   --profile isolated --source "$FIXTURE" --root "$MANAGED/app" --commit "$SHA1" \
   --config-root "$MANAGED/config" --state-root "$MANAGED/state" --log-root "$MANAGED/log" \
