@@ -311,3 +311,20 @@ After creating a connector with the Playwright tools enabled:
 - Writable runtime directories for browser profile and output
 - `chromiumSandbox: false` in launch options when running headless without
   kernel user namespace sandboxing
+
+## Execution Profile Contract
+
+`send-chat` accepts optional `execution_profile` (`isolated`, `agent`,
+`privileged`, `full-control`) and `boundary` (`host`, `container`, `vm`). Static
+operator and chat policy must permit the selection, and it must match the actual
+configured execution surface. There is no privilege fallback or caller OS-user,
+sudo, path or systemd control. These fields are not mutable Settings.
+
+Errors before execution: `invalid_execution_profile` and `invalid_boundary`
+(400), `execution_policy_invalid` (400), `execution_profile_not_allowed`,
+`boundary_not_allowed`, and `insufficient_authority` (403).
+`session_authority_mismatch` or `session_authority_unknown` (409) require a new
+session; `session_authority_unavailable` (503) means binding storage failed.
+Completed execution metadata contains `runtime`, `execution_profile`, `boundary`.
+See [Execution Profile Contract](deployment.md#execution-profile-contract) for
+compatibility defaults, containment requirements and legacy session migration.

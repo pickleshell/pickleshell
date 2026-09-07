@@ -224,3 +224,13 @@ performance findings.
 Reviews produce findings only. Apply each confirmed finding in a separate
 task, ordered by severity. Every fix requires a regression test before it can
 be marked complete.
+
+## Execution Profile Contract
+
+Keep authority and boundary separate. Static policy and the actual execution
+surface constrain request selection; never implement privilege fallback or
+relabel an existing host process as a container/VM. Session authority bindings
+must survive result eviction. Settings must not expose or expand profile policy.
+The OpenCode agent template is opt-in through `deploy/release.sh --opencode-agent`.
+Ordinary Terminal stays AF_UNIX-only with NoNewPrivileges. See the complete
+[Execution Profile Contract](docs/deployment.md#execution-profile-contract).

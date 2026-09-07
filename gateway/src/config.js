@@ -227,3 +227,6 @@ module.exports = {
 module.exports.getConfiguredDefaultRuntime = getConfiguredDefaultRuntime;
 module.exports.getGlobalCodexConfig = getGlobalCodexConfig;
 module.exports.KNOWN_RUNTIMES = KNOWN_RUNTIMES;
+
+module.exports.resolveExecutionProfile = (chatId, request, runtime) =>
+  require('./execution-profile').resolve(loadConfig(), getChatConfig(chatId), request, runtime);

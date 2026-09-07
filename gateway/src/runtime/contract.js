@@ -12,6 +12,7 @@ const RUNTIME_CODEX = 'codex';
 // AgentRequest — options accepted by runAgentRequest().
 // {
 //   runtime: string,
+//   executionContext: { runtime: string, execution_profile: string, boundary: string },
 //   request_id: string,
 //   chatId: string,
 //   message: string,
@@ -101,8 +102,8 @@ const RUNTIME_CODEX = 'codex';
 //   command?: string       // executable passed to supervisor; defaults to bash
 //   isAvailable?: () => boolean
 //   buildPrompt(message, fileSummary) -> string
-//   buildArgs(prompt, workspace, sessionId, model) -> string[]
-//   buildChildEnv(sourceEnv?) -> object
+//   buildArgs(prompt, workspace, sessionId, model, executionContext) -> string[]
+//   buildChildEnv(sourceEnv?, executionContext) -> object
 //   createStreamHandler({ chatId, onProgress }) -> handler
 //     handleLine(line)      parse one stdout line, accumulate state, forward
 //                           the canonical event to onProgress
@@ -116,3 +117,9 @@ module.exports = {
   RUNTIME_OPENCODE,
   RUNTIME_CODEX,
 };
+
+// executionContext is resolved once by chat.js from static operator policy.
+// Adapters receive it; they must never elevate credentials or substitute a
+// boundary. The enclosing service/VM/container supplies the actual authority.
+// Custom runRequest(options) receives the same executionContext. Completed
+// public execution metadata includes runtime, execution_profile and boundary.

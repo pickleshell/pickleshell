@@ -7,7 +7,7 @@ usage() {
   printf '%s\n' \
     'Usage: release.sh --source REPOSITORY --root ABSOLUTE_ROOT --commit SHA' \
     '                   [--profile production|isolated|chatgpt]' \
-    '                   [--config-root PATH] [--state-root PATH] [--cache-root PATH]' \
+    '                   [--config-root PATH] [--settings-root PATH] [--state-root PATH] [--cache-root PATH]' \
     '                   [--workspace-root PATH] [--mcp-runtime-dir PATH] [--terminal-runtime-dir PATH]' \
     '                   [--terminal-socket PATH] [--node-executable PATH] [--terminal-node-executable PATH]' \
     '                   [--tunnel-client-executable PATH] [--tunnel-profile PATH]' \
@@ -15,7 +15,7 @@ usage() {
     '                   [--gateway-user USER] [--mcp-user USER] [--terminal-user USER]' \
     '                   [--gateway-group GROUP] [--mcp-group GROUP] [--terminal-group GROUP]' \
     '                   [--gateway-service NAME] [--mcp-service NAME] [--terminal-service NAME]' \
-    '                   [--include-terminal] [--no-systemd] [--dry-run] [--rollback]'
+    '                   [--opencode-agent] [--include-terminal] [--no-systemd] [--dry-run] [--rollback]'
 }
 
 die() { printf 'release: error: %s\n' "$1" >&2; exit 1; }
@@ -52,6 +52,7 @@ TUNNEL_CLIENT_EXECUTABLE='/usr/local/bin/tunnel-client'
 TUNNEL_PROFILE='/etc/pickleshell/tunnel-client/pickleshell.yaml'
 GATEWAY_ENV_FILE=''
 MCP_ENV_FILE=''
+OPENCODE_AGENT=0
 INCLUDE_TERMINAL=0
 NO_SYSTEMD=0
 DRY_RUN=0
@@ -71,6 +72,7 @@ while (($#)); do
           GATEWAY_USER=pickleshell-test; MCP_USER=pickleshell-test-tunnel; TERMINAL_USER=pickleshell-test-terminal
           GATEWAY_GROUP=pickleshell-test; MCP_GROUP=pickleshell-test-tunnel; TERMINAL_GROUP=pickleshell-test-terminal
           GATEWAY_SERVICE=pickleshell-test-gateway.service; MCP_SERVICE=pickleshell-test-tunnel.service; TERMINAL_SERVICE=pickleshell-test-terminal.service
+          SETTINGS_ROOT=/var/lib/pickleshell-test-settings
           CONFIG_ROOT=/etc/pickleshell-test; STATE_ROOT=/var/lib/pickleshell-test; CACHE_ROOT=/var/cache/pickleshell-test
           WORKSPACE_ROOT=/srv/pickleshell-test/workspace; TERMINAL_WORKSPACE_ROOT=/srv/pickleshell-test/workspace
           MCP_RUNTIME_DIR=/run/pickleshell-test-mcp; TERMINAL_RUNTIME_DIR=/run/pickleshell-test-terminal
@@ -107,6 +109,7 @@ while (($#)); do
     --mcp-group) MCP_GROUP=${2:-}; shift 2 ;;
     --terminal-group) TERMINAL_GROUP=${2:-}; shift 2 ;;
     --config-root) CONFIG_ROOT=${2:-}; shift 2 ;;
+    --settings-root) SETTINGS_ROOT=${2:-}; shift 2 ;;
     --state-root) STATE_ROOT=${2:-}; shift 2 ;;
     --cache-root) CACHE_ROOT=${2:-}; shift 2 ;;
     --workspace-root) WORKSPACE_ROOT=${2:-}; shift 2 ;;
@@ -126,6 +129,7 @@ while (($#)); do
     --gateway-service) GATEWAY_SERVICE=${2:-}; shift 2 ;;
     --mcp-service|--tunnel-service) MCP_SERVICE=${2:-}; shift 2 ;;
     --terminal-service) TERMINAL_SERVICE=${2:-}; shift 2 ;;
+    --opencode-agent) OPENCODE_AGENT=1; shift ;;
     --include-terminal) INCLUDE_TERMINAL=1; shift ;;
     --no-systemd) NO_SYSTEMD=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -548,6 +552,13 @@ install_units() {
   for group in "$GATEWAY_GROUP" "$MCP_GROUP" "$TERMINAL_GROUP"; do
     getent group "$group" >/dev/null 2>&1 || die "service group does not exist: $group"
   done
+  if [[ -f $UNITS_DIR/$GATEWAY_SERVICE ]] &&
+      grep -q '^Environment=PICKLESHELL_EXECUTION_SURFACE=opencode-agent-host$' "$UNITS_DIR/$GATEWAY_SERVICE"; then
+    OPENCODE_AGENT=1
+  fi
+  if ((OPENCODE_AGENT)) && [[ ! -f $RELEASE/deploy/systemd/pickleshell-opencode-agent.service.in || -L $RELEASE/deploy/systemd/pickleshell-opencode-agent.service.in ]]; then
+    die 'release does not support the selected OpenCode agent surface; existing units retained'
+  fi
   local backup_dir=$STATE/unit-backups
   [[ ! -e $backup_dir || ! -L $backup_dir ]] || die 'unit backup directory is a symlink'
   mkdir -m 0700 -p -- "$backup_dir"
@@ -558,6 +569,9 @@ install_units() {
   for component in gateway mcp; do
     unit=$(unit_for "$component")
     [[ $component == gateway ]] && source_unit=$RELEASE/deploy/systemd/pickleshell-gateway.service.in || source_unit=$RELEASE/deploy/systemd/pickleshell-tunnel.service.in
+    if [[ $component == gateway ]] && ((OPENCODE_AGENT)); then
+      source_unit=$RELEASE/deploy/systemd/pickleshell-opencode-agent.service.in
+    fi
     [[ -f $source_unit && ! -L $source_unit ]] || { log "missing unit file for $component" >&2; return 1; }
     local unit_contents
     unit_contents=$(render_unit "$component" "$source_unit")

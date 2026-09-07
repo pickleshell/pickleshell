@@ -19,6 +19,8 @@ export interface ChatRequest {
   message: string;
   session_id?: string;
   runtime?: "opencode" | "codex";
+  execution_profile?: "isolated" | "agent" | "privileged" | "full-control";
+  boundary?: "host" | "container" | "vm";
   /** @deprecated Use runtime. */
   agent?: "opencode" | "codex";
   model?: string;

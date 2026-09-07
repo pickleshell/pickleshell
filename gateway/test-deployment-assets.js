@@ -46,10 +46,8 @@ for (const line of [
 }
 const gatewayTemplate = read("deploy/systemd/pickleshell-gateway.service.in");
 for (const line of [
-  "Environment=SETTINGS_PATH=/var/lib/pickleshell-settings/settings.json",
-  "StateDirectory=pickleshell-settings",
-  "StateDirectoryMode=0700",
-  "ReadWritePaths=/var/lib/pickleshell-settings",
+  "Environment=SETTINGS_PATH=@SETTINGS_ROOT@/settings.json",
+  "ReadWritePaths=@SETTINGS_ROOT@",
   "SupplementaryGroups=@MCP_GROUP@",
   "ReadOnlyPaths=@MCP_TEMP_DIR@",
 ]) {

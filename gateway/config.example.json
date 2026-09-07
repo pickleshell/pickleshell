@@ -2,7 +2,15 @@
   "chats": {
     "example-chat": {
       "workspace": "/srv/pickleshell/workspace",
-      "agent": "opencode"
+      "agent": "opencode",
+      "allowed_execution_profiles": [
+        "agent"
+      ],
+      "allowed_boundaries": [
+        "host"
+      ],
+      "execution_profile": "agent",
+      "boundary": "host"
     }
   },
   "default_runtime": "opencode",
@@ -43,5 +51,18 @@
     "anthropic/claude-sonnet-4-20250514",
     "qwen/qwen3-coder"
   ],
-  "default_model": "opencode/big-pickle"
+  "default_model": "opencode/big-pickle",
+  "execution_profiles": {
+    "agent": {
+      "allowed_boundaries": [
+        "host"
+      ]
+    }
+  },
+  "default_execution_profile": "agent",
+  "default_boundary": "host",
+  "execution_surface": {
+    "execution_profile": "agent",
+    "boundary": "host"
+  }
 }

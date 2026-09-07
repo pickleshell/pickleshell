@@ -1,0 +1,78 @@
+[Unit]
+Description=PickleShell OpenCode agent execution surface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@GATEWAY_USER@
+Group=@GATEWAY_GROUP@
+SupplementaryGroups=@MCP_GROUP@
+WorkingDirectory=@ACTIVE_ROOT@/gateway
+EnvironmentFile=@GATEWAY_ENV_FILE@
+UnsetEnvironment=PICKLESHELL_MEMORY_BACKEND_TOKEN
+Environment=NODE_ENV=production
+Environment=PICKLESHELL_EXECUTION_SURFACE=opencode-agent-host
+Environment=PATH=@NODE_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=@STATE_ROOT@/agent-home
+Environment=XDG_CONFIG_HOME=@STATE_ROOT@/config
+Environment=XDG_DATA_HOME=@STATE_ROOT@/data
+Environment=XDG_STATE_HOME=@STATE_ROOT@/state
+Environment=XDG_CACHE_HOME=@CACHE_ROOT@/opencode
+Environment=CODEX_HOME=@STATE_ROOT@/agent-home/.codex
+Environment=OPENCODE_CONFIG_DIR=@STATE_ROOT@/config/opencode
+Environment=SETTINGS_PATH=@SETTINGS_ROOT@/settings.json
+Environment=NPM_CONFIG_CACHE=@CACHE_ROOT@/npm
+ExecStart=@NODE_EXECUTABLE@ src/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+TasksMax=256
+MemoryHigh=3G
+MemoryMax=4G
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+# Mask unrelated host configuration, service state, sockets and workspaces.
+TemporaryFileSystem=/etc:ro /var:ro /run:ro /srv:ro /opt:ro /mnt:ro /media:ro
+BindReadOnlyPaths=-/etc/ssl -/etc/ca-certificates -/etc/resolv.conf -/etc/hosts -/etc/nsswitch.conf
+BindReadOnlyPaths=-/etc/passwd -/etc/group -/etc/localtime
+BindReadOnlyPaths=@CONFIG_ROOT@/config.json @CONFIG_ROOT@/opencode.jsonc
+BindReadOnlyPaths=@APP_ROOT@ @MCP_TEMP_DIR@ @NODE_EXECUTABLE@
+BindPaths=@WORKSPACE_ROOT@ @SETTINGS_ROOT@
+BindPaths=@STATE_ROOT@/agent-home @STATE_ROOT@/config/opencode
+BindPaths=@STATE_ROOT@/data/opencode @STATE_ROOT@/state/opencode
+BindPaths=@CACHE_ROOT@/opencode @CACHE_ROOT@/npm
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+ReadWritePaths=@STATE_ROOT@/config/opencode
+ReadWritePaths=@SETTINGS_ROOT@
+ReadWritePaths=@STATE_ROOT@/data/opencode
+ReadWritePaths=@STATE_ROOT@/state/opencode
+ReadWritePaths=@STATE_ROOT@/agent-home
+ReadWritePaths=@CACHE_ROOT@/opencode
+ReadWritePaths=@CACHE_ROOT@/npm
+ReadWritePaths=@WORKSPACE_ROOT@
+ReadOnlyPaths=@APP_ROOT@
+ReadOnlyPaths=@MCP_TEMP_DIR@
+ReadOnlyPaths=@CONFIG_ROOT@/config.json
+ReadOnlyPaths=@CONFIG_ROOT@/opencode.jsonc
+InaccessiblePaths=-@CONFIG_ROOT@/control-plane.key
+InaccessiblePaths=-@CONFIG_ROOT@/mcp.env
+InaccessiblePaths=-@GATEWAY_ENV_FILE@
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

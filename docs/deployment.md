@@ -84,8 +84,8 @@ separate fixed-scope credential broker on loopback port 8767. Only explicitly
 wired Codex MCP clients connect to the broker. Shared/admin
 MCP keeps the authenticated 8766 backend and bearer auth. The distinct broker
 service reads a systemd credential projected from operator-only `0600`
-`backend.env`, rejects client authorization, and injects `user_id=codex-bos-v1`.
-The backend uses `/var/lib/pickleshell-memory/backend` as its persistence root. Port 8765 and any BOS
+`backend.env`, rejects client authorization, and injects the configured fixed `user_id`.
+The backend uses `/var/lib/pickleshell-memory/backend` as its persistence root. Port 8765 and any older host-specific
 spike data remain outside this lifecycle. Review
 `pickleshell-memory-backend/README.md` and
 `pickleshell-memory-mcp/README.md` before provisioning.
@@ -493,3 +493,99 @@ PICKLESHELL_SMOKE_CHAT_ID=example-chat \
 PICKLESHELL_RUN_AGENT_SMOKE=1 \
 npm run test:smoke
 ```
+
+## Execution Profile Contract
+
+PickleShell represents execution as `runtime + execution_profile + boundary`.
+Authority describes what an agent may do; boundary describes where that authority
+stops. The existing path stays ChatGPT → MCP → Gateway → runtime adapter → agent
+process. Profiles do not create another dispatcher or expose service controls.
+
+| profile | typical authority | network | root/sudo | intended boundary |
+|---|---|---|---|---|
+| isolated | minimal | none/local | no | host |
+| agent | workspace/runtime | controlled | no | host/container/vm |
+| privileged | elevated | controlled | limited | explicit |
+| full-control | environment root | enabled | yes | vm/container by default |
+
+`root inside VM != root of host`. Root may intentionally install packages and
+manage services inside an explicitly provisioned VM or container. Containers
+still share a host kernel: Docker socket access, privileged containers, host
+device mounts and broad capabilities can defeat containment. `full-control +
+host` is highest-risk and requires both explicit allowlists and
+`allow_full_control_host: true`. No unrestricted host unit or sudo escalation is
+provided. Privileged execution is a contract only until the operator provisions
+and reviews a suitable surface. Operator/admin routes are not agent profiles.
+
+Static `execution_profiles` maps known profile names to `allowed_boundaries`.
+Each chat has `allowed_execution_profiles` and `allowed_boundaries`; requests
+may select `execution_profile` and `boundary` only within both policies.
+`execution_surface: {"execution_profile":"agent","boundary":"host"}` declares
+the actual enclosing surface. It is an operator assertion, not a sandbox or a
+provisioning command. Selection must exactly match it: even a lower-authority
+label cannot make a running process less privileged. A different surface requires
+operator provisioning, never automatic upward fallback. Model output is not
+parsed for escalation instructions; denied operations remain denied.
+
+Exact compatibility defaults: absent global policy allows only agent/host;
+absent chat allowlists allow only agent and host. Selection uses request, then
+chat, then global `default_execution_profile`/`default_boundary`, then agent/host.
+Absent `execution_surface` means agent/host. Existing installations retain their
+OS behavior; the compatibility label does not certify their account permissions
+or retrofit a sandbox. Operators must audit existing identities before asserting
+agent isolation. Explicit null, unknown names, malformed policy and disallowed
+selections fail closed. To allow full-control/vm, explicitly configure the global
+policy, both chat allowlists, defaults, and an actual VM surface declaration.
+
+Profiles and boundaries deliberately remain outside mutable Settings. Settings
+cannot expand execution policy and responses contain none of its paths,
+credentials or service configuration. Runtime changes selected through Settings
+still pass execution policy at dispatch.
+
+Session IDs are bound to runtime, profile, boundary, chat and workspace in a
+write-once store beside the settings file (`execution-sessions/`). Changes return
+`session_authority_mismatch`; unknown sessions under explicit policy return
+`session_authority_unknown` and require a new session. Bindings survive Gateway
+restarts and result-buffer expiry. For compatibility only, configurations without
+any profile policy may adopt an old session on first continuation as agent/host;
+after adoption its binding is fixed. Explicit policy migration requires new
+sessions for previously unbound IDs. Retain bindings with runtime session data;
+do not delete them to bypass a mismatch. The store and runtime state share the
+existing trusted service identity; this is not tamper protection against that OS
+principal. Execution result metadata records the effective tuple without paths.
+
+The opt-in `deploy/release.sh --opencode-agent` selects the repository-owned
+`pickleshell-opencode-agent.service.in` template for the existing Gateway service.
+It uses the dedicated unprivileged `--gateway-user`/group, empty capabilities,
+`NoNewPrivileges=true`, private devices/tmp, hidden homes and masked unrelated
+configuration/state/socket trees. Only assigned workspace and runtime/settings
+state are writable, plus private temporary storage. AF_UNIX, AF_INET and AF_INET6
+support local IPC and provider access; egress destinations require operator
+network policy. This unit supports OpenCode agent/host only. Use a dedicated
+account with no sudo, administrative groups or unrelated credentials, one
+assigned workspace per surface, and a matching static config. The service's
+Gateway and child agent deliberately share this identity, as in the existing
+architecture; chat directories are not separate OS security principals.
+
+Prepare OpenCode and assigned provider credentials in the rendered runtime
+config/data directories. Never put a backend Memory bearer token in this service
+environment or these directories. Hidden host configuration and credential
+sockets are not projected into the unit, and the adapter retains its explicit
+child-environment allowlist. Later per-principal Memory credentials may be
+projected separately; this feature neither injects nor alters Memory credentials.
+The installer renders through the existing immutable release, backup, activation,
+readiness and rollback path. `--settings-root` supports isolated rehearsals.
+This is an alternative template for the existing service, not another Gateway.
+Once installed, the release installer preserves this template on subsequent
+upgrades and rollback even when the flag is omitted. Rollback to a release
+without the hardened template fails closed; it does not substitute the ordinary
+Gateway unit. Automatic failed-activation recovery retains the backed-up unit.
+
+Ordinary Terminal remains a separate, more restricted service with
+`RestrictAddressFamilies=AF_UNIX` and `NoNewPrivileges=true`; this feature gives it
+neither network access nor sudo. The installer's `--profile isolated` means an
+isolated release rehearsal and is unrelated to execution profile `isolated`.
+
+PickleShell provides execution/capability mechanisms. Core may later select
+`model + agent + execution profile + boundary` according to task policy. This
+contract does not turn PickleShell into Core.

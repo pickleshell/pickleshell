@@ -43,12 +43,17 @@ check(sendChatSchema.agent_timeout_sec.safeParse(86400).success, "send-chat time
 check(sendChatSchema.codex_transport.safeParse("exec").success, "send-chat transport accepted");
 check(!sendChatSchema.codex_transport.safeParse("other").success, "send-chat transport rejected");
 
+check(!settingsSchema.safeParse({ action: "set", settings: { execution_profile: "full-control" } }).success, "Settings cannot change profile policy");
+check(sendChatSchema.execution_profile.safeParse("agent").success, "execution profile accepted");
+check(!sendChatSchema.execution_profile.safeParse("root").success, "unknown profile rejected");
+check(!sendChatSchema.boundary.safeParse("invented").success, "unknown boundary rejected");
 let sendHandler: any;
 const forwarded: any[] = [];
 registerSendChat({ tool(_n: string, _d: string, _s: unknown, callback: any) { sendHandler = callback; } }, {
   async chat(request: any) { forwarded.push(request); return { ok: true, chat_id: request.chat_id, request_id: "req_test", session_id: null, state: "busy", next_action: "session-status", retry_after_ms: 1 }; },
 } as unknown as import("./src/gateway-client.js").GatewayClient);
-await sendHandler({ chat_id: "chat", message: "hello", agent_timeout_sec: 10, codex_transport: "mcp" });
+await sendHandler({ chat_id: "chat", message: "hello", agent_timeout_sec: 10, codex_transport: "mcp", execution_profile: "agent", boundary: "host" });
+check(forwarded[0].execution_profile === "agent" && forwarded[0].boundary === "host", "execution selection forwarded to Gateway");
 check(forwarded[0].agent_timeout_sec === 10 && forwarded[0].codex_transport === "mcp", "send-chat forwards explicit settings");
 
 const originalFetch = globalThis.fetch;

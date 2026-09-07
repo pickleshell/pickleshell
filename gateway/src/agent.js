@@ -109,7 +109,7 @@ function isRuntimeTransportAvailable(runtimeName, transport) {
   return adapter.isTransportAvailable(transport);
 }
 
-function runAgentRequest({ runtime, request_id, chatId, message, workspace, timeoutSec, session_id, model, fileSummary, onProgress, transport }) {
+function dispatchAgentRequest({ runtime, request_id, chatId, message, workspace, timeoutSec, session_id, model, fileSummary, onProgress, transport, executionContext }) {
   const runtimeName = runtime || RUNTIME_OPENCODE;
   const requestId = request_id || generateRequestId();
   const startedMs = Date.now();
@@ -152,6 +152,7 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
       const custom = adapter.runRequest({
         runtime: runtimeName,
         transport,
+        executionContext,
         request_id: requestId,
         chatId,
         message,
@@ -166,11 +167,12 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
     }
 
     const prompt = adapter.buildPrompt(message, fileSummary);
-    const args = adapter.buildArgs(prompt, workspace, session_id, model);
+    const args = adapter.buildArgs(prompt, workspace, session_id, model, executionContext);
 
     console.log(
       `[${runtimeName.toUpperCase()}] request chat=${chatId}` +
       ` request_id=${requestId}` +
+      ` execution_profile=${executionContext?.execution_profile || 'legacy'} boundary=${executionContext?.boundary || 'host'}` +
       ` session=${session_id ? 'existing' : 'new'}` +
       ` model=${model || 'default'}` +
       ` files=${fileSummary?.length || 0}` +
@@ -182,7 +184,7 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
       command: adapter.command || 'bash',
       args,
       cwd: workspace,
-      env: adapter.buildChildEnv(),
+      env: adapter.buildChildEnv(undefined, executionContext),
       timeoutMs: timeoutSec * 1000,
       onLine: handler.handleLine,
     });
@@ -262,6 +264,16 @@ function runAgentRequest({ runtime, request_id, chatId, message, workspace, time
   });
 
   return { promise, cancel };
+}
+
+// Apply authority metadata uniformly, including custom adapter transports and
+// preparation failures. The dispatcher supplies the already-resolved context.
+function runAgentRequest(options) {
+  const execution = dispatchAgentRequest(options);
+  if (!options.executionContext) return execution;
+  return { cancel: execution.cancel, promise: execution.promise.then(result => ({
+    ...result, metadata: { ...result.metadata, ...options.executionContext },
+  })) };
 }
 
 const sendMessage = (chatId, message, chatConfig, timeoutSec, sessionId, model, fileSummary, onProgress) => {

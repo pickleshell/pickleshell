@@ -4,6 +4,8 @@ const fileTransfer = require('./file-transfer');
 const concurrency = require('./concurrency');
 const settings = require('./settings');
 const crypto = require('crypto');
+const { ExecutionProfileError } = require('./execution-profile');
+const executionSession = require('./execution-session');
 
 // Map the internal AgentResult.state onto the public execution-state
 // vocabulary reported under output.execution_state:
@@ -111,6 +113,18 @@ const chatHandler = async (req, res) => {
     const codexTransport = resolved.values.codex_transport;
     const resolvedModel = resolved.values.model;
     const timeoutSec = resolved.values.agent_timeout_sec;
+
+    const executionContext = config.resolveExecutionProfile(chat_id, req.body, runtime.runtime);
+    const authorityBinding = executionSession.tuple(chat_id, chatConfig.workspace, executionContext);
+    if (session_id) {
+      // Legacy sessions may be adopted only under the unchanged implicit surface.
+      const cfg = config.loadConfig();
+      const legacy = cfg.execution_profiles === undefined && cfg.execution_surface === undefined &&
+        cfg.default_execution_profile === undefined && cfg.default_boundary === undefined &&
+        chatConfig.execution_profile === undefined && chatConfig.boundary === undefined &&
+        chatConfig.allowed_execution_profiles === undefined && chatConfig.allowed_boundaries === undefined;
+      executionSession.check(session_id, authorityBinding, { legacy });
+    }
 
     // Validate destination_dir if provided
     if (destination_dir) {
@@ -226,6 +240,7 @@ const chatHandler = async (req, res) => {
     // AgentResult carries the same identifiers the client already has.
     const { promise, cancel } = agent.runAgentRequest({
       runtime: runtime.runtime,
+      executionContext,
       request_id: requestId,
       chatId: chat_id,
       message,
@@ -242,6 +257,8 @@ const chatHandler = async (req, res) => {
     concurrency.setCancelFn(slotKey, cancel);
 
     promise.then((agentResult) => {
+      if (agentResult.session_id) executionSession.check(agentResult.session_id, authorityBinding, { bind: true });
+      agentResult.metadata = { ...agentResult.metadata, ...executionContext };
       // Persist the full canonical AgentResult into the result buffer so
       // session-output can report the execution outcome (runtime,
       // execution_state, events, structured error, metadata) while the
@@ -294,7 +311,7 @@ const chatHandler = async (req, res) => {
       // a slot if an unexpected rejection slips through.
       console.error('Chat error:', error.message);
       concurrency.setErrorClass(slotKey, 'internal_error');
-      concurrency.complete(slotKey, { error: error.message });
+      concurrency.complete(slotKey, { execution_state: 'error', error: { class: error.code || 'internal_error', message: error.message }, metadata: executionContext });
       concurrency.release(slotKey);
       slotKey = null;
     });
@@ -303,6 +320,9 @@ const chatHandler = async (req, res) => {
     if (slotKey) concurrency.release(slotKey);
     console.error('Chat error:', error.message);
 
+    if (error instanceof ExecutionProfileError) {
+      return res.status(error.status).json({ ok: false, error: error.code, details: error.message });
+    }
     if (error.message.includes('timeout')) {
       return res.status(504).json({
         ok: false,

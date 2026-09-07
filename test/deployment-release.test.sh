@@ -254,7 +254,8 @@ release_script --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$THREE" \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service \
   --mcp-service pickleshell-test-tunnel.service \
-  --terminal-service pickleshell-test-terminal.service --include-terminal \
+  --terminal-service pickleshell-test-terminal.service --include-terminal --opencode-agent \
+  --settings-root /var/lib/pickleshell-test-settings \
   --config-root /etc/pickleshell-test --state-root /var/lib/pickleshell-test \
   --cache-root /var/cache/pickleshell-test --workspace-root /srv/pickleshell-test/workspace \
   --terminal-workspace-root /srv/pickleshell-test/workspace \
@@ -272,6 +273,9 @@ for unit in pickleshell-test-gateway.service pickleshell-test-tunnel.service pic
   ! grep -E '/opt/pickleshell/|/etc/pickleshell/|/var/lib/pickleshell/|/var/cache/pickleshell/|/srv/pickleshell/|User=pickleshell($|[^-])|User=pickleshell-tunnel|User=pickleshell-terminal|pickleshell-gateway.service' "$ISOLATED_UNITS/$unit"
   grep -q 'NoNewPrivileges=true' "$ISOLATED_UNITS/$unit"
 done
+grep -q 'Environment=PICKLESHELL_EXECUTION_SURFACE=opencode-agent-host' "$ISOLATED_UNITS/pickleshell-test-gateway.service"
+grep -q '^RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6$' "$ISOLATED_UNITS/pickleshell-test-gateway.service"
+! grep -q '@' "$ISOLATED_UNITS/pickleshell-test-gateway.service"
 grep -q 'After=network-online.target pickleshell-test-gateway.service' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'ExecStart=/usr/local/bin/tunnel-client run --profile-file /etc/pickleshell-test/tunnel-client/pickleshell-test.yaml' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
 grep -q 'RuntimeDirectory=pickleshell-test-mcp' "$ISOLATED_UNITS/pickleshell-test-tunnel.service"
@@ -320,6 +324,7 @@ chmod +x "$ACL_BIN/getfacl"
   GATEWAY_USER=release-gateway; GATEWAY_GROUP=release-gateway
   MCP_USER=release-mcp; MCP_GROUP=release-mcp
   TERMINAL_USER=release-terminal; TERMINAL_GROUP=release-terminal
+  SETTINGS_ROOT=$TMP/prep/settings
   STATE_ROOT=$TMP/prep/state; CACHE_ROOT=$TMP/prep/cache; WORKSPACE_ROOT=$TMP/prep/workspace
   MCP_TEMP_DIR=$TMP/prep/state/mcp-temp; MCP_BIND_SOURCE=$TMP/prep/run-mcp
   TERMINAL_RUNTIME_DIR=$TMP/prep/run-terminal; TERMINAL_WORKSPACE_ROOT=$TMP/prep/home/workspace
@@ -437,7 +442,7 @@ printf 'four\n' > "$SOURCE/gateway/version.txt"
 git -C "$SOURCE" add gateway/version.txt
 git -C "$SOURCE" commit -q -m four
 FOUR=$(git -C "$SOURCE" rev-parse HEAD)
-release_script --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$FOUR" \
+release_script --source "$SOURCE" --root "$ISOLATED_DEPLOY" --commit "$FOUR" --opencode-agent \
   --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
   --gateway-service pickleshell-test-gateway.service \
   --mcp-service pickleshell-test-tunnel.service \
@@ -458,6 +463,7 @@ release_script --root "$ISOLATED_DEPLOY" --rollback --include-terminal \
 [[ $(<"$ISOLATED_DEPLOY/state/current-target") == releases/$THREE ]]
 [[ $(<"$ISOLATED_DEPLOY/state/previous-target") == releases/$FOUR ]]
 THREE_GATEWAY_UNIT=$(<"$ISOLATED_UNITS/pickleshell-test-gateway.service")
+grep -q '^Environment=PICKLESHELL_EXECUTION_SURFACE=opencode-agent-host$' "$ISOLATED_UNITS/pickleshell-test-gateway.service"
 grep -q 'restart pickleshell-test-gateway.service' "$FAKE_SYSTEMCTL_LOG"
 grep -q 'is-active pickleshell-test-gateway.service' "$FAKE_SYSTEMCTL_LOG"
 grep -q 'restart pickleshell-test-tunnel.service' "$FAKE_SYSTEMCTL_LOG"
@@ -595,5 +601,19 @@ if [[ $prefix == */mcp-server ]]; then mkdir -p "$prefix/dist"; printf '// test\
 elif [[ $prefix == */terminal ]]; then mkdir -p "$prefix/bin"; printf '#!/bin/sh\n' > "$prefix/bin/cgroup-launcher"; chmod +x "$prefix/bin/cgroup-launcher"; fi
 FAKE_NPM
 chmod +x "$BIN/npm"
+
+# An older payload cannot silently replace a hardened surface with the ordinary unit.
+printf 'releases/%s\n' "$FOUR" > "$ISOLATED_DEPLOY/state/previous-target"
+chmod u+w "$ISOLATED_DEPLOY/releases/$FOUR/deploy/systemd"
+rm "$ISOLATED_DEPLOY/releases/$FOUR/deploy/systemd/pickleshell-opencode-agent.service.in"
+if release_script --root "$ISOLATED_DEPLOY" --rollback \
+  --gateway-group "$USER" --mcp-group "$USER" --terminal-group "$USER" \
+  --gateway-service pickleshell-test-gateway.service \
+  --mcp-service pickleshell-test-tunnel.service \
+  --terminal-service pickleshell-test-terminal.service \
+  --systemctl "$BIN/fake-systemctl" --units-dir "$ISOLATED_UNITS" >"$TMP/profile-rollback.log" 2>&1; then exit 1; fi
+grep -q 'release does not support the selected OpenCode agent surface' "$TMP/profile-rollback.log"
+[[ $(readlink "$ISOLATED_DEPLOY/active") == releases/$THREE ]]
+[[ $(<"$ISOLATED_UNITS/pickleshell-test-gateway.service") == "$THREE_GATEWAY_UNIT" ]]
 
 printf 'deployment release tests passed\n'

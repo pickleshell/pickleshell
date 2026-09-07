@@ -44,6 +44,8 @@ export const sendChatSchema = {
     .describe(
       "Optional runtime for this request. If omitted, use chat runtime, then default_runtime from config."
     ),
+  execution_profile: z.enum(["isolated", "agent", "privileged", "full-control"]).optional().describe("Select within operator execution policy; never escalates automatically"),
+  boundary: z.enum(["host", "container", "vm"]).optional().describe("Operator-provisioned containment boundary"),
   agent: z
     .enum(["opencode", "codex"])
     .optional()
@@ -106,6 +108,8 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
       message: string;
       session_id?: string;
       runtime?: "opencode" | "codex";
+      execution_profile?: "isolated" | "agent" | "privileged" | "full-control";
+      boundary?: "host" | "container" | "vm";
       agent?: "opencode" | "codex";
       model?: string;
       agent_timeout_sec?: number;
@@ -160,6 +164,8 @@ export function registerSendChat(mcp: any, client: GatewayClient) {
             message: args.message,
             session_id: args.session_id,
             runtime: args.runtime ?? args.agent,
+            execution_profile: args.execution_profile,
+            boundary: args.boundary,
             model: args.model,
             agent_timeout_sec: args.agent_timeout_sec,
             codex_transport: args.codex_transport,
