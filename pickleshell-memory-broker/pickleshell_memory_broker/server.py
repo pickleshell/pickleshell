@@ -1,4 +1,6 @@
 import io
+import hashlib
+from .policy import load_policy, PrincipalPolicy
 import socket
 import threading
 import time
@@ -132,6 +134,10 @@ class BrokerHandler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         return
 
+    def send_response(self, code, message=None):
+        self.audit_status = code
+        super().send_response(code, message)
+
     def send_error_json(self, status, error):
         body = json.dumps({"error": error, "status": status}, separators=(",", ":")).encode()
         self.send_response(status)
@@ -143,6 +149,8 @@ class BrokerHandler(BaseHTTPRequestHandler):
 
     def route(self):
         parsed = urlsplit(self.path)
+        if parsed.scheme or parsed.netloc or parsed.fragment:
+            return None
         if len(self.path.encode()) > MAX_TARGET_BYTES:
             return None
         query = parse_qs(parsed.query, keep_blank_values=True)
@@ -175,6 +183,9 @@ class BrokerHandler(BaseHTTPRequestHandler):
     def do_REQUEST(self):
         if sum(len(k.encode()) + len(v.encode()) + 4 for k, v in self.headers.items()) > MAX_HEADER_BYTES:
             return self.send_error_json(431, "request_headers_too_large")
+        policy = getattr(self.server, "principal_policy", None)
+        if policy is not None:
+            return self.principal_request(policy)
         if self.headers.get("Authorization") is not None:
             return self.send_error_json(400, "client_authorization_forbidden")
         route = self.route()
@@ -206,6 +217,66 @@ class BrokerHandler(BaseHTTPRequestHandler):
         self.connection.settimeout(10)
         self.forward(method, path, query, body)
 
+    def principal_request(self, policy):
+        self.principal = None
+        target, scope, operation = None, None, None
+        try:
+            credentials = self.headers.get_all("Authorization", [])
+            if len(credentials) != 1:
+                return self.send_error_json(401, "principal_unauthorized")
+            self.principal = policy.authenticate(credentials[0])
+            if self.principal is None:
+                return self.send_error_json(401, "principal_unauthorized")
+            route = self.route()
+            if route is None:
+                return self.send_error_json(404, "route_not_found")
+            method, path, memory_id, methods, query = route
+            if method not in methods:
+                return self.send_error_json(405, "method_not_allowed")
+            operation = ("health" if path == "/health" else "search" if path == "/search" else
+                         "history" if path.endswith("/history") else
+                         {"POST": "add", "PUT": "update", "DELETE": "delete", "GET": "get" if memory_id else "list"}[method])
+            if any(self.headers.get(h) is not None for h in ("X-Agent", "X-Principal")):
+                return self.send_error_json(403, "principal_override_denied")
+            allowed_query = {"target", "limit"} if path == "/memories" and method == "GET" else ({"target"} if memory_id else set())
+            if set(query) - allowed_query or any(len(v) != 1 for v in query.values()):
+                return self.send_error_json(403, "scope_override_denied")
+            try:
+                body = self.read_body()
+            except ValueError as error:
+                return self.send_error_json(413 if str(error) == "request_too_large" else 400, str(error))
+            payload = None
+            if method in {"POST", "PUT"}:
+                try:
+                    payload = json.loads(body.decode("utf-8"), object_pairs_hook=unique_payload)
+                except (ValueError, UnicodeError, RecursionError):
+                    return self.send_error_json(400, "invalid_request")
+                allowed = {"target", "query", "limit"} if path == "/search" else ({"target", "text", "infer"} if method == "POST" else {"target", "text"})
+                if not isinstance(payload, dict) or set(payload) - allowed:
+                    return self.send_error_json(403, "scope_override_denied")
+                target = payload.pop("target", "private")
+            else:
+                target = query.pop("target", ["private"])[0]
+            write = method in {"PUT", "DELETE"} or (method == "POST" and path == "/memories")
+            scope = policy.resolve(self.principal, target, write)
+            if scope is None:
+                return self.send_error_json(403, "target_access_denied")
+            if payload is not None:
+                payload["user_id"] = scope
+                body = json.dumps(payload, separators=(",", ":")).encode()
+                if len(body) > MAX_BODY_BYTES:
+                    return self.send_error_json(413, "request_too_large")
+            elif path != "/health":
+                query["user_id"] = [scope]
+            self.connection.settimeout(10)
+            self.forward(method, path, query, body)
+        finally:
+            # Broker-owned identity, no client text/IDs/credentials in the audit.
+            event = {"principal": self.principal["name"] if self.principal else None,
+                     "target": target if isinstance(target, str) and (target == "private" or target in (self.principal or {}).get("shared", {})) else None,
+                     "scope": scope, "operation": operation, "method": self.command, "status": getattr(self, "audit_status", 400)}
+            print(json.dumps(event, separators=(",", ":")), flush=True)
+
     def forward(self, method, path, query, body):
         target = path
         if query:
@@ -225,6 +296,14 @@ class BrokerHandler(BaseHTTPRequestHandler):
             if response.length not in (None, 0):
                 raise ValueError("incomplete upstream response")
             # Mark before any headers can reach the client, including partial writes.
+            if 300 <= response.status < 400:
+                raise ValueError("upstream redirect denied")
+            if path == "/health" and response.status == 200 and getattr(self, "principal", None):
+                health = json.loads(data)
+                # Never disclose arbitrary backend health fields through broker discovery.
+                health = {k: v for k, v in health.items() if k in {"status", "provider", "version"} and isinstance(v, str) and len(v) <= 64}
+                health["broker"] = PrincipalPolicy.public(self.principal)
+                data = json.dumps(health, separators=(",", ":")).encode()
             response_started = True
             self.send_response(response.status)
             content_type = response.getheader("Content-Type")
@@ -250,13 +329,36 @@ class BrokerHandler(BaseHTTPRequestHandler):
     do_TRACE = do_REQUEST
 
 
+def unique_payload(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate request key")
+        result[key] = value
+    return result
+
+
 def main():
     try: host, port, backend, token = config()
     except ValueError as error: raise SystemExit(f"pickleshell-memory-broker: configuration error: {error}") from None
+    mode = os.environ.get("PICKLESHELL_MEMORY_BROKER_MODE")
+    policy_path = os.environ.get("PICKLESHELL_MEMORY_BROKER_POLICY_FILE")
+    try:
+        if mode == "principals" and policy_path:
+            policy = load_policy(policy_path)
+            if hashlib.sha256(token.encode()).hexdigest() in policy.by_digest:
+                raise ValueError("principal credential must differ from backend credential")
+        elif mode == "legacy-codex" and not policy_path:
+            policy = None
+        else:
+            raise ValueError("explicit broker mode and principal policy are required")
+    except ValueError as error:
+        raise SystemExit(f"pickleshell-memory-broker: configuration error: {error}") from None
     if host == "::1":
         BoundedHTTPServer.address_family = socket.AF_INET6
     server = BoundedHTTPServer((host, port), BrokerHandler)
     server.broker_config = (host, port, backend, token)
+    server.principal_policy = policy
     server.serve_forever()
 
 

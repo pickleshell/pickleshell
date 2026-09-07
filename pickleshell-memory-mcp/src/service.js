@@ -52,9 +52,10 @@ export class MemoryService {
       return this.error("audit_failure", 500, false);
     }
     return { content: [{ type: "text", text: JSON.stringify({
-      transport: "stdio", authentication: "operator-launched-process+optional-backend-bearer",
+      transport: "stdio", authentication: this.config.brokerMode ? "principal-credential-broker" : "operator-launched-process+optional-backend-bearer",
       backend_protocol: "mem0-http-v1", role: this.config.role,
-      scope: this.config.role === "agent" ? this.config.scope : "explicit-per-call",
+      scope: this.config.brokerMode ? "operator-targets" : (this.config.role === "agent" ? this.config.scope : "explicit-per-call"),
+      ...(this.config.brokerMode ? publicPrincipal(health) : {}),
       semantics: "transparent", operations: Object.keys(OPERATIONS), backend: publicBackendHealth(health),
     }) }] };
   }
@@ -88,4 +89,12 @@ function publicBackendHealth(health) {
     if (typeof value === "string" && value.length <= MAX_PUBLIC_HEALTH_VALUE_LENGTH) result[field] = value;
   }
   return result;
+}
+
+function publicPrincipal(health) {
+  const broker = health?.broker;
+  if (!broker || !/^[a-z][a-z0-9_-]{0,63}$/.test(broker.principal) || !Array.isArray(broker.targets)) return {};
+  return { principal: broker.principal, targets: broker.targets.slice(0, 65).filter((g) => g &&
+    typeof g.target === "string" && /^(private|shared\/[a-z][a-z0-9_/-]{0,120})$/.test(g.target) &&
+    typeof g.read === "boolean" && typeof g.write === "boolean").map(({target, read, write}) => ({target, read, write})) };
 }

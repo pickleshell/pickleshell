@@ -9,6 +9,89 @@ This package is independent of Gateway startup. If it is absent, stopped, or
 misconfigured, Agent, Browser, Terminal, Gateway, and the standard PickleShell
 MCP server continue to work unchanged.
 
+## PickleShell Memory component
+
+PickleShell Memory is an additional PickleShell component; it is not a fourth
+core service. It is currently implemented by three independently released
+parts:
+
+- `pickleshell-memory-mcp`: this stdio MCP transport; it adds transport,
+  policy, audit, structured errors, and capability discovery;
+- `pickleshell-memory-broker`: a loopback-only scoped credential broker used
+  by the managed Codex wiring;
+- `pickleshell-memory-backend`: the production Mem0 backend that owns the
+  memory engine, extraction, vector store, and persistence.
+
+PickleShell Memory is **shared external memory**. It is deliberately separate
+from agent-local memory:
+
+- **Agent-local context / native memory** is the runtime's own session
+  context and any memory the runtime itself provides. Its sharing and lifetime
+  follow that runtime; it does not imply access to PickleShell shared scopes.
+- **Shared external memory** is the Mem0 backend: persistent, scope-bound,
+  and addressable through the MCP tools by any correctly wired agent session
+  in the same scope, including sessions that start later.
+
+## Managed production path (single-principal baseline)
+
+The managed production deployment exposes shared memory to Codex only through
+this loopback-only chain:
+
+```text
+Codex
+  -> installed PickleShell Memory MCP (role=agent, scope=codex-bos-v1)
+  -> scoped broker on 127.0.0.1:8767
+  -> production Mem0 backend on 127.0.0.1:8766
+```
+
+Backend credential projection is owned by the broker: the broker service
+receives a systemd `LoadCredential` copy of the operator-only `0600`
+`backend.env`, applies that credential, and fixes `user_id=codex-bos-v1` on
+every request. The backend credential is not exposed to Codex or to the MCP
+process, and the Codex MCP launcher never reads `backend.env` or `mcp.env`.
+
+## Verified shared-memory handoff (2026-09-07)
+
+A 2026-09-07 end-to-end experiment on the managed production path verified
+that shared memory survives across independent agent sessions:
+
+1. Agent A, a Codex session, stored architectural knowledge together with the
+   marker `PICKLESHELL_SHARED_MEMORY_HANDOFF_20260907_A` in scope
+   `codex-bos-v1`.
+2. Agent B, a completely fresh independent Codex session, received no
+   transcript and no memory ID, then semantically searched the shared memory.
+3. Agent B found memory `6a293b43-afe6-4b1c-9641-663c8896a58c` and recovered
+   the architecture and the marker.
+
+Verdict: **AGENT A -> SHARED MEM0 -> AGENT B HANDOFF PASS**.
+
+Why this matters: shared persistent knowledge can outlive an individual
+session or agent and be recovered by another. That is a useful proven
+engineering precursor for Core's future shared/organizational knowledge
+layer.
+
+What is proven is cross-session handoff between independent Codex agent
+sessions through the managed production memory path. Cross-runtime handoff
+(for example, Codex -> OpenCode) has not been proven and is not claimed here.
+
+Sanitized evidence:
+[`docs/evidence/2026-09-07-shared-memory-handoff.md`](../docs/evidence/2026-09-07-shared-memory-handoff.md)
+
+## Multi-principal shared memory (not yet deployed)
+
+The repository now supports one authenticated broker at 8767 for Codex,
+OpenCode and future configured principals. Private memory defaults to `private`;
+shared project memory uses an operator-approved target such as
+`shared/project/pickleshell`, with independent read/write permissions. Keep
+`codex-bos-v1` as Codex's physical private scope to preserve existing memories.
+
+See [principal policy, trust boundary, installation, migration and tests](../docs/memory-principals.md).
+Principal credentials are distinct from the backend bearer. Separate Unix
+accounts protect each runtime's credential; the installed `src/principal.js`
+launcher fixes the single broker endpoint. Admin/direct 8766 behavior remains
+unchanged. No multi-principal production deployment or real OpenCode handoff
+is claimed by this implementation.
+
 ## Policy modes
 
 - `admin` is an explicitly global administrative view. Every memory call must
@@ -55,6 +138,9 @@ sudo deploy/memory-release.sh \
   --node-executable /path/to/node-20-or-newer \
   --python-executable /path/to/regular-python-3.11-or-newer
 ```
+
+For authenticated multi-principal installation, follow the linked policy guide
+and pass `--broker-policy`; the legacy setup below documents compatibility.
 
 Before installation, create distinct backend (`pickleshell-memory`) and broker
 (`pickleshell-memory-broker`) users/groups, plus a separate

@@ -7,8 +7,9 @@ export class BackendClient {
     const url = new URL(this.config.backendUrl + path);
     const body = {};
     for (const key of operation.body || []) if (args[key] !== undefined) body[key] = args[key];
-    if (operation.method === "POST" || operation.method === "PUT") body.user_id = scope;
-    else url.searchParams.set("user_id", scope);
+    const scopeKey = this.config.brokerMode ? "target" : "user_id";
+    if (operation.method === "POST" || operation.method === "PUT") body[scopeKey] = scope;
+    else url.searchParams.set(scopeKey, scope);
     for (const key of operation.query || []) if (args[key] !== undefined) url.searchParams.set(key, String(args[key]));
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
@@ -17,9 +18,10 @@ export class BackendClient {
         method: operation.method,
         headers: {
           "accept": "application/json", "content-type": "application/json",
-          ...(this.config.backendToken ? { authorization: `Bearer ${this.config.backendToken}` } : {}),
+          ...((this.config.principalToken || this.config.backendToken) ? { authorization: `Bearer ${this.config.principalToken || this.config.backendToken}` } : {}),
         },
         ...(Object.keys(body).length ? { body: JSON.stringify(body) } : {}),
+        redirect: "error",
         signal: controller.signal,
       });
       const text = await response.text();
@@ -40,7 +42,8 @@ export class BackendClient {
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
     try {
       const response = await this.fetch(new URL(this.config.backendUrl + "/health"), {
-        headers: { accept: "application/json", ...(this.config.backendToken ? { authorization: `Bearer ${this.config.backendToken}` } : {}) },
+        headers: { accept: "application/json", ...((this.config.principalToken || this.config.backendToken) ? { authorization: `Bearer ${this.config.principalToken || this.config.backendToken}` } : {}) },
+        redirect: "error",
         signal: controller.signal,
       });
       if (!response.ok) throw backendError(mapStatus(response.status), response.status, isRetryableStatus(response.status));

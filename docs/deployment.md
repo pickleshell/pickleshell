@@ -422,6 +422,11 @@ start a new conversation.
 
 ## Optional memory profile
 
+Authenticated multi-principal Memory uses one broker endpoint, per-principal
+credentials, and explicit private/shared policies. See [the principal deployment
+and rollback contract](memory-principals.md) before adding `--broker-policy`.
+The historical single-principal configuration remains a compatibility mode.
+
 The optional memory sidecar and Memory MCP are deployed independently with
 `deploy/memory-release.sh`; they are not inputs to Gateway, tunnel, Browser, or
 Terminal startup/readiness. Follow the complete configuration, credential,

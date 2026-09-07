@@ -9,6 +9,7 @@ User=@BROKER_USER@
 Group=@BROKER_GROUP@
 LoadCredential=backend.env:@BACKEND_ENV_FILE@
 Environment=PICKLESHELL_MEMORY_BACKEND_ENV_FILE=%d/backend.env
+@BROKER_POLICY_DIRECTIVES@
 ExecStart=@BROKER_WRAPPER@
 Restart=on-failure
 RestartSec=5

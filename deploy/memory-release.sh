@@ -4,7 +4,7 @@ set -Eeuo pipefail
 die() { printf 'memory-release: error: %s\n' "$1" >&2; exit 1; }
 usage() { printf '%s\n' 'Usage: memory-release.sh --source REPO --root ROOT --commit FULL_SHA [options] [--rollback]'; }
 
-SOURCE=''; ROOT='/opt/pickleshell-memory'; COMMIT=''; PROFILE=production
+BROKER_POLICY=''; SOURCE=''; ROOT='/opt/pickleshell-memory'; COMMIT=''; PROFILE=production
 CONFIG_ROOT='/etc/pickleshell-memory'; STATE_ROOT='/var/lib/pickleshell-memory'; LOG_ROOT='/var/log/pickleshell-memory'
 UNITS_DIR='/etc/systemd/system'; LOGROTATE_DIR='/etc/logrotate.d'; WRAPPER_DIR='/usr/local/libexec'
 SERVICE_USER='pickleshell-memory'; SERVICE_GROUP='pickleshell-memory'; SERVICE='pickleshell-memory-backend.service'; BROKER_SERVICE='pickleshell-memory-broker.service'
@@ -25,6 +25,7 @@ while (($#)); do case "$1" in
   --python-executable) PYTHON_EXECUTABLE=${2:-}; shift 2;;
   --backend-executable) BACKEND_EXECUTABLE=${2:-}; MANAGED_BACKEND=0; ISOLATED_BACKEND_SET=1; shift 2;;
   --managed-backend-executable) BACKEND_EXECUTABLE=${2:-}; MANAGED_BACKEND=1; ISOLATED_BACKEND_SET=1; shift 2;;
+  --broker-policy) BROKER_POLICY=${2:-}; shift 2;;
   --broker-user) BROKER_USER=${2:-}; ISOLATED_BROKER_USER_SET=1; shift 2;;
   --broker-group) BROKER_GROUP=${2:-}; ISOLATED_BROKER_GROUP_SET=1; shift 2;;
   --audit-group) AUDIT_GROUP=${2:-}; ISOLATED_AUDIT_SET=1; shift 2;;
@@ -259,8 +260,25 @@ if ((!ROLLBACK)); then
   RELEASE="$RELEASES/$RESOLVED"; STAGING=''
   [[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
 fi
+if [[ -n $BROKER_POLICY ]]; then
+  safe_path "$BROKER_POLICY" 'broker policy'
+  validate_no_symlink_components "$BROKER_POLICY"
+  [[ $BROKER_POLICY == "$CONFIG_ROOT/broker-policy.json" ]] || die 'broker policy must be CONFIG_ROOT/broker-policy.json'
+  (( ! ROLLBACK )) || die 'rollback restores the policy path recorded with its target release; omit --broker-policy'
+  # Validate the exact requested commit's parser before the deployment lock or writes.
+  git -C "$SOURCE" show "$RESOLVED:pickleshell-memory-broker/pickleshell_memory_broker/policy.py" |
+    "$PYTHON_EXECUTABLE" - "$BROKER_POLICY" || die 'invalid broker principal policy'
+fi
 acquire_deployment_lock
-if ((ROLLBACK)); then prevalidate_rollback; else
+if ((ROLLBACK)); then
+  prevalidate_rollback
+  if [[ -f $ROOT/$previous/.broker-policy-path ]]; then
+    recorded_policy=$(<"$ROOT/$previous/.broker-policy-path")
+    [[ $recorded_policy == "$CONFIG_ROOT/broker-policy.json" ]] || die 'rollback principal policy path mismatch'
+    validate_no_symlink_components "$recorded_policy"
+    "$PYTHON_EXECUTABLE" "$ROOT/$previous/pickleshell-memory-broker/pickleshell_memory_broker/policy.py" "$recorded_policy" || die 'invalid rollback principal policy'
+  fi
+else
   [[ ! -e $RELEASE && ! -L $RELEASE ]] || die 'release already exists; use a new exact commit or rollback'
 fi
 mkdir -p -- "$ROOT" "$STATE_ROOT" "$LOG_ROOT" "$UNITS_DIR" "$LOGROTATE_DIR" "$WRAPPER_DIR"
@@ -314,8 +332,14 @@ render_artifacts() {
   ((MANAGED_BACKEND)) && specs+=("pickleshell-memory-backend-bin.sh.in:$BACKEND_EXECUTABLE:0755")
   for spec in "${specs[@]}"; do
     template="$release/deploy/systemd/${spec%%:*}"; target=${spec#*:}; mode=${target##*:}; target=${target%:*}; contents=$(<"$template") || return
-    for token in ACTIVE_ROOT CONFIG_ROOT STATE_ROOT LOG_ROOT BACKEND_ENV_FILE MCP_ENV_FILE AUDIT_LOG SERVICE_USER SERVICE_GROUP BACKEND_EXECUTABLE NODE_EXECUTABLE BACKEND_WRAPPER BROKER_WRAPPER PYTHON_EXECUTABLE BROKER_USER BROKER_GROUP BACKEND_SERVICE; do
-      case $token in BROKER_USER) value=$BROKER_USER;; BROKER_GROUP) value=$BROKER_GROUP;; BACKEND_SERVICE) value=$SERVICE;; ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; PYTHON_EXECUTABLE) value=$PYTHON_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; BROKER_WRAPPER) value="$WRAPPER_DIR/broker-wrapper";; esac
+    for token in ACTIVE_ROOT CONFIG_ROOT STATE_ROOT LOG_ROOT BACKEND_ENV_FILE MCP_ENV_FILE AUDIT_LOG SERVICE_USER SERVICE_GROUP BACKEND_EXECUTABLE NODE_EXECUTABLE BACKEND_WRAPPER BROKER_WRAPPER PYTHON_EXECUTABLE BROKER_USER BROKER_GROUP BACKEND_SERVICE BROKER_POLICY_DIRECTIVES; do
+      case $token in BROKER_POLICY_DIRECTIVES)
+        value='Environment=PICKLESHELL_MEMORY_BROKER_MODE=legacy-codex'
+        if [[ -f $release/.broker-policy-path ]]; then
+          policy_path=$(<"$release/.broker-policy-path")
+          [[ $policy_path == "$CONFIG_ROOT/broker-policy.json" ]] || return 1
+          value=$(printf 'Environment=PICKLESHELL_MEMORY_BROKER_MODE=principals\nLoadCredential=policy.json:%s\nEnvironment=PICKLESHELL_MEMORY_BROKER_POLICY_FILE=%%d/policy.json' "$policy_path")
+        fi;; BROKER_USER) value=$BROKER_USER;; BROKER_GROUP) value=$BROKER_GROUP;; BACKEND_SERVICE) value=$SERVICE;; ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; PYTHON_EXECUTABLE) value=$PYTHON_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; BROKER_WRAPPER) value="$WRAPPER_DIR/broker-wrapper";; esac
       [[ $template != *.logrotate.in || $token != SERVICE_GROUP ]] || value=$AUDIT_GROUP
       contents=${contents//"@$token@"/"$value"}
     done
@@ -574,6 +598,7 @@ RELEASE_ID=$(stat -Lc '%d:%i' -- "$RELEASE") || die 'cannot inspect claimed fina
 validate_release_identity || die 'final release path identity changed'
 git -C "$SOURCE" archive "$RESOLVED" "${archive_paths[@]}" | tar -x -C "$RELEASE"
 validate_release_identity || die 'final release path identity changed'
+[[ -z $BROKER_POLICY ]] || printf '%s\n' "$BROKER_POLICY" > "$RELEASE/.broker-policy-path"
 printf '%s\n' "$RESOLVED" > "$RELEASE/.release-sha"; npm --prefix "$RELEASE/pickleshell-memory-mcp" ci --omit=dev
 validate_release_identity || die 'final release path identity changed'
 if ((MANAGED_BACKEND)); then

@@ -12,7 +12,7 @@ import { MemoryService } from "./service.js";
 export function createServer(config, backend = new BackendClient(config), auditor = new Auditor(config.auditLog)) {
   const service = new MemoryService(config, backend, auditor);
   const server = new McpServer({ name: "pickleshell-memory-mcp", version: "0.1.0" });
-  const scope = config.role === "admin" ? { user_id: z.string().min(1).max(200).describe("Explicit Mem0 user_id scope") } : {};
+  const scope = config.role === "admin" ? { user_id: z.string().min(1).max(200).describe("Explicit Mem0 user_id scope") } : (config.brokerMode ? { target: z.string().regex(/^(private|shared\/[a-z][a-z0-9_/-]{0,120})$/).default("private").describe("Private memory or an operator-approved shared target; see capabilities") } : {});
   const id = { memory_id: z.string().min(1).max(200) };
   const tools = {
     memory_add: { text: z.string().min(1).max(32000), infer: z.boolean().default(true), ...scope },

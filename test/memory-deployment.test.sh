@@ -574,6 +574,8 @@ chmod 0755 "$PREFIX/bin/logrotate"
 
 install_release() {
   local source=${2:-$FIXTURE}
+  local -a principal_args=()
+  [[ -z ${3:-} ]] || principal_args=(--broker-policy "$3")
   PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$PREFIX" "$FIXTURE/deploy/memory-release.sh" \
     --profile isolated --source "$source" --root "$PREFIX/app" --commit "$1" \
     --config-root "$PREFIX/config" --state-root "$PREFIX/state" --log-root "$PREFIX/log" \
@@ -581,7 +583,7 @@ install_release() {
     --backend-executable "$PREFIX/bin/backend.js" --node-executable "$(command -v node)" \
     --broker-service isolated-memory-broker.service --broker-user nobody --broker-group nogroup --audit-group "$(id -gn)" --service-user "$(id -un)" --service-group "$(id -gn)" \
     --service pickleshell-memory-isolated.service \
-    --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin"
+    --systemctl "$PREFIX/bin/systemctl" --wrapper-dir "$PREFIX/bin" "${principal_args[@]}"
 }
 
 run_normal_preflight_no_mutation_case() {
@@ -1419,4 +1421,53 @@ test ! -e "$PREFIX/enabled/pickleshell-memory-isolated.service"
 rollback_release
 assert_base_recovered
 printf 'pre-broker 769ffde rollback, failed upgrade, failed enable and boot-state recovery: ok\n'
+# Principal policy is validated before staging; per-release mode survives rollback.
+printf 'principal-policy\n' > "$FIXTURE/VERSION"
+git -C "$FIXTURE" add VERSION
+git -C "$FIXTURE" commit -qm principal-policy
+PRINCIPAL_SHA=$(git -C "$FIXTURE" rev-parse HEAD)
+POLICY_FILE="$PREFIX/config/broker-policy.json"
+write_principal_policy() {
+  python3 - "$POLICY_FILE" <<'PY_POLICY'
+import hashlib,json,sys
+from pathlib import Path
+p=Path(sys.argv[1]);p.write_text(json.dumps({"version":1,"principals":[{"name":name,"token_sha256":hashlib.sha256((name*20).encode()).hexdigest(),"private_scope":"codex-bos-v1" if name=="codex" else "agent:opencode:bos-v1","shared":{"shared/project/pickleshell":{"scope":"project:pickleshell:shared","read":True,"write":True}}} for name in ["codex","opencode"]]}));p.chmod(0o600)
+PY_POLICY
+}
+for invalid_policy in malformed duplicate unsafe-mode; do
+  write_principal_policy
+  case $invalid_policy in
+    malformed) printf '{broken' > "$POLICY_FILE" ;;
+    duplicate) printf '{"version":1,"version":1,"principals":[]}' > "$POLICY_FILE" ;;
+    unsafe-mode) chmod 0644 "$POLICY_FILE" ;;
+  esac
+  before_policy_failure=$(sha256sum "$PREFIX/app/state/current-target" "$PREFIX/app/state/previous-target" "$PREFIX/systemctl.calls")
+  if install_release "$PRINCIPAL_SHA" "$FIXTURE" "$POLICY_FILE" > "$TMP/principal-policy-$invalid_policy.out" 2>&1; then
+    echo 'invalid principal policy accepted' >&2; exit 1
+  fi
+  grep -q 'invalid broker principal policy' "$TMP/principal-policy-$invalid_policy.out"
+  test "$before_policy_failure" = "$(sha256sum "$PREFIX/app/state/current-target" "$PREFIX/app/state/previous-target" "$PREFIX/systemctl.calls")"
+  test ! -e "$PREFIX/app/releases/$PRINCIPAL_SHA"
+done
+write_principal_policy
+install_release "$PRINCIPAL_SHA" "$FIXTURE" "$POLICY_FILE"
+test "$(<"$PREFIX/app/active/.broker-policy-path")" = "$POLICY_FILE"
+test -f "$PREFIX/app/active/pickleshell-memory-mcp/src/principal.js"
+grep -q '^Environment=PICKLESHELL_MEMORY_BROKER_MODE=principals$' "$PREFIX/units/isolated-memory-broker.service"
+grep -q "^LoadCredential=policy.json:$POLICY_FILE$" "$PREFIX/units/isolated-memory-broker.service"
+grep -q '^Environment=PICKLESHELL_MEMORY_BROKER_POLICY_FILE=%d/policy.json$' "$PREFIX/units/isolated-memory-broker.service"
+rollback_release
+assert_base_recovered
+# No --broker-policy on reverse rollback: authenticated mode is release metadata.
+rollback_release
+test "$(readlink "$PREFIX/app/active")" = "releases/$PRINCIPAL_SHA"
+grep -q '^Environment=PICKLESHELL_MEMORY_BROKER_MODE=principals$' "$PREFIX/units/isolated-memory-broker.service"
+# Failed legacy activation must restore the prior authenticated mode as well.
+if install_release "$FAILED_SHA" > "$TMP/principal-failed-upgrade.out" 2>&1; then exit 1; fi
+grep -q 'previous deployment restored and verified' "$TMP/principal-failed-upgrade.out"
+test "$(readlink "$PREFIX/app/active")" = "releases/$PRINCIPAL_SHA"
+grep -q '^Environment=PICKLESHELL_MEMORY_BROKER_MODE=principals$' "$PREFIX/units/isolated-memory-broker.service"
+rollback_release
+assert_base_recovered
+printf 'principal policy preflight, credential projection rendering, authenticated-mode rollback: ok\n'
 printf 'memory deployment E2E: ok\n'
