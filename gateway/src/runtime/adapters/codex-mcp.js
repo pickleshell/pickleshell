@@ -1,6 +1,7 @@
 // Codex MCP stdio transport adapter.
 
-const { spawn, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
+const providers = require('../../execution/providers');
 const { createAgentEvent } = require('../normalize');
 const execAdapter = require('./codex-exec');
 
@@ -87,7 +88,9 @@ function normalizeToolResult(result) {
 }
 
 class JsonRpcWorker {
-  constructor({ command = CODEX_COMMAND, env = execAdapter.buildChildEnv(), requestTimeoutMs }) {
+  constructor({ command = CODEX_COMMAND, env = execAdapter.buildChildEnv(), requestTimeoutMs, executionContext = { boundary: 'host', boundary_provider: 'host' } }) {
+    this.provider = providers.forContext(executionContext);
+    this.authority = JSON.stringify(executionContext);
     this.id = ++workerSeq;
     this.command = command;
     this.env = env;
@@ -106,7 +109,7 @@ class JsonRpcWorker {
 
   start() {
     if (this.proc) return;
-    this.proc = spawn(this.command, ['mcp-server'], {
+    this.proc = this.provider.spawn(this.command, ['mcp-server'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: this.env,
       shell: false,
@@ -341,8 +344,10 @@ class JsonRpcWorker {
   }
 }
 
-async function createReadyWorker(timeoutMs, onWorker) {
+async function createReadyWorker(timeoutMs, onWorker, executionContext) {
+  providers.forContext(executionContext);
   for (const worker of [...idleWorkers]) {
+    if (worker.authority !== JSON.stringify(executionContext)) continue;
     idleWorkers.delete(worker);
     if (worker.ready && !worker.closed) {
       worker.requestTimeoutMs = timeoutMs;
@@ -351,7 +356,7 @@ async function createReadyWorker(timeoutMs, onWorker) {
     }
   }
 
-  const worker = new JsonRpcWorker({ requestTimeoutMs: timeoutMs });
+  const worker = new JsonRpcWorker({ requestTimeoutMs: timeoutMs, executionContext });
   onWorker?.(worker);
   try {
     await worker.initialize();
@@ -415,7 +420,7 @@ function resultFromError({ error, runtime, requestId, sessionId, events, started
   };
 }
 
-function runRequest({ runtime, request_id, message, workspace, timeoutSec, session_id, model, fileSummary, onProgress }) {
+function runRequest({ runtime, request_id, message, workspace, timeoutSec, session_id, model, fileSummary, onProgress, executionContext = { boundary: 'host', boundary_provider: 'host' } }) {
   const requestId = request_id;
   const startedMs = Date.now();
   const startedAt = new Date(startedMs).toISOString();
@@ -433,7 +438,7 @@ function runRequest({ runtime, request_id, message, workspace, timeoutSec, sessi
       worker = await createReadyWorker(timeoutMs, (readyWorker) => {
         worker = readyWorker;
         if (timedOut) readyWorker.cancel('PickleShell request timeout');
-      });
+      }, executionContext);
       if (timedOut) {
         throw new TransportError('transport_timeout', 'Codex MCP request timed out', {
           worker_id: worker.id,

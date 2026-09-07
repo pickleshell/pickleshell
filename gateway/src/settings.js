@@ -187,11 +187,11 @@ function globalRaw(document) {
   return values;
 }
 
-function validateTuple(tuple) {
+function validateTuple(tuple, { checkAvailability = true } = {}) {
   const runtime = config.normalizeRuntime(tuple.runtime);
   if (!runtime) throw new SettingsError('runtime_invalid', 'Runtime is invalid', 400);
   if (!config.isRuntimeAllowed(runtime)) throw new SettingsError('runtime_not_allowed', `Runtime "${runtime}" is not allowed`, 403);
-  if (!config.isRuntimeAvailable(runtime)) throw new SettingsError('runtime_unavailable', `Runtime "${runtime}" is unavailable`, 503);
+  if (checkAvailability && !config.isRuntimeAvailable(runtime)) throw new SettingsError('runtime_unavailable', `Runtime "${runtime}" is unavailable`, 503);
   const timeout = normalizeValue('agent_timeout_sec', tuple.agent_timeout_sec);
   if (timeout === undefined) throw new SettingsError('invalid_request', 'agent_timeout_sec must be an integer from 1 to 86400', 400);
   const model = normalizeValue('model', tuple.model);
@@ -201,14 +201,14 @@ function validateTuple(tuple) {
   if (modelError) throw new SettingsError('runtime_model_invalid', modelError.message, 400);
   const transport = normalizeValue('codex_transport', tuple.codex_transport);
   if (!transport) throw new SettingsError('codex_transport_invalid', 'Codex transport must be exec or mcp', 400);
-  if (runtime === 'codex' && !agent.isRuntimeTransportAvailable(runtime, transport)) throw new SettingsError('runtime_unavailable', `Codex transport "${transport}" is unavailable`, 503);
+  if (checkAvailability && runtime === 'codex' && !agent.isRuntimeTransportAvailable(runtime, transport)) throw new SettingsError('runtime_unavailable', `Codex transport "${transport}" is unavailable`, 503);
   return { runtime, model, agent_timeout_sec: timeout, codex_transport: transport };
 }
 
-function resolve(chatId, overrides = {}, document = readStore()) {
+function resolve(chatId, overrides = {}, document = readStore(), options = {}) {
   refreshConfig(); chatOrThrow(chatId);
   const raw = rawEffective(chatId, document, overrides);
-  return { values: validateTuple(raw.values), sources: raw.sources, persisted: document.chats[chatId]?.settings || {}, global: document.global.settings, revision: document.file_revision, global_revision: document.global.revision, chat_revision: document.chats[chatId]?.revision || 0 };
+  return { values: validateTuple(raw.values, options), sources: raw.sources, persisted: document.chats[chatId]?.settings || {}, global: document.global.settings, revision: document.file_revision, global_revision: document.global.revision, chat_revision: document.chats[chatId]?.revision || 0 };
 }
 
 function definitions(effective) {

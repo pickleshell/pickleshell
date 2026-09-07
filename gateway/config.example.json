@@ -63,6 +63,12 @@
   "default_boundary": "host",
   "execution_surface": {
     "execution_profile": "agent",
-    "boundary": "host"
+    "boundary": "host",
+    "boundary_provider": "host"
+  },
+  "boundary_providers": {
+    "host": {
+      "enabled": true
+    }
   }
 }

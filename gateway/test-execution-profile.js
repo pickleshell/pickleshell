@@ -9,10 +9,10 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'execution-profile-'));
 const rejects = (code, fn) => assert.throws(fn, error => error.code === code);
 const resolve = (cfg = {}, chat = {}, request = {}) => contract.resolve(cfg, chat, request);
 async function main() {
-  assert.deepEqual(resolve(), { runtime: 'opencode', execution_profile: 'agent', boundary: 'host' });
+  assert.deepEqual(resolve(), { runtime: 'opencode', execution_profile: 'agent', boundary: 'host', boundary_provider: 'host' });
   for (const name of contract.PROFILES) {
     const cfg = { execution_profiles: { [name]: { allowed_boundaries: ['vm'] } }, execution_surface: { execution_profile: name, boundary: 'vm' } };
-    assert.equal(resolve(cfg, { allowed_execution_profiles: [name], allowed_boundaries: ['vm'] }, { execution_profile: name, boundary: 'vm' }).execution_profile, name);
+    rejects('boundary_provider_unavailable', () => resolve(cfg, { allowed_execution_profiles: [name], allowed_boundaries: ['vm'] }, { execution_profile: name, boundary: 'vm' }));
   }
   rejects('invalid_execution_profile', () => resolve({}, {}, { execution_profile: 'root' }));
   rejects('invalid_execution_profile', () => resolve({ default_execution_profile: null }));
@@ -25,7 +25,7 @@ async function main() {
   rejects('boundary_not_allowed', () => resolve(full, fullChat, { execution_profile: 'full-control' }));
   assert.equal(resolve({ ...full, allow_full_control_host: true }, fullChat, { execution_profile: 'full-control' }).boundary, 'host');
   rejects('insufficient_authority', () => resolve(full, fullChat, { execution_profile: 'full-control', boundary: 'vm' }));
-  rejects('execution_profile_not_allowed', () => resolve(full, {}, { execution_profile: 'full-control', boundary: 'vm' }));
+  rejects('execution_policy_invalid', () => resolve(full, {}, { execution_profile: 'full-control', boundary: 'vm' }));
   rejects('boundary_not_allowed', () => resolve({ execution_profiles: { agent: { allowed_boundaries: ['host'] } } }, { allowed_boundaries: ['vm'] }, { boundary: 'vm' }));
   const oldSurface = process.env.PICKLESHELL_EXECUTION_SURFACE;
   process.env.PICKLESHELL_EXECUTION_SURFACE = 'opencode-agent-host';
@@ -85,8 +85,10 @@ async function main() {
   assert(!described.includes('allowed_boundaries'));
   assert(!described.includes('/operator-private-policy'));
   const mismatch = await request({ session_id: 'ses_contract', boundary: 'vm' });
-  assert.equal(mismatch.body.error, 'session_authority_mismatch');
-  const unknown = await request({ session_id: 'ses_unknown', boundary: 'vm' });
+  assert.equal(mismatch.body.error, 'boundary_provider_unavailable');
+  rejects('session_authority_mismatch', () => session.check('ses_contract', session.tuple('example', temp, { ...context, boundary: 'vm', boundary_provider: 'vm' })));
+  activeConfig.execution_surface = { execution_profile: 'agent', boundary: 'host' };
+  const unknown = await request({ session_id: 'ses_unknown' });
   assert.equal(unknown.body.error, 'session_authority_unknown');
   assert.equal(calls, 2);
   // Fresh process reads persisted bindings; no process-local cache or TTL dependence.

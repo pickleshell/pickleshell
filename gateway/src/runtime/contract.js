@@ -12,7 +12,7 @@ const RUNTIME_CODEX = 'codex';
 // AgentRequest — options accepted by runAgentRequest().
 // {
 //   runtime: string,
-//   executionContext: { runtime: string, execution_profile: string, boundary: string },
+//   executionContext: { runtime: string, execution_profile: string, boundary: string, boundary_provider: string },
 //   request_id: string,
 //   chatId: string,
 //   message: string,
@@ -120,6 +120,7 @@ module.exports = {
 
 // executionContext is resolved once by chat.js from static operator policy.
 // Adapters receive it; they must never elevate credentials or substitute a
-// boundary. The enclosing service/VM/container supplies the actual authority.
+// boundary. Process launch belongs to the resolved boundary provider. Host uses
+// the enclosing service authority; VM/container providers are unavailable.
 // Custom runRequest(options) receives the same executionContext. Completed
-// public execution metadata includes runtime, execution_profile and boundary.
+// public execution metadata includes runtime, execution_profile, boundary and boundary_provider.

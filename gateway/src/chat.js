@@ -102,7 +102,7 @@ const chatHandler = async (req, res) => {
     if (requestedTransport !== undefined) requestOverrides.codex_transport = requestedTransport;
     let resolved;
     try {
-      resolved = settings.resolve(chat_id, requestOverrides);
+      resolved = settings.resolve(chat_id, requestOverrides, undefined, { checkAvailability: false });
     } catch (error) {
       if (error instanceof settings.SettingsError) {
         return res.status(error.status).json({ ok: false, chat_id, error: error.code, details: error.message });
@@ -119,12 +119,15 @@ const chatHandler = async (req, res) => {
     if (session_id) {
       // Legacy sessions may be adopted only under the unchanged implicit surface.
       const cfg = config.loadConfig();
-      const legacy = cfg.execution_profiles === undefined && cfg.execution_surface === undefined &&
+      const legacy = cfg.execution_profiles === undefined && cfg.execution_surface === undefined && cfg.boundary_providers === undefined &&
         cfg.default_execution_profile === undefined && cfg.default_boundary === undefined &&
         chatConfig.execution_profile === undefined && chatConfig.boundary === undefined &&
         chatConfig.allowed_execution_profiles === undefined && chatConfig.allowed_boundaries === undefined;
       executionSession.check(session_id, authorityBinding, { legacy });
     }
+
+    // Availability probes can spawn runtime processes: only after authority/session validation.
+    settings.validateTuple(resolved.values);
 
     // Validate destination_dir if provided
     if (destination_dir) {
@@ -320,7 +323,7 @@ const chatHandler = async (req, res) => {
     if (slotKey) concurrency.release(slotKey);
     console.error('Chat error:', error.message);
 
-    if (error instanceof ExecutionProfileError) {
+    if (error instanceof ExecutionProfileError || error instanceof settings.SettingsError) {
       return res.status(error.status).json({ ok: false, error: error.code, details: error.message });
     }
     if (error.message.includes('timeout')) {

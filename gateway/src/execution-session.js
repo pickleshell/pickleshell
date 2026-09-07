@@ -9,7 +9,7 @@ function bindingFile(sessionId) {
   return path.join(path.dirname(settingsPath), 'execution-sessions', `${digest}.json`);
 }
 function tuple(chatId, workspace, context) {
-  return JSON.stringify({ chat_id: chatId, workspace_hash: crypto.createHash('sha256').update(workspace).digest('hex'), ...context });
+  return JSON.stringify({ chat_id: chatId, workspace_hash: crypto.createHash('sha256').update(workspace).digest('hex'), runtime: context.runtime, execution_profile: context.execution_profile, boundary: context.boundary, boundary_provider: context.boundary_provider });
 }
 function check(sessionId, expected, { bind = false, legacy = false } = {}) {
   const file = bindingFile(sessionId);

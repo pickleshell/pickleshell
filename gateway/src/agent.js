@@ -15,7 +15,7 @@
 const crypto = require('crypto');
 const { RUNTIME_OPENCODE, RUNTIME_CODEX } = require('./runtime/contract');
 const { registerRuntime, getRuntime, isRuntimeAvailable } = require('./runtime/registry');
-const { supervise } = require('./runtime/supervisor');
+const providers = require('./execution/providers');
 const { buildMetadata } = require('./runtime/normalize');
 const opencodeAdapter = require('./runtime/adapters/opencode');
 const codexAdapter = require('./runtime/adapters/codex');
@@ -96,7 +96,7 @@ function buildAgentResult({ ok, runtime, request_id, session_id, state, reply, e
 
 function validateRuntimeModel(runtimeName, model) {
   const adapter = getRuntime(runtimeName);
-  if (!adapter || !isRuntimeAvailable(runtimeName) || typeof adapter.validateModel !== 'function') {
+  if (!adapter || typeof adapter.validateModel !== 'function') {
     return null;
   }
   return adapter.validateModel(model);
@@ -115,6 +115,7 @@ function dispatchAgentRequest({ runtime, request_id, chatId, message, workspace,
   const startedMs = Date.now();
   const startedAt = new Date(startedMs).toISOString();
 
+  const provider = providers.forContext(executionContext);
   const adapter = getRuntime(runtimeName);
   if (!adapter || !isRuntimeAvailable(runtimeName)) {
     const error = { class: 'unavailable', message: `Runtime "${runtimeName}" is not available`, exit_code: null, signal: null };
@@ -180,7 +181,7 @@ function dispatchAgentRequest({ runtime, request_id, chatId, message, workspace,
     );
 
     handler = adapter.createStreamHandler({ chatId, onProgress });
-    const proc = supervise({
+    const proc = provider.supervise({
       command: adapter.command || 'bash',
       args,
       cwd: workspace,
@@ -269,10 +270,30 @@ function dispatchAgentRequest({ runtime, request_id, chatId, message, workspace,
 // Apply authority metadata uniformly, including custom adapter transports and
 // preparation failures. The dispatcher supplies the already-resolved context.
 function runAgentRequest(options) {
-  const execution = dispatchAgentRequest(options);
-  if (!options.executionContext) return execution;
+  const runtime = options.runtime || RUNTIME_OPENCODE;
+  const executionContext = Object.freeze({ ...(options.executionContext || {
+    runtime, execution_profile: 'agent', boundary: 'host', boundary_provider: 'host',
+  }) });
+  // Internal callers also fail before availability probes or adapter preparation.
+  try {
+    providers.forContext(executionContext);
+    if (executionContext.runtime !== runtime) {
+      throw new (require('./execution-profile').ExecutionProfileError)(
+        'execution_authority_unavailable', 'Execution context runtime does not match dispatch', 403);
+    }
+  } catch (error) {
+    const startedMs = Date.now();
+    return { cancel: () => false, promise: Promise.resolve(buildAgentResult({
+      ok: false, runtime, request_id: options.request_id || generateRequestId(),
+      session_id: options.session_id || null, state: 'error', reply: null, events: [],
+      errorClass: error.code || 'execution_authority_unavailable',
+      error: { class: error.code || 'execution_authority_unavailable', message: error.message },
+      startedAt: new Date(startedMs).toISOString(), startedMs,
+    })) };
+  }
+  const execution = dispatchAgentRequest({ ...options, executionContext });
   return { cancel: execution.cancel, promise: execution.promise.then(result => ({
-    ...result, metadata: { ...result.metadata, ...options.executionContext },
+    ...result, metadata: { ...result.metadata, ...executionContext },
   })) };
 }
 

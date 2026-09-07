@@ -230,7 +230,10 @@ be marked complete.
 Keep authority and boundary separate. Static policy and the actual execution
 surface constrain request selection; never implement privilege fallback or
 relabel an existing host process as a container/VM. Session authority bindings
-must survive result eviction. Settings must not expose or expand profile policy.
+must include provider identity and survive result eviction. Settings must not expose
+or expand profile/provider policy. Only the host boundary provider is implemented;
+VM/container declarations must fail before runtime probes, slots or processes.
+Process launch belongs to the resolved provider, never a runtime adapter fallback.
 The OpenCode agent template is opt-in through `deploy/release.sh --opencode-agent`.
 Ordinary Terminal stays AF_UNIX-only with NoNewPrivileges. See the complete
 [Execution Profile Contract](docs/deployment.md#execution-profile-contract).

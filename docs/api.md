@@ -325,6 +325,16 @@ Errors before execution: `invalid_execution_profile` and `invalid_boundary`
 `boundary_not_allowed`, and `insufficient_authority` (403).
 `session_authority_mismatch` or `session_authority_unknown` (409) require a new
 session; `session_authority_unavailable` (503) means binding storage failed.
-Completed execution metadata contains `runtime`, `execution_profile`, `boundary`.
+Completed execution metadata contains `runtime`, `execution_profile`, `boundary`
+and `boundary_provider`. Providers are operator-controlled, not caller/Settings
+selections. Only the host provider is implemented. VM/container selections return
+`boundary_provider_unavailable` (503), even with matching declared surfaces.
+Unknown providers return `boundary_provider_invalid` (400); provider/boundary
+mismatches return `execution_authority_unavailable` (403). Malformed provider
+configuration returns `execution_policy_invalid` (400). No rejected provider
+request acquires a slot or starts runtime availability probes/agent processes.
+Boundary is an enforced provider property, not a descriptive label. Root inside
+VM/container is acceptable only after its provider has established that boundary.
+Old session bindings without provider identity require a new session.
 See [Execution Profile Contract](deployment.md#execution-profile-contract) for
 compatibility defaults, containment requirements and legacy session migration.

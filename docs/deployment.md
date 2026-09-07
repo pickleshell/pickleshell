@@ -496,7 +496,7 @@ npm run test:smoke
 
 ## Execution Profile Contract
 
-PickleShell represents execution as `runtime + execution_profile + boundary`.
+PickleShell represents execution as `runtime + execution_profile + boundary + boundary_provider`.
 Authority describes what an agent may do; boundary describes where that authority
 stops. The existing path stays ChatGPT → MCP → Gateway → runtime adapter → agent
 process. Profiles do not create another dispatcher or expose service controls.
@@ -521,10 +521,12 @@ Static `execution_profiles` maps known profile names to `allowed_boundaries`.
 Each chat has `allowed_execution_profiles` and `allowed_boundaries`; requests
 may select `execution_profile` and `boundary` only within both policies.
 `execution_surface: {"execution_profile":"agent","boundary":"host"}` declares
-the actual enclosing surface. It is an operator assertion, not a sandbox or a
-provisioning command. Selection must exactly match it: even a lower-authority
-label cannot make a running process less privileged. A different surface requires
-operator provisioning, never automatic upward fallback. Model output is not
+the authority of the enclosing service. Selection must exactly match its profile
+and boundary: a lower-authority label cannot make a running process less privileged.
+The declaration alone cannot enable VM/container execution. Boundary is not a
+descriptive label: a boundary value is valid only when a concrete execution
+provider enforces it. A different surface requires operator provisioning, never
+automatic upward fallback. Model output is not
 parsed for escalation instructions; denied operations remain denied.
 
 Exact compatibility defaults: absent global policy allows only agent/host;
@@ -534,25 +536,69 @@ Absent `execution_surface` means agent/host. Existing installations retain their
 OS behavior; the compatibility label does not certify their account permissions
 or retrofit a sandbox. Operators must audit existing identities before asserting
 agent isolation. Explicit null, unknown names, malformed policy and disallowed
-selections fail closed. To allow full-control/vm, explicitly configure the global
-policy, both chat allowlists, defaults, and an actual VM surface declaration.
+selections fail closed. Configured defaults are validated even when overridden;
+chat allowlists must reference defined profiles. Duplicate JSON keys (including
+escaped equivalent keys) are rejected rather than resolved by last-key-wins.
+
+The small provider layer is `gateway/src/execution/providers.js`. Dispatch resolves
+policy and provider before runtime availability probes, session execution or slot
+acquisition. Runtime adapters format commands; providers own process launch. The
+host provider reuses the existing supervisor for OpenCode/Codex exec and owns the
+Codex MCP worker spawn. MCP workers are reused only for the same authority context.
+
+| boundary / provider | current support | behavior |
+|---|---|---|
+| host | implemented | local process under the configured service identity and restrictions |
+| container | contract defined, provider unavailable | structured `boundary_provider_unavailable`; no process or slot |
+| vm | contract defined, provider unavailable | structured `boundary_provider_unavailable`; no process or slot |
+
+Optional static `execution_surface.boundary_provider` defaults to the selected
+boundary and must name that same boundary's provider. It is not a request or
+Settings field. Unknown providers return `boundary_provider_invalid`; mismatched
+provider/boundary pairs return `execution_authority_unavailable`. Optional static
+`boundary_providers` is a map of known provider names to `{ "enabled": boolean }`.
+If supplied, the selected provider must be explicitly enabled. No commands, paths,
+credentials or additional provider options are accepted. For example:
+
+```json
+{
+  "boundary_providers": { "host": { "enabled": true } },
+  "execution_surface": {
+    "execution_profile": "agent",
+    "boundary": "host",
+    "boundary_provider": "host"
+  }
+}
+```
+
+Missing provider configuration preserves the existing host path only. Enabling a
+VM/container entry cannot install or implement that provider: both remain
+unavailable, even with matching policy/surface declarations. A host provider can
+never satisfy `boundary=vm` or `boundary=container`; there is no fallback.
+`full-control + host` still requires exact boolean `allow_full_control_host: true`
+and matching explicit profile/boundary permissions. Host launch does not grant
+root or sudo. Root inside VM/container is acceptable only after the corresponding
+provider has established that boundary. This release implements no such provider
+and claims no VM/container isolation, including for an externally enclosed Gateway.
 
 Profiles and boundaries deliberately remain outside mutable Settings. Settings
 cannot expand execution policy and responses contain none of its paths,
 credentials or service configuration. Runtime changes selected through Settings
 still pass execution policy at dispatch.
 
-Session IDs are bound to runtime, profile, boundary, chat and workspace in a
+Session IDs are bound to runtime, profile, boundary, provider identity, chat and workspace in a
 write-once store beside the settings file (`execution-sessions/`). Changes return
 `session_authority_mismatch`; unknown sessions under explicit policy return
 `session_authority_unknown` and require a new session. Bindings survive Gateway
 restarts and result-buffer expiry. For compatibility only, configurations without
 any profile policy may adopt an old session on first continuation as agent/host;
-after adoption its binding is fixed. Explicit policy migration requires new
-sessions for previously unbound IDs. Retain bindings with runtime session data;
+after adoption its binding is fixed. Bindings from the prior contract without a
+provider identity mismatch and require a new session; they are not silently
+upgraded. Explicit policy migration requires new sessions for previously unbound IDs. Retain bindings with runtime session data;
 do not delete them to bypass a mismatch. The store and runtime state share the
 existing trusted service identity; this is not tamper protection against that OS
-principal. Execution result metadata records the effective tuple without paths.
+principal. Execution result metadata records runtime, execution_profile, boundary and
+boundary_provider from the resolved provider context, without paths.
 
 The opt-in `deploy/release.sh --opencode-agent` selects the repository-owned
 `pickleshell-opencode-agent.service.in` template for the existing Gateway service.

@@ -13,9 +13,10 @@ const loadConfig = () => {
 
   try {
     const rawData = fs.readFileSync(configPath, 'utf8');
-    configData = JSON.parse(rawData);
+    configData = require('./execution/parse-config')(rawData);
     return configData;
   } catch (error) {
+    if (error instanceof require('./execution-profile').ExecutionProfileError) throw error;
     console.error('Failed to load config:', error.message);
     configData = { chats: {} };
     return configData;
