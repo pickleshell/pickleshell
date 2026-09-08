@@ -338,7 +338,10 @@ render_artifacts() {
         if [[ -f $release/.broker-policy-path ]]; then
           policy_path=$(<"$release/.broker-policy-path")
           [[ $policy_path == "$CONFIG_ROOT/broker-policy.json" ]] || return 1
-          value=$(printf 'Environment=PICKLESHELL_MEMORY_BROKER_MODE=principals\nLoadCredential=policy.json:%s\nEnvironment=PICKLESHELL_MEMORY_BROKER_POLICY_FILE=%%d/policy.json' "$policy_path")
+          # systemd may project credentials as 0440 (including on BOS).
+          # Keep the validator strict: install a private 0400 runtime copy as
+          # the broker UID before ExecStart. RuntimeDirectory is UID-owned 0700.
+          value=$(printf 'Environment=PICKLESHELL_MEMORY_BROKER_MODE=principals\nLoadCredential=policy.json:%s\nRuntimeDirectory=%s-policy\nRuntimeDirectoryMode=0700\nExecStartPre=/usr/bin/install -m 0400 %%d/policy.json /run/%s-policy/policy.json\nEnvironment=PICKLESHELL_MEMORY_BROKER_POLICY_FILE=/run/%s-policy/policy.json' "$policy_path" "${BROKER_SERVICE%.service}" "${BROKER_SERVICE%.service}" "${BROKER_SERVICE%.service}")
         fi;; BROKER_USER) value=$BROKER_USER;; BROKER_GROUP) value=$BROKER_GROUP;; BACKEND_SERVICE) value=$SERVICE;; ACTIVE_ROOT) value="$ROOT/active";; CONFIG_ROOT) value=$CONFIG_ROOT;; STATE_ROOT) value=$STATE_ROOT;; LOG_ROOT) value=$LOG_ROOT;; BACKEND_ENV_FILE) value=$BACKEND_ENV_FILE;; MCP_ENV_FILE) value=$MCP_ENV_FILE;; AUDIT_LOG) value=$AUDIT_LOG;; SERVICE_USER) value=$SERVICE_USER;; SERVICE_GROUP) value=$SERVICE_GROUP;; BACKEND_EXECUTABLE) value=$BACKEND_EXECUTABLE;; NODE_EXECUTABLE) value=$NODE_EXECUTABLE;; PYTHON_EXECUTABLE) value=$PYTHON_EXECUTABLE;; BACKEND_WRAPPER) value="$WRAPPER_DIR/backend-wrapper";; BROKER_WRAPPER) value="$WRAPPER_DIR/broker-wrapper";; esac
       [[ $template != *.logrotate.in || $token != SERVICE_GROUP ]] || value=$AUDIT_GROUP
       contents=${contents//"@$token@"/"$value"}

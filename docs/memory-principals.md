@@ -155,7 +155,12 @@ launcher until the authenticated broker and new launcher are switched together.
    ```
 
    Policy validation runs before deployment writes. The systemd unit projects
-   both `backend.env` and the policy into separate private credentials. Each
+   both `backend.env` and the policy into separate private credentials. Because
+   systemd can project a credential as 0440, the broker unit installs the policy
+   as a broker-owned 0400 file in its private 0700 RuntimeDirectory before
+   starting. The strict policy validator reads that copy; it still rejects 0440,
+   group/world writes, unsafe owners and symlinks. The operator source remains
+   root-owned 0600, and agent identities cannot traverse the runtime directory. Each
    immutable release records its policy pathname in `.broker-policy-path`;
    the source policy remains operator-managed, not copied into a release or Git.
    No new TCP listener is introduced.

@@ -65,7 +65,7 @@ class PolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)/'policy.json'; path.write_text(json.dumps(document())); path.chmod(0o600)
             load_policy(path)
-            for mode in (0o644, 0o640, 0o666):
+            for mode in (0o440, 0o644, 0o640, 0o620, 0o602, 0o666):
                 path.chmod(mode)
                 with self.assertRaises(ValueError): load_policy(path)
             path.chmod(0o600)
@@ -80,6 +80,22 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaises(ValueError):load_policy(path)
             path.write_text('{broken')
             with self.assertRaises(ValueError):load_policy(path)
+
+    def test_projected_policy_is_installed_privately_without_weakening_validation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)/'projected.json'
+            source.write_text(json.dumps(document()))
+            source.chmod(0o440)  # Actual systemd LoadCredential mode on BOS.
+            with self.assertRaises(ValueError):
+                load_policy(source)
+            runtime = Path(temp)/'runtime'
+            runtime.mkdir(mode=0o700)
+            target = runtime/'policy.json'
+            subprocess.run(['/usr/bin/install', '-m', '0400', str(source), str(target)], check=True)
+            self.assertEqual(target.stat().st_uid, os.geteuid())
+            self.assertEqual(target.stat().st_mode & 0o777, 0o400)
+            self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
+            load_policy(target)
 
     def test_main_missing_malformed_policy_or_reused_backend_credential_never_falls_back(self):
         with tempfile.TemporaryDirectory() as temp:

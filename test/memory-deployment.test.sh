@@ -1455,7 +1455,10 @@ test "$(<"$PREFIX/app/active/.broker-policy-path")" = "$POLICY_FILE"
 test -f "$PREFIX/app/active/pickleshell-memory-mcp/src/principal.js"
 grep -q '^Environment=PICKLESHELL_MEMORY_BROKER_MODE=principals$' "$PREFIX/units/isolated-memory-broker.service"
 grep -q "^LoadCredential=policy.json:$POLICY_FILE$" "$PREFIX/units/isolated-memory-broker.service"
-grep -q '^Environment=PICKLESHELL_MEMORY_BROKER_POLICY_FILE=%d/policy.json$' "$PREFIX/units/isolated-memory-broker.service"
+grep -q '^Environment=PICKLESHELL_MEMORY_BROKER_POLICY_FILE=/run/isolated-memory-broker-policy/policy.json$' "$PREFIX/units/isolated-memory-broker.service"
+grep -q '^RuntimeDirectory=isolated-memory-broker-policy$' "$PREFIX/units/isolated-memory-broker.service"
+grep -q '^RuntimeDirectoryMode=0700$' "$PREFIX/units/isolated-memory-broker.service"
+grep -q '^ExecStartPre=/usr/bin/install -m 0400 %d/policy.json /run/isolated-memory-broker-policy/policy.json$' "$PREFIX/units/isolated-memory-broker.service"
 rollback_release
 assert_base_recovered
 # No --broker-policy on reverse rollback: authenticated mode is release metadata.
