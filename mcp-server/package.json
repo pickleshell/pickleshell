@@ -15,7 +15,7 @@
     "@playwright/mcp": "^0.0.78",
     "dotenv": "^16.4.7",
     "playwright": "^1.62.0-alpha-1783623505000",
-    "zod": "^3.24.4"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
