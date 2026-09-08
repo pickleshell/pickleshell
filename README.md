@@ -5,7 +5,7 @@
 
 <p align="center"><strong>Give ChatGPT a local machine to work with</strong></p>
 
-[![Release](https://img.shields.io/badge/release-v0.1.4-f5a623)](#release-history)
+[![Release](https://img.shields.io/badge/release-v0.2.0-f5a623)](#release-history)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](#development)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#requirements)
@@ -39,6 +39,22 @@ An independently installed [Memory MCP](pickleshell-memory-mcp/README.md) is
 available with a repository-owned [self-hosted Mem0 backend](pickleshell-memory-backend/README.md)
 as an optional workstation sidecar integration. It is not a fourth core
 service and never participates in Gateway startup or readiness.
+
+## v0.2.0 Highlights
+
+PickleShell now separates **what an agent may do** from **where that authority stops**.
+Execution requests can be constrained by an operator-approved profile (`isolated`, `agent`,
+`privileged`, or `full-control`) and boundary (`host`, `container`, or `vm`). A boundary
+is enforced by a concrete provider, not treated as a label: unavailable VM/container
+providers fail closed before a process or concurrency slot is created.
+
+The optional Memory stack now supports multiple principals with isolated private scopes and
+explicit shared project scopes. This lets different agent runtimes exchange durable
+knowledge without sharing their private memory or backend credentials.
+
+See [Deployment](docs/deployment.md) for the execution-profile and boundary-provider
+contract, and [Memory principals](docs/memory-principals.md) for the shared-memory trust
+model.
 
 ## Philosophy
 
@@ -97,7 +113,7 @@ carry out a complex task directly from ChatGPT.
 
 > [!WARNING]
 > **The `main` branch may contain unreleased changes.** The latest stable
-> release is `v0.1.4`; use it only with trusted users and a dedicated service
+> release is `v0.2.0`; use it only with trusted users and a dedicated service
 > account. Read
 > [SECURITY.md](SECURITY.md) before deployment.
 
@@ -361,8 +377,9 @@ Include the relevant setup details and steps to reproduce the problem.
 
 ## Project Status
 
-PickleShell `0.1.4` is the latest release. It adds the public settings tool,
-scoped persisted runtime settings, and optional supervised Codex MCP transport.
+PickleShell `0.2.0` is the latest release. It adds first-class execution authority
+profiles with enforced boundary providers, a dedicated networked OpenCode agent surface,
+and multi-principal shared Memory for controlled knowledge exchange between agent runtimes.
 
 This is a complete, fully functional, and stable release of the integrated
 PickleShell system. Gateway, MCP, Agent, Browser, Terminal, tunnel, and
@@ -373,6 +390,30 @@ version is already suitable for real-world testing and use with trusted users.
 Interfaces may still change before the stable `1.0` release.
 
 ## Release History
+
+### [v0.2.0](https://github.com/pickleshell/pickleshell/releases/tag/v0.2.0)
+
+- Added the first-class **Execution Profile Contract**: execution resolves as
+  `runtime + execution_profile + boundary + boundary_provider`. Operator policy controls
+  which profiles and boundaries are available; sessions cannot silently resume with
+  different authority, and there is no automatic upward privilege fallback.
+- Added enforced **boundary providers**. `host` is implemented; `container` and `vm`
+  fail closed until a real provider is configured. A requested VM/container boundary can
+  never fall back to direct host execution. `full-control + host` remains denied by default.
+- Added a dedicated networked **OpenCode `agent + host`** execution surface with an
+  unprivileged service identity, `NoNewPrivileges=true`, controlled Internet networking,
+  and isolated writable runtime state. The ordinary Terminal remains a separate,
+  stricter AF_UNIX-only surface.
+- Added managed **multi-principal PickleShell Memory** on the optional Mem0 sidecar:
+  separate private scopes, operator-approved shared scopes, one credential-projecting
+  broker, broker-only backend credentials, deterministic policy ownership/mode checks,
+  immutable release activation, and rollback/recovery support.
+- Validated a real **Codex → shared Mem0 → OpenCode** handoff using separate unprivileged
+  OS identities and principals. OpenCode discovered Codex-written project knowledge
+  semantically without receiving the originating transcript or memory ID; private scopes
+  remained isolated and the handoff survived a broker restart.
+- These execution and memory primitives are designed to be reusable by higher-level
+  orchestration systems such as Core; PickleShell remains the execution/integration layer.
 
 ### [v0.1.4](https://github.com/pickleshell/pickleshell/releases/tag/v0.1.4)
 

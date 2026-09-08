@@ -1,6 +1,6 @@
 {
   "name": "@pickleshell/terminal",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Private PTY runtime for PickleShell",
   "main": "src/server.js",
   "scripts": {
@@ -13,6 +13,8 @@
   "dependencies": {
     "node-pty": "^1.1.0"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "license": "MIT"
 }
