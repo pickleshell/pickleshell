@@ -30,6 +30,11 @@ full traces. The Browser exposes Playwright automation tools. Continue local
 coding sessions, delegate to an operator-approved model, and transfer files
 into a controlled workspace.
 
+[Direct ChatGPT Memory](docs/chatgpt-memory.md) provides private/shared memory
+CRUD, search, history and discovery, plus credential-authorized administration
+through the Memory broker. Normal and admin surfaces use the same implementation;
+policy changes remain operator-owned and ChatGPT never receives backend credentials.
+
 An independently installed [Memory MCP](pickleshell-memory-mcp/README.md) is
 available with a repository-owned [self-hosted Mem0 backend](pickleshell-memory-backend/README.md)
 as an optional workstation sidecar integration. It is not a fourth core

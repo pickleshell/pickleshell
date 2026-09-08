@@ -7,7 +7,7 @@
   "scripts": {
     "build": "npm --prefix mcp-server run build && npm --prefix terminal run build",
     "test": "npm --prefix gateway test && npm --prefix mcp-server test && npm --prefix terminal test && npm --prefix pickleshell-memory-mcp test && python3 test/memory-broker.test.py && bash test/deployment-release.test.sh && bash test/memory-deployment.test.sh && bash test/memory-backend.test.sh && bash test/memory-backend-e2e.test.sh",
-    "test:memory-principals": "python3 test/memory-multi-principal.test.py && python3 test/memory-multi-principal-e2e.test.py",
+    "test:memory-principals": "python3 test/memory-multi-principal.test.py && python3 test/memory-management.test.py && python3 test/memory-multi-principal-e2e.test.py",
     "test:memory-deployment": "bash test/memory-deployment.test.sh",
     "test:memory-backend": "bash test/memory-backend.test.sh && bash test/memory-backend-e2e.test.sh",
     "test:file-handoff-integration": "bash test/file-transfer-handoff.test.sh",

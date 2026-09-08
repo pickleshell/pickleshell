@@ -263,3 +263,11 @@ Tool failures return `isError: true` with only `error`, HTTP-like `status`, and
 Audit records contain timestamp, actor, role, effective scope, tool, policy
 decision, outcome, duration, and bounded error code—never memory text, query,
 result content, or credentials.
+
+## Direct ChatGPT surface
+
+Use the installed `src/chatgpt.js` launcher for broker-only normal/admin tools.
+See [ChatGPT Memory](../docs/chatgpt-memory.md) for all eighteen tools, trusted
+principal authorization, explicit administrative grants and deployment wiring.
+The direct-backend admin examples above are the legacy operator interface and
+must not be used as ChatGPT configuration.

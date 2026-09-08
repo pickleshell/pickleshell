@@ -32,12 +32,13 @@ export function loadConfig(env = process.env) {
   if (brokerMode && (role !== "agent" || scope || env.PICKLESHELL_MEMORY_BACKEND_TOKEN)) {
     throw new Error("Principal MCP requires agent role without scope or backend token");
   }
-  if (brokerMode && (backendUrl.protocol !== "http:" || backendUrl.hostname !== "127.0.0.1" || backendUrl.pathname !== "/")) {
+  if (brokerMode && (backendUrl.protocol !== "http:" || backendUrl.hostname !== "127.0.0.1" || (backendUrl.pathname !== "/" || backendUrl.port === "8766"))) {
     throw new Error("Principal MCP requires a loopback broker URL");
   }
   const principalToken = brokerMode ? readPrincipalCredential(credentialFile) : null;
   return Object.freeze({
     brokerMode, principalToken,
+    exposeAdmin: brokerMode && env.PICKLESHELL_MEMORY_EXPOSE_ADMIN === "1",
     role, actor, scope: role === "agent" ? scope : null,
     auditLog, backendUrl: backendUrl.href.replace(/\/$/, ""),
     backendToken: env.PICKLESHELL_MEMORY_BACKEND_TOKEN || null,

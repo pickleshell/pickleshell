@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { MANAGEMENT_TOOLS } from "./management.js";
 import { z } from "zod";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -25,8 +26,16 @@ export function createServer(config, backend = new BackendClient(config), audito
     const transportSchema = config.role === "agent" ? z.object(inputSchema).passthrough() : inputSchema;
     server.registerTool(name, { description: `Mem0 ${name.slice(7)} with PickleShell policy enforcement`, inputSchema: transportSchema }, (args) => service.call(name, args));
   }
-  server.registerTool("memory_capabilities", { description: "Discover memory backend and effective policy without exposing credentials", inputSchema: {} },
-    async () => service.capabilities());
+  if (config.brokerMode) {
+    for (const [name, {schema, description}] of Object.entries(MANAGEMENT_TOOLS)) {
+      if (name.startsWith("memory_admin_") && !config.exposeAdmin) continue;
+      server.registerTool(name, { description, inputSchema: z.object(schema).passthrough(),
+        annotations: {readOnlyHint: name !== "memory_admin_delete", destructiveHint: name === "memory_admin_delete", openWorldHint: false} },
+        args => service.call(name, args));
+    }
+  }
+  server.registerTool("memory_capabilities", { description: "Discover memory backend and effective policy without exposing credentials", inputSchema: z.object({}).passthrough() },
+    async (args) => service.capabilities(args));
   return server;
 }
 

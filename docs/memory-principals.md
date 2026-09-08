@@ -2,7 +2,10 @@
 
 PickleShell Memory is an optional PickleShell component. Backend/admin remains
 `MCP -> 127.0.0.1:8766`; scoped agents use one broker at `127.0.0.1:8767`.
-A port identifies the service, never an agent. Do not allocate per-agent ports.
+The [ChatGPT Memory surface](chatgpt-memory.md), including administration, always
+uses the broker; the direct backend/admin path below refers only to the historical
+operator interface. Optional `role` and `admin_targets` extend version 1 policy as
+documented there. A port identifies the service, never an agent. Do not allocate per-agent ports.
 
 This change prepares multi-principal deployment; it does not deploy it. The
 previous managed Codex experiment proved cross-session recall. The deterministic
@@ -93,7 +96,7 @@ input. There are at most 64 principals and 64 shared targets per principal.
 The policy is loaded once at broker startup; changing it requires an operator
 restart. Tools cannot edit policy. Broker audit events report the authenticated
 principal, recognized target, resolved scope, operation, HTTP method and response status;
-no memory text, query, memory IDs or credentials are recorded. These events go
+timestamp, authenticated role and validated memory IDs are included; no memory text, query or credentials are recorded. These events go
 to stdout (the systemd journal); MCP continues to use its existing JSONL audit. MCP audit actor
 labels remain diagnostic and do not replace broker-authenticated identity.
 

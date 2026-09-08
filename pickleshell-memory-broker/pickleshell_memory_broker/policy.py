@@ -37,7 +37,12 @@ class PrincipalPolicy:
         self.by_digest = {}
         names, private_scopes, shared_scopes, aliases = set(), set(), set(), {}
         for entry in entries:
-            keys(entry, {"name", "token_sha256", "private_scope", "shared"})
+            if not isinstance(entry, dict) or set(entry) - {"name", "token_sha256", "private_scope", "shared", "role", "admin_targets"} or not {"name", "token_sha256", "private_scope", "shared"} <= set(entry):
+                raise ValueError("invalid principal fields")
+            if entry.get("role", "agent") not in ("agent", "admin"):
+                raise ValueError("invalid principal role")
+            if "admin_targets" in entry and entry.get("role") != "admin":
+                raise ValueError("administrative grants require admin role")
             name, digest, private = entry["name"], entry["token_sha256"], entry["private_scope"]
             if not isinstance(name, str) or not NAME.fullmatch(name) or name in names:
                 raise ValueError("invalid or duplicate principal")
@@ -69,6 +74,30 @@ class PrincipalPolicy:
         if private_scopes & shared_scopes:
             raise ValueError("private scopes cannot be shared")
 
+        self.by_name = {p["name"]: p for p in self.by_digest.values()}
+        self.admin_catalog = {"private/" + p["name"]: p["private_scope"] for p in entries}
+        self.admin_catalog.update(aliases)
+        for entry in entries:
+            grants = entry.get("admin_targets", {})
+            if not isinstance(grants, dict) or len(grants) > 128:
+                raise ValueError("invalid administrative grants")
+            for target, grant in grants.items():
+                if target not in self.admin_catalog:
+                    raise ValueError("unknown administrative target")
+                keys(grant, {"read", "delete"})
+                if any(type(v) is not bool for v in grant.values()):
+                    raise ValueError("administrative permissions must be booleans")
+
+    def administrative_targets(self, principal):
+        return [{"target": target, "scope": self.admin_catalog[target], **grant}
+                for target, grant in principal.get("admin_targets", {}).items()]
+
+    @staticmethod
+    def sanitized(principal):
+        return {**PrincipalPolicy.public(principal), "private_scope": principal["private_scope"],
+                "configured": True,
+                "admin_targets": principal.get("admin_targets", {})}
+
     def authenticate(self, authorization):
         if not isinstance(authorization, str) or not re.fullmatch(r"Bearer [A-Za-z0-9_-]{43,128}", authorization):
             return None
@@ -86,9 +115,9 @@ class PrincipalPolicy:
 
     @staticmethod
     def public(principal):
-        return {"principal": principal["name"], "targets": [
-            {"target": "private", "read": True, "write": True},
-            *({"target": target, "read": grant["read"], "write": grant["write"]}
+        return {"principal": principal["name"], "role": principal.get("role", "agent"), "targets": [
+            {"target": "private", "scope": principal["private_scope"], "read": True, "write": True},
+            *({"target": target, "scope": grant["scope"], "read": grant["read"], "write": grant["write"]}
               for target, grant in principal["shared"].items())]}
 
 

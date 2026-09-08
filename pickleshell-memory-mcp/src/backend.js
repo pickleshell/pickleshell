@@ -8,8 +8,10 @@ export class BackendClient {
     const body = {};
     for (const key of operation.body || []) if (args[key] !== undefined) body[key] = args[key];
     const scopeKey = this.config.brokerMode ? "target" : "user_id";
-    if (operation.method === "POST" || operation.method === "PUT") body[scopeKey] = scope;
-    else url.searchParams.set(scopeKey, scope);
+    if (!operation.unscoped) {
+      if (operation.method === "POST" || operation.method === "PUT") body[scopeKey] = scope;
+      else url.searchParams.set(scopeKey, scope);
+    }
     for (const key of operation.query || []) if (args[key] !== undefined) url.searchParams.set(key, String(args[key]));
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
@@ -20,7 +22,7 @@ export class BackendClient {
           "accept": "application/json", "content-type": "application/json",
           ...((this.config.principalToken || this.config.backendToken) ? { authorization: `Bearer ${this.config.principalToken || this.config.backendToken}` } : {}),
         },
-        ...(Object.keys(body).length ? { body: JSON.stringify(body) } : {}),
+        ...(["POST", "PUT"].includes(operation.method) ? { body: JSON.stringify(body) } : {}),
         redirect: "error",
         signal: controller.signal,
       });
@@ -28,7 +30,7 @@ export class BackendClient {
       let payload;
       try { payload = text ? JSON.parse(text) : {}; }
       catch { throw backendError("invalid_backend_response", 502, false, undefined, true); }
-      if (!response.ok) throw backendError(mapStatus(response.status), response.status, isRetryableStatus(response.status), payload, response.status >= 500);
+      if (!response.ok) throw backendError((this.config.brokerMode && SAFE_BROKER_ERRORS.has(payload?.error) ? payload.error : mapStatus(response.status)), response.status, isRetryableStatus(response.status), payload, response.status >= 500);
       return payload;
     } catch (error) {
       if (error?.name === "AbortError") throw backendError("backend_timeout", 504, true, undefined, true);
@@ -72,3 +74,5 @@ function isRetryableStatus(status) {
 function backendError(code, status, retryable, backend, mutationOutcomeUncertain = false) {
   return Object.assign(new Error(code), { code, status, retryable, backend, mutationOutcomeUncertain });
 }
+
+const SAFE_BROKER_ERRORS = new Set(["admin_required", "target_not_allowed", "target_access_denied", "operation_not_allowed", "memory_not_found", "backend_unavailable", "policy_unavailable", "invalid_request", "principal_unauthorized", "principal_not_found", "scope_override_denied"]);

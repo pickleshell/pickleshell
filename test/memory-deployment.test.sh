@@ -968,6 +968,10 @@ PATH="$PREFIX/bin:$PATH" FAKE_SYSTEMD_ROOT="$FIRST_FAILURE" "$FIXTURE/deploy/mem
   --service pickleshell-memory-first-failure.service \
   --systemctl "$FIRST_FAILURE/bin/systemctl" --wrapper-dir "$FIRST_FAILURE/bin"
 test -d "$FIRST_FAILURE/app/releases/$SHA1"
+# Generic release packaging includes the fixed-broker ChatGPT launcher and management API.
+test -f "$FIRST_FAILURE/app/releases/$SHA1/pickleshell-memory-mcp/src/chatgpt.js"
+test -f "$FIRST_FAILURE/app/releases/$SHA1/pickleshell-memory-broker/pickleshell_memory_broker/management.py"
+test "$(stat -c '%a' "$FIRST_FAILURE/app/releases/$SHA1/pickleshell-memory-mcp/src/chatgpt.js")" = 444
 test "$(readlink "$FIRST_FAILURE/app/active")" = "releases/$SHA1"
 test "$(<"$FIRST_FAILURE/app/state/current-target")" = "releases/$SHA1"
 test -f "$FIRST_FAILURE/enabled/pickleshell-memory-first-failure.service"

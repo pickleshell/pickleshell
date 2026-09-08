@@ -1,4 +1,6 @@
 import io
+from datetime import datetime, timezone
+from .management import handle as management_request, OPERATIONS as MANAGEMENT_OPERATIONS
 import hashlib
 from .policy import load_policy, PrincipalPolicy
 import socket
@@ -147,6 +149,35 @@ class BrokerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def redact(self, value):
+        # Decode JSON before redaction so escaped token characters cannot leak.
+        secrets = [self.server.broker_config[3]]
+        if getattr(self, "principal", None):
+            secrets.append(self.headers.get("Authorization", "")[7:])
+        def clean(item):
+            if isinstance(item, str):
+                for secret in secrets:
+                    if secret:
+                        item = item.replace(secret, "[redacted]")
+                return item
+            if isinstance(item, list):
+                return [clean(v) for v in item]
+            if isinstance(item, dict):
+                return {clean(k): clean(v) for k, v in item.items()}
+            return item
+        return clean(value)
+
+    def send_json(self, status, value):
+        body = json.dumps(self.redact(value), separators=(",", ":")).encode()
+        if len(body) > MAX_RESPONSE_BYTES:
+            return self.send_error_json(502, "response_too_large")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Connection", "close")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def route(self):
         parsed = urlsplit(self.path)
         if parsed.scheme or parsed.netloc or parsed.fragment:
@@ -227,6 +258,19 @@ class BrokerHandler(BaseHTTPRequestHandler):
             self.principal = policy.authenticate(credentials[0])
             if self.principal is None:
                 return self.send_error_json(401, "principal_unauthorized")
+            if any(self.headers.get(h) is not None for h in ("X-Agent", "X-Principal")):
+                return self.send_error_json(403, "principal_override_denied")
+            if self.path.startswith("/management/"):
+                operation = self.path[len("/management/"):]
+                if operation.startswith("admin_") and self.principal.get("role", "agent") != "admin":
+                    return self.send_error_json(403, "admin_required")
+                if self.command != "POST":
+                    return self.send_error_json(405, "operation_not_allowed")
+                try:
+                    payload = json.loads(self.read_body().decode("utf-8"), object_pairs_hook=unique_payload)
+                except (ValueError, UnicodeError, RecursionError):
+                    return self.send_error_json(400, "invalid_request")
+                return management_request(self, policy, operation, payload)
             route = self.route()
             if route is None:
                 return self.send_error_json(404, "route_not_found")
@@ -236,8 +280,6 @@ class BrokerHandler(BaseHTTPRequestHandler):
             operation = ("health" if path == "/health" else "search" if path == "/search" else
                          "history" if path.endswith("/history") else
                          {"POST": "add", "PUT": "update", "DELETE": "delete", "GET": "get" if memory_id else "list"}[method])
-            if any(self.headers.get(h) is not None for h in ("X-Agent", "X-Principal")):
-                return self.send_error_json(403, "principal_override_denied")
             allowed_query = {"target", "limit"} if path == "/memories" and method == "GET" else ({"target"} if memory_id else set())
             if set(query) - allowed_query or any(len(v) != 1 for v in query.values()):
                 return self.send_error_json(403, "scope_override_denied")
@@ -257,6 +299,7 @@ class BrokerHandler(BaseHTTPRequestHandler):
                 target = payload.pop("target", "private")
             else:
                 target = query.pop("target", ["private"])[0]
+            self.audit_memory_id = memory_id
             write = method in {"PUT", "DELETE"} or (method == "POST" and path == "/memories")
             scope = policy.resolve(self.principal, target, write)
             if scope is None:
@@ -271,11 +314,18 @@ class BrokerHandler(BaseHTTPRequestHandler):
             self.connection.settimeout(10)
             self.forward(method, path, query, body)
         finally:
-            # Broker-owned identity, no client text/IDs/credentials in the audit.
-            event = {"principal": self.principal["name"] if self.principal else None,
+            # Broker-owned identity and validated IDs, no content or credentials.
+            operation = operation if operation in MANAGEMENT_OPERATIONS | {"health", "search", "history", "add", "update", "delete", "get", "list"} else None
+            event = {"timestamp": datetime.now(timezone.utc).isoformat(),
+                     "role": self.principal.get("role", "agent") if self.principal else None,
+                     "administrative_destructive": operation == "admin_delete",
+                     "memory_id": getattr(self, "audit_memory_id", None),
+                     "principal": self.principal["name"] if self.principal else None,
                      "target": target if isinstance(target, str) and (target == "private" or target in (self.principal or {}).get("shared", {})) else None,
-                     "scope": scope, "operation": operation, "method": self.command, "status": getattr(self, "audit_status", 400)}
-            print(json.dumps(event, separators=(",", ":")), flush=True)
+                     "scope": getattr(self, "audit_scope", scope), "operation": operation, "method": self.command, "status": getattr(self, "audit_status", 400)}
+            if hasattr(self, "audit_target"):
+                event["target"] = self.audit_target
+            print(json.dumps(self.redact(event), separators=(",", ":")), flush=True)
 
     def forward(self, method, path, query, body):
         target = path
@@ -301,9 +351,21 @@ class BrokerHandler(BaseHTTPRequestHandler):
             if path == "/health" and response.status == 200 and getattr(self, "principal", None):
                 health = json.loads(data)
                 # Never disclose arbitrary backend health fields through broker discovery.
-                health = {k: v for k, v in health.items() if k in {"status", "provider", "version"} and isinstance(v, str) and len(v) <= 64}
+                health = {"status": "ok" if health.get("status") == "ok" else "degraded",
+                          "provider": "mem0"}
+                # Release version comes from the broker code directory in admin status;
+                # do not expose backend-controlled diagnostic strings here.
                 health["broker"] = PrincipalPolicy.public(self.principal)
                 data = json.dumps(health, separators=(",", ":")).encode()
+            if response.status >= 400 and getattr(self, "principal", None):
+                code = "memory_not_found" if response.status == 404 else "backend_unavailable" if response.status >= 500 else "invalid_request"
+                response_started = True
+                return self.send_error_json(response.status, code)
+            if getattr(self, "principal", None):
+                data = json.dumps(self.redact(json.loads(data)), separators=(",", ":")).encode()
+                if len(data) > MAX_RESPONSE_BYTES:
+                    response_started = True
+                    return self.send_error_json(502, "response_too_large")
             response_started = True
             self.send_response(response.status)
             content_type = response.getheader("Content-Type")
