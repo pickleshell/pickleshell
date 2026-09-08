@@ -77,6 +77,31 @@ The normal MCP surface provides capability discovery, target discovery, semantic
 PickleShell keeps this diagram separate from the core Agent/Browser/Terminal architecture because Memory is an optional integration. See [Memory MCP](pickleshell-memory-mcp/README.md), [self-hosted Mem0 backend](pickleshell-memory-backend/README.md), [Memory principals](docs/memory-principals.md), and [Direct ChatGPT Memory](docs/chatgpt-memory.md).
 
 
+### Memory quick start
+
+After an operator installs the Memory stack and connects its MCP surface, run
+these tools in order. The examples use `shared/project/pickleshell`; substitute
+an approved alias returned by target discovery if your deployment uses another.
+
+| Step | Tool | Arguments / expected result |
+| --- | --- | --- |
+| Discover capabilities and health | `memory_capabilities` | `{}` — inspect the effective principal, role, permissions, and backend health. |
+| Discover targets | `memory_list_targets` | `{}` — choose a target with `read: true`; shared access is deployment-specific. |
+| Search shared knowledge | `memory_search` | `{"target":"shared/project/pickleshell","query":"project architecture","limit":5}` |
+| Read a result | `memory_get` | `{"target":"shared/project/pickleshell","memory_id":"<id returned by search>"}` — keep the same target. |
+
+An empty search result can mean the approved target has no matching memories.
+For an optional write test, first confirm that `private` has `write: true` and
+that your ChatGPT workspace permits write tools:
+
+1. Call `memory_add` with `{"target":"private","text":"Disposable Memory quick-start test <unique marker>","infer":false}`; replace the marker with a unique value.
+2. Read the newly returned ID with `memory_get`, using `target: "private"`.
+3. Delete only that test ID with `memory_delete`, using the same target.
+4. Call `memory_get` again; expect `memory_not_found`.
+
+Use a returned test ID rather than a pre-existing record. These are setup/test
+instructions, not a claim that the ChatGPT UI integration has passed validation.
+
 ## v0.2.0 Highlights
 
 PickleShell now separates **what an agent may do** from **where that authority stops**.
@@ -92,6 +117,33 @@ knowledge without sharing their private memory or backend credentials.
 See [Deployment](docs/deployment.md) for the execution-profile and boundary-provider
 contract, and [Memory principals](docs/memory-principals.md) for the shared-memory trust
 model.
+
+### Permissions at a glance
+
+Execution profiles and Memory grants are independent. Selecting an execution
+profile, including `full-control`, does not grant Memory administration.
+
+| Execution profile | Intended authority | Provisioning requirement |
+| --- | --- | --- |
+| `isolated` | Minimal execution, no root/sudo; no or local networking | A matching operator-provisioned execution surface. |
+| `agent` | Workspace/runtime access, controlled networking, no root/sudo | An approved surface and boundary; the compatibility default is `agent + host`. |
+| `privileged` | Elevated execution with limited root/sudo | An explicitly provisioned and reviewed surface; the profile name alone grants nothing. |
+| `full-control` | Root authority within the selected environment | A real approved boundary provider; host use additionally requires explicit opt-in. |
+
+Only the host boundary provider is currently implemented. Container/VM requests
+fail closed; profile selection does not create a sandbox or elevate the running
+service. See the [Execution Profile Contract](docs/deployment.md#execution-profile-contract).
+
+| Memory grant | Permitted operations | Boundary |
+| --- | --- | --- |
+| Normal target `read` | Search, list, get, history | The principal's private target or an explicitly approved shared target. |
+| Normal target `write` | Add, update, delete | Only targets with an explicit write grant; shared read access does not imply write access. |
+| Memory admin role | Status, health, principal and sanitized policy inspection, inventory | A separately authenticated operator-approved principal; no live policy mutation. |
+| Admin target `read` / `delete` | Administrative search/get or single-record deletion, respectively | Explicit administrative target grants; deletion also requires a matching confirmation ID. |
+
+The credential-bound broker policy determines Memory authority. Exposing admin
+tool schemas cannot promote an ordinary principal. See [Memory principals](docs/memory-principals.md)
+and [Direct ChatGPT Memory](docs/chatgpt-memory.md).
 
 ## Philosophy
 
