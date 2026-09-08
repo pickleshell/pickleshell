@@ -40,6 +40,43 @@ available with a repository-owned [self-hosted Mem0 backend](pickleshell-memory-
 as an optional workstation sidecar integration. It is not a fourth core
 service and never participates in Gateway startup or readiness.
 
+## Optional Shared Memory (Mem0)
+
+PickleShell can add a durable memory layer for ChatGPT and agent runtimes. This is an **optional sidecar**, not part of the Agent/Browser/Terminal core. The current backend is [Mem0](https://github.com/mem0ai/mem0), run behind PickleShell's own Memory broker and MCP interface.
+
+The idea is simple: each runtime keeps its own private memory, while operator-approved shared scopes let different runtimes exchange durable knowledge. A production handoff has been validated between Codex and OpenCode using the same shared Mem0 store while their private scopes and credentials remained separate.
+
+```mermaid
+flowchart TB
+    CX["Codex"] --> CM["PickleShell Memory MCP"]
+    OC["OpenCode"] --> OM
+    CH["ChatGPT"] --> HM
+
+    CM --> B["Multi-principal Memory broker"]
+    OM["PickleShell Memory MCP"] --> B
+    HM["PickleShell Memory MCP"] --> B
+
+    B --> PRIV["Private scopes\nPer principal"]
+    B --> SHARED["Shared project scopes\nSelective read / write"]
+    B --> M0["Self-hosted Mem0"]
+
+    M0 --> QD["Qdrant vector store"]
+    M0 --> SQL["Local metadata / history store"]
+```
+
+The trust boundary is intentionally at the broker:
+
+- Codex, OpenCode, ChatGPT, and future runtimes can use different principals.
+- A principal cannot select another principal, raw `user_id`, or backend scope through MCP tool arguments.
+- Private scopes remain isolated; shared scopes are explicit operator policy.
+- The backend bearer is owned by the broker and is not delivered to ChatGPT, Codex, OpenCode, or the Memory MCP client.
+- The Memory stack can be deployed, restarted, and rolled back independently of the main PickleShell Gateway.
+
+The normal MCP surface provides capability discovery, target discovery, semantic search, get, add, update, history, and delete. The ChatGPT-facing implementation also supports a **separate, credential-authorized admin surface** for status, health, principal and sanitized policy inspection, inventory, and scoped administrative record operations. Admin authority cannot be selected by a tool argument.
+
+PickleShell keeps this diagram separate from the core Agent/Browser/Terminal architecture because Memory is an optional integration. See [Memory MCP](pickleshell-memory-mcp/README.md), [self-hosted Mem0 backend](pickleshell-memory-backend/README.md), [Memory principals](docs/memory-principals.md), and [Direct ChatGPT Memory](docs/chatgpt-memory.md).
+
+
 ## v0.2.0 Highlights
 
 PickleShell now separates **what an agent may do** from **where that authority stops**.
