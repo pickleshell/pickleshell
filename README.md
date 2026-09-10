@@ -40,49 +40,6 @@ available with a repository-owned [self-hosted Mem0 backend](pickleshell-memory-
 as an optional workstation sidecar integration. It is not a fourth core
 service and never participates in Gateway startup or readiness.
 
-## v0.2.0 Highlights
-
-PickleShell now separates **what an agent may do** from **where that authority stops**.
-Execution requests can be constrained by an operator-approved profile (`isolated`, `agent`,
-`privileged`, or `full-control`) and boundary (`host`, `container`, or `vm`). A boundary
-is enforced by a concrete provider, not treated as a label: unavailable VM/container
-providers fail closed before a process or concurrency slot is created.
-
-The optional Memory stack now supports multiple principals with isolated private scopes and
-explicit shared project scopes. This lets different agent runtimes exchange durable
-knowledge without sharing their private memory or backend credentials.
-
-See [Deployment](docs/deployment.md) for the execution-profile and boundary-provider
-contract, and [Memory principals](docs/memory-principals.md) for the shared-memory trust
-model.
-
-### Permissions at a glance
-
-Execution profiles and Memory grants are independent. Selecting an execution
-profile, including `full-control`, does not grant Memory administration.
-
-| Execution profile | Intended authority | Provisioning requirement |
-| --- | --- | --- |
-| `isolated` | Minimal execution, no root/sudo; no or local networking | A matching operator-provisioned execution surface. |
-| `agent` | Workspace/runtime access, controlled networking, no root/sudo | An approved surface and boundary; the compatibility default is `agent + host`. |
-| `privileged` | Elevated execution with limited root/sudo | An explicitly provisioned and reviewed surface; the profile name alone grants nothing. |
-| `full-control` | Root authority within the selected environment | A real approved boundary provider; host use additionally requires explicit opt-in. |
-
-Only the host boundary provider is currently implemented. Container/VM requests
-fail closed; profile selection does not create a sandbox or elevate the running
-service. See the [Execution Profile Contract](docs/deployment.md#execution-profile-contract).
-
-| Memory grant | Permitted operations | Boundary |
-| --- | --- | --- |
-| Normal target `read` | Search, list, get, history | The principal's private target or an explicitly approved shared target. |
-| Normal target `write` | Add, update, delete | Only targets with an explicit write grant; shared read access does not imply write access. |
-| Memory admin role | Status, health, principal and sanitized policy inspection, inventory | A separately authenticated operator-approved principal; no live policy mutation. |
-| Admin target `read` / `delete` | Administrative search/get or single-record deletion, respectively | Explicit administrative target grants; deletion also requires a matching confirmation ID. |
-
-The credential-bound broker policy determines Memory authority. Exposing admin
-tool schemas cannot promote an ordinary principal. See [Memory principals](docs/memory-principals.md)
-and [Direct ChatGPT Memory](docs/chatgpt-memory.md).
-
 ## Philosophy
 
 > "Any task can be solved in a single prompt."
@@ -219,6 +176,49 @@ The three mandatory core services all run locally on your machine:
 | **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface. Codex defaults to the exec transport; the experimental MCP transport is selected internally with `codex.transport` and requires the Codex `0.143.0` `codex`/`codex-reply` MCP tool surface. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
 | **Terminal** | Implemented, E2E verified across reference profiles | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. The clean external release-installation gate remains open. |
+
+## v0.2.0 Highlights
+
+PickleShell now separates **what an agent may do** from **where that authority stops**.
+Execution requests can be constrained by an operator-approved profile (`isolated`, `agent`,
+`privileged`, or `full-control`) and boundary (`host`, `container`, or `vm`). A boundary
+is enforced by a concrete provider, not treated as a label: unavailable VM/container
+providers fail closed before a process or concurrency slot is created.
+
+The optional Memory stack now supports multiple principals with isolated private scopes and
+explicit shared project scopes. This lets different agent runtimes exchange durable
+knowledge without sharing their private memory or backend credentials.
+
+See [Deployment](docs/deployment.md) for the execution-profile and boundary-provider
+contract, and [Memory principals](docs/memory-principals.md) for the shared-memory trust
+model.
+
+### Permissions at a glance
+
+Execution profiles and Memory grants are independent. Selecting an execution
+profile, including `full-control`, does not grant Memory administration.
+
+| Execution profile | Intended authority | Provisioning requirement |
+| --- | --- | --- |
+| `isolated` | Minimal execution, no root/sudo; no or local networking | A matching operator-provisioned execution surface. |
+| `agent` | Workspace/runtime access, controlled networking, no root/sudo | An approved surface and boundary; the compatibility default is `agent + host`. |
+| `privileged` | Elevated execution with limited root/sudo | An explicitly provisioned and reviewed surface; the profile name alone grants nothing. |
+| `full-control` | Root authority within the selected environment | A real approved boundary provider; host use additionally requires explicit opt-in. |
+
+Only the host boundary provider is currently implemented. Container/VM requests
+fail closed; profile selection does not create a sandbox or elevate the running
+service. See the [Execution Profile Contract](docs/deployment.md#execution-profile-contract).
+
+| Memory grant | Permitted operations | Boundary |
+| --- | --- | --- |
+| Normal target `read` | Search, list, get, history | The principal's private target or an explicitly approved shared target. |
+| Normal target `write` | Add, update, delete | Only targets with an explicit write grant; shared read access does not imply write access. |
+| Memory admin role | Status, health, principal and sanitized policy inspection, inventory | A separately authenticated operator-approved principal; no live policy mutation. |
+| Admin target `read` / `delete` | Administrative search/get or single-record deletion, respectively | Explicit administrative target grants; deletion also requires a matching confirmation ID. |
+
+The credential-bound broker policy determines Memory authority. Exposing admin
+tool schemas cannot promote an ordinary principal. See [Memory principals](docs/memory-principals.md)
+and [Direct ChatGPT Memory](docs/chatgpt-memory.md).
 
 ## Optional Shared Memory (Mem0)
 
