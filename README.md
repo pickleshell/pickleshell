@@ -40,68 +40,6 @@ available with a repository-owned [self-hosted Mem0 backend](pickleshell-memory-
 as an optional workstation sidecar integration. It is not a fourth core
 service and never participates in Gateway startup or readiness.
 
-## Optional Shared Memory (Mem0)
-
-PickleShell can add a durable memory layer for ChatGPT and agent runtimes. This is an **optional sidecar**, not part of the Agent/Browser/Terminal core. The current backend is [Mem0](https://github.com/mem0ai/mem0), run behind PickleShell's own Memory broker and MCP interface.
-
-The idea is simple: each runtime keeps its own private memory, while operator-approved shared scopes let different runtimes exchange durable knowledge. A production handoff has been validated between Codex and OpenCode using the same shared Mem0 store while their private scopes and credentials remained separate.
-
-```mermaid
-flowchart TB
-    CX["Codex"] --> CM["PickleShell Memory MCP"]
-    OC["OpenCode"] --> OM
-    CH["ChatGPT"] --> HM
-
-    CM --> B["Multi-principal Memory broker"]
-    OM["PickleShell Memory MCP"] --> B
-    HM["PickleShell Memory MCP"] --> B
-
-    B --> PRIV["Private scopes\nPer principal"]
-    B --> SHARED["Shared project scopes\nSelective read / write"]
-    B --> M0["Self-hosted Mem0"]
-
-    M0 --> QD["Qdrant vector store"]
-    M0 --> SQL["Local metadata / history store"]
-```
-
-The trust boundary is intentionally at the broker:
-
-- Codex, OpenCode, ChatGPT, and future runtimes can use different principals.
-- A principal cannot select another principal, raw `user_id`, or backend scope through MCP tool arguments.
-- Private scopes remain isolated; shared scopes are explicit operator policy.
-- The backend bearer is owned by the broker and is not delivered to ChatGPT, Codex, OpenCode, or the Memory MCP client.
-- The Memory stack can be deployed, restarted, and rolled back independently of the main PickleShell Gateway.
-
-The normal MCP surface provides capability discovery, target discovery, semantic search, get, add, update, history, and delete. The ChatGPT-facing implementation also supports a **separate, credential-authorized admin surface** for status, health, principal and sanitized policy inspection, inventory, and scoped administrative record operations. Admin authority cannot be selected by a tool argument.
-
-PickleShell keeps this diagram separate from the core Agent/Browser/Terminal architecture because Memory is an optional integration. See [Memory MCP](pickleshell-memory-mcp/README.md), [self-hosted Mem0 backend](pickleshell-memory-backend/README.md), [Memory principals](docs/memory-principals.md), and [Direct ChatGPT Memory](docs/chatgpt-memory.md).
-
-
-### Memory quick start
-
-After an operator installs the Memory stack and connects its MCP surface, run
-these tools in order. The examples use `shared/project/pickleshell`; substitute
-an approved alias returned by target discovery if your deployment uses another.
-
-| Step | Tool | Arguments / expected result |
-| --- | --- | --- |
-| Discover capabilities and health | `memory_capabilities` | `{}` — inspect the effective principal, role, permissions, and backend health. |
-| Discover targets | `memory_list_targets` | `{}` — choose a target with `read: true`; shared access is deployment-specific. |
-| Search shared knowledge | `memory_search` | `{"target":"shared/project/pickleshell","query":"project architecture","limit":5}` |
-| Read a result | `memory_get` | `{"target":"shared/project/pickleshell","memory_id":"<id returned by search>"}` — keep the same target. |
-
-An empty search result can mean the approved target has no matching memories.
-For an optional write test, first confirm that `private` has `write: true` and
-that your ChatGPT workspace permits write tools:
-
-1. Call `memory_add` with `{"target":"private","text":"Disposable Memory quick-start test <unique marker>","infer":false}`; replace the marker with a unique value.
-2. Read the newly returned ID with `memory_get`, using `target: "private"`.
-3. Delete only that test ID with `memory_delete`, using the same target.
-4. Call `memory_get` again; expect `memory_not_found`.
-
-Use a returned test ID rather than a pre-existing record. These are setup/test
-instructions, not a claim that the ChatGPT UI integration has passed validation.
-
 ## v0.2.0 Highlights
 
 PickleShell now separates **what an agent may do** from **where that authority stops**.
@@ -281,6 +219,68 @@ The three mandatory core services all run locally on your machine:
 | **Agent** | Implemented on OpenCode and Codex | `send-chat`, `session-status`, `session-output`, `cancel-request` with session continuity via `session_id`. OpenCode remains the supported default; Codex is a first-class alternative backend behind the same MCP interface. Codex defaults to the exec transport; the experimental MCP transport is selected internally with `codex.transport` and requires the Codex `0.143.0` `codex`/`codex-reply` MCP tool surface. |
 | **Browser** | Implemented | Playwright browser automation, exposed through the PickleShell MCP server. |
 | **Terminal** | Implemented, E2E verified across reference profiles | Separate unprivileged node-pty runtime with persistent PTY sessions and six MCP tools. The clean external release-installation gate remains open. |
+
+## Optional Shared Memory (Mem0)
+
+PickleShell can add a durable memory layer for ChatGPT and agent runtimes. This is an **optional sidecar**, not part of the Agent/Browser/Terminal core. The current backend is [Mem0](https://github.com/mem0ai/mem0), run behind PickleShell's own Memory broker and MCP interface.
+
+The idea is simple: each runtime keeps its own private memory, while operator-approved shared scopes let different runtimes exchange durable knowledge. A production handoff has been validated between Codex and OpenCode using the same shared Mem0 store while their private scopes and credentials remained separate.
+
+```mermaid
+flowchart TB
+    CX["Codex"] --> CM["PickleShell Memory MCP"]
+    OC["OpenCode"] --> OM
+    CH["ChatGPT"] --> HM
+
+    CM --> B["Multi-principal Memory broker"]
+    OM["PickleShell Memory MCP"] --> B
+    HM["PickleShell Memory MCP"] --> B
+
+    B --> PRIV["Private scopes\nPer principal"]
+    B --> SHARED["Shared project scopes\nSelective read / write"]
+    B --> M0["Self-hosted Mem0"]
+
+    M0 --> QD["Qdrant vector store"]
+    M0 --> SQL["Local metadata / history store"]
+```
+
+The trust boundary is intentionally at the broker:
+
+- Codex, OpenCode, ChatGPT, and future runtimes can use different principals.
+- A principal cannot select another principal, raw `user_id`, or backend scope through MCP tool arguments.
+- Private scopes remain isolated; shared scopes are explicit operator policy.
+- The backend bearer is owned by the broker and is not delivered to ChatGPT, Codex, OpenCode, or the Memory MCP client.
+- The Memory stack can be deployed, restarted, and rolled back independently of the main PickleShell Gateway.
+
+The normal MCP surface provides capability discovery, target discovery, semantic search, get, add, update, history, and delete. The ChatGPT-facing implementation also supports a **separate, credential-authorized admin surface** for status, health, principal and sanitized policy inspection, inventory, and scoped administrative record operations. Admin authority cannot be selected by a tool argument.
+
+PickleShell keeps this diagram separate from the core Agent/Browser/Terminal architecture because Memory is an optional integration. See [Memory MCP](pickleshell-memory-mcp/README.md), [self-hosted Mem0 backend](pickleshell-memory-backend/README.md), [Memory principals](docs/memory-principals.md), and [Direct ChatGPT Memory](docs/chatgpt-memory.md).
+
+
+### Memory quick start
+
+After an operator installs the Memory stack and connects its MCP surface, run
+these tools in order. The examples use `shared/project/pickleshell`; substitute
+an approved alias returned by target discovery if your deployment uses another.
+
+| Step | Tool | Arguments / expected result |
+| --- | --- | --- |
+| Discover capabilities and health | `memory_capabilities` | `{}` — inspect the effective principal, role, permissions, and backend health. |
+| Discover targets | `memory_list_targets` | `{}` — choose a target with `read: true`; shared access is deployment-specific. |
+| Search shared knowledge | `memory_search` | `{"target":"shared/project/pickleshell","query":"project architecture","limit":5}` |
+| Read a result | `memory_get` | `{"target":"shared/project/pickleshell","memory_id":"<id returned by search>"}` — keep the same target. |
+
+An empty search result can mean the approved target has no matching memories.
+For an optional write test, first confirm that `private` has `write: true` and
+that your ChatGPT workspace permits write tools:
+
+1. Call `memory_add` with `{"target":"private","text":"Disposable Memory quick-start test <unique marker>","infer":false}`; replace the marker with a unique value.
+2. Read the newly returned ID with `memory_get`, using `target: "private"`.
+3. Delete only that test ID with `memory_delete`, using the same target.
+4. Call `memory_get` again; expect `memory_not_found`.
+
+Use a returned test ID rather than a pre-existing record. These are setup/test
+instructions, not a claim that the ChatGPT UI integration has passed validation.
 
 ## Use Case Example
 
