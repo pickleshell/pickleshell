@@ -14,7 +14,7 @@
     "@modelcontextprotocol/sdk": "^1.22.0",
     "@playwright/mcp": "^0.0.78",
     "dotenv": "^16.4.7",
-    "playwright": "^1.62.0-alpha-1783623505000",
+    "playwright": "^1.62.0",
     "zod": "^3.24.4"
   },
   "devDependencies": {
