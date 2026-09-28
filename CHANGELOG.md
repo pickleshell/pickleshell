@@ -2,6 +2,22 @@
 
 All notable PickleShell releases are documented here.
 
+## [0.2.1] - 2026-09-29
+
+### Changed
+
+- Expanded the README architecture and release guidance for the integrated
+  PickleShell system.
+- Added a focused quick start and explicit permission tables for the optional
+  shared Memory integration.
+- Clarified how private and operator-approved shared Memory scopes fit into the
+  main architecture.
+- Aligned package versions for the Gateway, MCP server, Terminal, and Memory MCP
+  with the `0.2.1` patch release.
+
+This patch release contains documentation and release-metadata updates only; the
+runtime behavior from `0.2.0` is unchanged.
+
 ## [0.2.0] - 2026-09-08
 
 ### Added

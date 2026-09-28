@@ -1,6 +1,6 @@
 {
   "name": "@pickleshell/memory-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Optional policy-enforcing MCP transport for workstation memory backends",
   "type": "module",
   "main": "src/index.js",

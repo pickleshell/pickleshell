@@ -5,7 +5,7 @@
 
 <p align="center"><strong>Give ChatGPT a local machine to work with</strong></p>
 
-[![Release](https://img.shields.io/badge/release-v0.2.0-f5a623)](#release-history)
+[![Release](https://img.shields.io/badge/release-v0.2.1-f5a623)](#release-history)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](#development)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#requirements)
@@ -97,7 +97,7 @@ carry out a complex task directly from ChatGPT.
 
 > [!WARNING]
 > **The `main` branch may contain unreleased changes.** The latest stable
-> release is `v0.2.0`; use it only with trusted users and a dedicated service
+> release is `v0.2.1`; use it only with trusted users and a dedicated service
 > account. Read
 > [SECURITY.md](SECURITY.md) before deployment.
 
@@ -466,7 +466,7 @@ Include the relevant setup details and steps to reproduce the problem.
 
 ## Project Status
 
-PickleShell `0.2.0` is the latest release. It adds first-class execution authority
+PickleShell `0.2.1` is the latest release. It includes the first-class execution authority
 profiles with enforced boundary providers, a dedicated networked OpenCode agent surface,
 and multi-principal shared Memory for controlled knowledge exchange between agent runtimes.
 
@@ -479,6 +479,14 @@ version is already suitable for real-world testing and use with trusted users.
 Interfaces may still change before the stable `1.0` release.
 
 ## Release History
+
+### [v0.2.1](https://github.com/pickleshell/pickleshell/releases/tag/v0.2.1)
+
+- Expanded the integrated-system architecture and release guidance.
+- Added a focused quick start and explicit permission tables for optional
+  shared Memory.
+- Clarified private and operator-approved shared Memory scopes without changing
+  the `v0.2.0` runtime behavior.
 
 ### [v0.2.0](https://github.com/pickleshell/pickleshell/releases/tag/v0.2.0)
 
